@@ -100,9 +100,9 @@ function writeStore(obj) {
 // becomes 3), and TreeKey.sign starts again at use 0 once mUses >= mMaxUses ("SERIOUS ERROR : MAX TREEKEYS USED"). So a count of
 // 262144 or more signs with a one-time key that was already used, and the counter only goes up: every later send too. On a
 // block-capable node started with -blockaskeyuses (security/txn-write-gate-android 49d667d6eb4) createDefault is 128 x 4 =
-// 268435456 uses, the node takes the use from the block number (keyuses can only raise it) and refuses a count outside capacity:
-// the classic bound is below that capacity, so one bound serves both key modes. A count is the uses already made: the next send
-// signs at that use, so 0 to LAST_USE leaves at least one.
+// 268435456 uses and the node takes the use from the block number (keyuses can only raise it). A count is the uses already made: the next send
+// signs at that use, so 0 to LAST_USE leaves at least one. (Correction, 0.19.333: the bound is the classic one; on a block key wallet the
+// Web Wallet does not run at all: blockOff below.)
 const KEY_USES = 262144, LAST_USE = KEY_USES - 1;
 const ABOVE_LAST = "A key has 262144 one-time uses, so the uses it has already made are a whole number from 0 to 262143 (262144 or more leaves it nothing to sign with). Nothing was saved.";
 // said as what is known (0.19.324): the chain's figure can over-count, and every wallet signs this address with the same key
@@ -126,6 +126,14 @@ function entryFor(store, addr) {
 // The chain's figure for a key (main.js: main/keyuses.js onchainUses over the pinned, no-redirect fetch): a whole number, or
 // null when it was not read. The public key of each address this session derived, so main asks for the right key.
 let onchainOf = async () => null;
+// A block key wallet (0.19.333): there `keys action:genkey` builds a 128 x 4 key (TreeKey.createDefault follows -blockaskeyuses), so a seed
+// gives a DIFFERENT address than on every classic wallet and the official Web Wallet (funds at the classic address are not seen; funds
+// sent to the block-mode address are out of reach of any classic wallet), "a key has 262144 one-time uses" is not true there and the
+// chain's figure protects nothing. Off, in main, on the recorded key mode, until it is designed for that mode.
+let keyModeOf = () => "";
+function setKeyMode(fn) { if (typeof fn === "function") keyModeOf = fn; }
+const BLOCK_OFF = "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.";
+function blockOff() { let m = ""; try { m = keyModeOf(); } catch (e) { m = ""; } if (m === "block") throw new Error(BLOCK_OFF); }
 const derivedKeys = new Map();
 function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
 const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
@@ -136,6 +144,7 @@ const FIRST_UNREAD = "The chain's figure for this key could not be read (the key
  *  what the chain shows, checked HERE, in main (0.19.255 for a damaged entry, 0.19.270 for every unacknowledged one: the
  *  window's floor alone took any count), and it is refused while that figure cannot be read. */
 async function ackKeyuses(address, count) {
+  blockOff();
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   const n = typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : count;
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("Key uses must be a whole number of 0 or more.");   // 0.19.230: "abc" was 0
@@ -159,7 +168,7 @@ async function ackKeyuses(address, count) {
   return { address, keyuses: e.keyuses, ack: true };
 }
 /** Current stored keyuses info for an address (does not mutate). */
-function keyusesInfo(address) { const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
+function keyusesInfo(address) { blockOff(); const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
 // ---------------------------------------------------------------------------
 // node interaction
 // ---------------------------------------------------------------------------
@@ -197,6 +206,7 @@ async function isNodeOwnSeed(pubkey, seed) {
 /** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the
  *  balance can be the node's FULL total (a real wallet spreads coins over many keys). PUBLIC material only. */
 async function derive(seed) {
+  blockOff();
   if (!isPhrase(seed)) throw new Error('Enter your seed phrase (a " or \\ or line break can\'t be carried safely)');
   if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
   const r = await runner('keys action:genkey phrase:"' + seed + '"');   // VERBATIM — anyphrase, case-sensitive
@@ -210,6 +220,7 @@ async function derive(seed) {
 /** Balances. For the node's OWN seed use `balance` — the FULL wallet total across ALL its addresses (coins are
  *  spread over many keys, so a single genkey address reads ~0). For a foreign seed, the single megammr address. */
 async function read(address, nodeSeed) {
+  blockOff();
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address)) && !looksLikeMinimaAddress(address)) throw new Error("bad address");
   const r = await runner(nodeSeed ? "balance" : ("balance megammr:true address:" + address)).catch(() => null);
   const rows = (r && Array.isArray(r.response)) ? r.response : [];
@@ -229,6 +240,7 @@ async function read(address, nodeSeed) {
  * Requires the user to have acknowledged the address's prior-use count (ackKeyuses) first.
  */
 async function send(opts) {
+  blockOff();
   const { seed, to, amount, tokenid } = opts || {};
   if (!isPhrase(seed)) throw new Error("Invalid seed phrase");
   if (!looksLikeMinimaAddress(to)) throw new Error("Invalid recipient address");
@@ -312,7 +324,7 @@ async function send(opts) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = { setOnchain,
+module.exports = { setOnchain, setKeyMode,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status, KEY_USES, LAST_USE,
   _setRunner: (fn) => { runner0 = fn; },

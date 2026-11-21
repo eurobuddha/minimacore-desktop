@@ -271,3 +271,19 @@ test("Web Wallet: a damaged entry's old count (57, \"57\", 57.5, \"57.5\") is a 
   assert.ok(app.includes('toast(t("Secret key uses confirmed: {n}", { n: wwKu.keyuses }), "ok")'), "the toast says the figure main kept");
   assert.ok(/\.toast--copy \{[^}]*overflow-wrap: anywhere/.test(rd("renderer/app.css")), "a whole id in a toast wraps instead of running off the window");
 });
+
+// ---- 0.19.333: the Web Wallet is off, in main, on a block key wallet (a seed gives another address there; the count protects nothing) ----
+test("Web Wallet on a block key wallet: derive, read, send, the key-use confirmation and its read are refused in main with one sentence; nothing reaches the node", async () => {
+  const ww = require("../main/webwallet"), sent = [];
+  ww._setRunner(async (c) => { sent.push(c); return { status: true, response: { megammr: true } }; });
+  ww.setKeyMode(() => "block");
+  const WHY = /^(?:Error: )?The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it\. Nothing was done\.$/;
+  await assert.rejects(ww.derive("alpha beta"), WHY); await assert.rejects(ww.read("0x" + "11".repeat(32), false), WHY);
+  await assert.rejects(ww.send({ seed: "alpha beta", to: "0x" + "11".repeat(32), amount: "1", tokenid: "0x00" }), WHY); await assert.rejects(ww.ackKeyuses("0x" + "A9".repeat(32), 1), WHY);
+  assert.throws(() => ww.keyusesInfo("0x" + "A9".repeat(32)), WHY);
+  assert.deepEqual(sent, [], "nothing reached the node");
+  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta").catch(() => {}); assert.ok(sent.length > 0, "a classic wallet goes on");
+  ww.setKeyMode(() => { throw new Error("config unreadable"); }); await ww.derive("alpha beta").catch((e) => assert.doesNotMatch(e.message, WHY));
+  ww.setKeyMode(() => "");
+  assert.ok(rd("main/main.js").includes("webwallet.setKeyMode(() => config.load().keyMode);"), "main gives it the recorded key mode");
+});
