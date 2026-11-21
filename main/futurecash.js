@@ -644,7 +644,9 @@ function create(o) {
       if (!store) return { ok: false, error: "Future Cash Next has not started yet." };
       const r = await cleanAddress();
       if (!r.ok) return r;
+      const before = kv().get(K.SAFE_ADDRESS, "");
       kv().set(K.SAFE_MODE, "samenode"); kv().set(K.SAFE_ADDRESS, r.value); kv().setBool(K.ENABLED, true);
+      destinationChanged(before);
       activity("info", "Safe destination = a fresh same-node address | address:" + r.value);
       activity("info", "At-risk rescue ENABLED");
       return { ok: true, value: r.value };
@@ -660,7 +662,9 @@ function create(o) {
       const local = "That address belongs to THIS node. Use an EXTERNAL wallet (a different node/seed) with fresh keys.";
       const sets = await scriptTable(true);
       if (sets.tracked.has(canon(a)) || hasOwnKey(await scriptRow(a))) return { ok: false, error: local };
+      const before = kv().get(K.SAFE_ADDRESS, "");
       kv().set(K.SAFE_MODE, "external"); kv().set(K.SAFE_ADDRESS, a);
+      destinationChanged(before);
       setSafeReused("", 0);   // a flag of the previous destination described that one, not this
       kv().setBool(K.ENABLED, true);
       activity("info", (count === 0 ? "Safe address set (external), verified clean" : "Safe address set (external): reuse check UNVERIFIED, will re-check") + " | address:" + a);
@@ -681,7 +685,15 @@ function create(o) {
       return { ok: true };
     });
   }
-  const granted = () => { try { return !!(o.granted && walletKey && o.granted(walletKey)); } catch (e) { return false; } };
+  /** The grant counts only for the destination the native question named (review H3): another safe = no grant. */
+  const granted = () => { try { const g = o.granted && walletKey ? o.granted(walletKey) : null; return !!(g && g.safe && store && canon(g.safe) === canon(store.kv.get(K.SAFE_ADDRESS, ""))); } catch (e) { return false; } };
+  /** A new destination: the grant named the old one, so it is dropped and the guardian stops until the question is passed again. */
+  function destinationChanged(before) {
+    const now2 = kv().get(K.SAFE_ADDRESS, "");
+    if (before && canon(before) === canon(now2)) return;
+    try { if (o.dropGrant && walletKey) o.dropGrant(walletKey); } catch (e) {}
+    if (kv().is(K.GUARDIAN_ON, false)) { kv().setBool(K.GUARDIAN_ON, false); activity("warn", "Guardian stopped: the safe destination changed, so background signing must be allowed again for it | address:" + now2); }
+  }
   /** Is the guardian allowed to act now: switched on, a destination, the grant, and not paused (Freeze). */
   /** The floor for UNATTENDED work: MINIMA only, at least min_auto. */
   const minAuto = () => { const v = store ? store.kv.get(K.MIN_AUTO, MIN_AUTO_DEFAULT) : MIN_AUTO_DEFAULT; return AMOUNT.test(v) && toUnits(v) > 0n ? v : MIN_AUTO_DEFAULT; };

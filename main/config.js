@@ -219,17 +219,23 @@ function effectiveParams() {
   return out;
 }
 
-/** Future Cash Next's grant for one wallet (its first public key): at = ms when the user allowed it, or null to take it back. */
-function setFcGrant(walletKey, at) {
+/**
+ * Future Cash Next's grant for one wallet (its first public key), BOUND TO THE SAFE DESTINATION the native question
+ * named (0.19.205, review H3): { at, safe }. at null takes it back. A grant of another shape (before 0.19.205: a bare
+ * number) is not a grant: the question is asked again.
+ */
+function setFcGrant(walletKey, at, safe) {
   if (!/^0x[0-9a-f]{64}$/.test(String(walletKey))) throw new Error("Unknown wallet.");
+  if (at && !/^M[xX][0-9A-Za-z]{30,100}$/.test(String(safe || ""))) throw new Error("A grant names its safe destination.");
   const cur = load(), g = Object.assign({}, cur.fcGrant && typeof cur.fcGrant === "object" ? cur.fcGrant : {});
-  if (at) g[walletKey] = Number(at); else delete g[walletKey];
+  if (at) g[walletKey] = { at: Number(at), safe: String(safe) }; else delete g[walletKey];
   cur.fcGrant = g;
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
   return g;
 }
-const fcGranted = (walletKey) => { const g = load().fcGrant; return !!(g && typeof g === "object" && Number(g[walletKey]) > 0); };
+/** The grant for this wallet, { at, safe }, or null. */
+const fcGranted = (walletKey) => { const g = load().fcGrant, r = g && typeof g === "object" ? g[walletKey] : null; return r && typeof r === "object" && Number(r.at) > 0 && typeof r.safe === "string" && r.safe ? { at: Number(r.at), safe: r.safe } : null; };
 
 /** Default node data folder (inside the app's own space, never the repo/cwd). */
 function defaultDataFolder() { return path.join(app.getPath("userData"), "node-data"); }

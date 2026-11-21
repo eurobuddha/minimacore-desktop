@@ -437,7 +437,7 @@ ipcMain.handle("mcd:keyUsesAudit", () => { requireRunning(); return keyuses.audi
 // "futurecash" (the signing queue and the coin guard see it); the key audit through the KeyUses host. It runs while the
 // node runs: its store is this wallet's own file, and one pass is made on each new block.
 const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), { owner: "futurecash" }),   // ONE command each (0.19.194): it sends no chain dir: () => app.getPath("userData"),
-  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk), reserve,
+  get: (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES }), log: (l) => node.log(l), granted: (wk) => config.fcGranted(wk), dropGrant: (wk) => config.setFcGrant(wk, null), reserve,
   notify: (title, body) => { try { const n = new Notification({ title: String(title), body: String(body), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ } } });
 reserve.setHoldSource("futurecash", () => futurecash.coinHolds());   // what it is about to sweep: no other part of the app may spend it first
 const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
@@ -472,7 +472,10 @@ async function fcGuardian(on) {
       message: lang.t("Let Future Cash Next sign by itself?"),
       detail: lang.t("While the guardian runs, Future Cash Next signs and posts two kinds of transaction with nobody at the screen:\n\n• Collect a matured stake to its own payout address. That is an address of this wallet, and the contract allows no other.\n• Move a coin from an address of this wallet whose one-time key was used more than once, or that was retired, to your safe destination:\n{safe}\n\nBefore anything is signed, the app checks the node's own copy of the transaction against these two shapes, and refuses and logs anything else. Nothing else is signed by itself.\n\nYou can take this back at any time on the Guardian tab (Background signing). The guardian then stops.", { safe }) });
     if (r.response !== 0) return { ok: false, declined: true };
-    config.setFcGrant(wk, Date.now());
+    // the destination is read again AFTER the answer: the grant is for the address the question showed, never another
+    const after = await futurecash.status();
+    if (!safe || !after || after.safe !== safe || futurecash.walletKey !== wk) return { ok: false, error: "The rescue destination changed while you were asked. Nothing was allowed." };
+    config.setFcGrant(wk, Date.now(), safe);
     node.log("[futurecash] the user allowed background signing for the wallet whose first key is " + wk);
   }
   return futurecash.setGuardian(true);

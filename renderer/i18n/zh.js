@@ -5160,7 +5160,8 @@
   "Unattended minimum": "无人值守最低金额",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "守护程序只会自行领取和清扫不少于此金额的 MINIMA 币。更小的币和代币会等待您处理：在“锁定付款”选项卡中领取，或在本选项卡中清扫或找回。",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "守护程序只会自行领取和清扫不少于此金额的 MINIMA 币。",
-  "Change": "更改"
+  "Change": "更改",
+  "The rescue destination changed while you were asked. Nothing was allowed.": "在询问您期间救援目的地已更改。未允许任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5231,5 +5232,6 @@
   "Unattended minimum",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
-  "Change"
+  "Change",
+  "The rescue destination changed while you were asked. Nothing was allowed."
 ] });

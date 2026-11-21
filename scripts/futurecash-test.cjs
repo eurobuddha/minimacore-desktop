@@ -331,7 +331,7 @@ const SAFE_MX = "MxG081SDHCPHCMDEM4NU4GW54FSPPY9ASN55JJNKB8JYKYSE8BSPRQ985WP0KH6
 /** A guardian: audited, an external safe destination set, rescue on, the guardian on, and the grant given (unless grant:false). */
 async function guardian(nodeOpts, o = {}) {
   let granted = o.grant !== false;
-  const x = await audited(nodeOpts, { granted: () => granted, get: async (url) => (url.includes("/reuse?") ? { status: true, results: [{ address: SAFE_HEX, reused: false, reuse_count: 0 }] } : null) });
+  const x = await audited(nodeOpts, { granted: () => (granted ? { at: 1, safe: SAFE_MX } : null), get: async (url) => (url.includes("/reuse?") ? { status: true, results: [{ address: SAFE_HEX, reused: false, reuse_count: 0 }] } : null) });
   const kv = x.e._store().kv;
   assert.equal((await x.e.setSafeExternal(SAFE_MX)).ok, true);
   kv.set(FC.K.ATRISK_ADDRS, JSON.stringify(o.atRisk || [PAY1]));
@@ -465,9 +465,9 @@ test("coins stranded on a retired address are queued and swept to the safe desti
 test("the grant: asked natively in main, written only by config.setFcGrant, never from a renderer patch; revocable", () => {
   const cfg = fs.readFileSync(path.join(__dirname, "..", "main", "config.js"), "utf8"), main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
   assert.ok(/if \(k === "fcGrant"\) continue;/.test(cfg), "sanitisePatch drops fcGrant: mcd:saveConfig cannot set it");
-  assert.equal((main.match(/config\.setFcGrant\(/g) || []).length, 2, "two writers: the grant after the native question, and Revoke");
+  assert.equal((main.match(/config\.setFcGrant\(/g) || []).length, 3, "three writers: the grant after the native question, Revoke, and a new destination dropping it");
   const fn = main.slice(main.indexOf("async function fcGuardian"), main.indexOf("async function fcRevoke"));
-  assert.ok(fn.indexOf("dialog.showMessageBox(") > 0 && fn.indexOf("dialog.showMessageBox(") < fn.indexOf("config.setFcGrant(wk, Date.now())"), "the question comes before the grant");
+  assert.ok(fn.indexOf("dialog.showMessageBox(") > 0 && fn.indexOf("dialog.showMessageBox(") < fn.indexOf("config.setFcGrant(wk, Date.now(), safe)"), "the question comes before the grant");
   assert.ok(/if \(r\.response !== 0\) return \{ ok: false, declined: true \};/.test(fn), "anything but Allow declines");
   assert.ok(/revoke: \(\) => fcRevoke\(\)/.test(main));
   const ops = main.slice(main.indexOf("const FC_OPS"), main.indexOf(" * THE ONE NATIVE GRANT"));
@@ -477,7 +477,7 @@ test("the grant: asked natively in main, written only by config.setFcGrant, neve
 test("the coin guard: a collected coin waiting for its sweep is held for Future Cash Next until it is swept; other owners cannot take it first", async () => {
   const reg = require("../main/reserve.js").createRegistry({ now: () => Date.now(), log() {} });
   const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
-  const x = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } }, { granted: () => true, reserve: reg, get: async () => ({ status: true, results: [{ address: SAFE_HEX, reused: false, reuse_count: 0 }] }) });
+  const x = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } }, { granted: () => ({ at: 1, safe: SAFE_MX }), reserve: reg, get: async () => ({ status: true, results: [{ address: SAFE_HEX, reused: false, reuse_count: 0 }] }) });
   const { e, node } = x, kv = e._store().kv;
   await e.setSafeExternal(SAFE_MX); kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY1])); await e.setGuardian(true);
   node.n.answer.txnsign = async () => ({ status: false, error: "vault busy" });   // the sweep fails this time: the coin stays queued
@@ -663,4 +663,23 @@ test("H2: a manual Sweep that fails gives a sweep the guardian had queued back t
   fresh.node.n.answer.txnsign = async () => ({ status: false, error: "boom" });
   await fresh.e.sweepAddress(PAY1);
   assert.equal(fresh.e._store().sweepRow(ID(60)), null, "a row the click itself made is removed on failure");
+});
+
+test("H3: the grant is bound to the safe destination it named: another destination drops it and stops the guardian; main reads the destination again after the question", async () => {
+  const OTHER = "MxG0815C6FG5FMUDRRMYTR8NRT0U7H8DTWK9SPZGJ2EY5RVTN60TJ6SZF7VJ889", s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  let grant = null; const dropped = [];
+  const x = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } }, { granted: () => grant, dropGrant: (wk) => { dropped.push(wk); grant = null; }, get: async () => ({ status: true, results: [] }) });
+  const { e, node } = x, kv = e._store().kv;
+  await e.setSafeExternal(SAFE_MX); kv.set(FC.K.ATRISK_ADDRS, JSON.stringify([PAY1]));
+  grant = { at: 1, safe: OTHER };
+  assert.equal((await e.setGuardian(true)).needsGrant, true, "a grant for another destination is no grant");
+  grant = { at: 1, safe: SAFE_MX }; assert.equal((await e.setGuardian(true)).ok, true); assert.equal((await e.status()).running, true);
+  await e.setSafeExternal(OTHER);
+  assert.equal(dropped.length, 2, "the first destination and the change each drop it"); const st = await e.status(); assert.deepEqual([st.running, st.guardianOn], [false, false]);
+  node.sent.length = 0; await e.pass(150);
+  assert.deepEqual(node.sent.filter(c => /^txn/.test(c)), [], "nothing signed or posted for the new destination");
+  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), fn = main.slice(main.indexOf("async function fcGuardian"), main.indexOf("async function fcRevoke"));
+  assert.ok(fn.indexOf("const after = await futurecash.status();") > fn.indexOf("dialog.showMessageBox(") && /after\.safe !== safe/.test(fn), "read again after the answer and compared with what was shown");
+  const cfg = fs.readFileSync(path.join(__dirname, "..", "main", "config.js"), "utf8");
+  assert.ok(cfg.includes("g[walletKey] = { at: Number(at), safe: String(safe) };") && cfg.includes('typeof r.safe === "string"'), "{ at, safe }; a bare number is no grant");
 });

@@ -5173,7 +5173,8 @@
   "Unattended minimum": "Мінімум для роботи без вас",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.": "Захисник сам отримує й переказує лише монети MINIMA не менші за цю суму. Менші та токени чекають на вас: «Отримати» на вкладці «Ставки», «Переказати» або «Повернути» на цій вкладці.",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.": "Захисник сам отримує й переказує лише монети MINIMA не менші за цю суму.",
-  "Change": "Змінити"
+  "Change": "Змінити",
+  "The rescue destination changed while you were asked. Nothing was allowed.": "Адреса для порятунку змінилася, поки вас питали. Нічого не дозволено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5244,5 +5245,6 @@
   "Unattended minimum",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount. Smaller ones, and tokens, wait for you: Collect on the Stakes tab, Sweep or Recover on this tab.",
   "The guardian collects and sweeps by itself only MINIMA coins of at least this amount.",
-  "Change"
+  "Change",
+  "The rescue destination changed while you were asked. Nothing was allowed."
 ] });
