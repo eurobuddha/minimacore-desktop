@@ -94,7 +94,11 @@ function masked(c) {
   return V.parts(String(c).replace(CTRL, " ")).map(p => {
     const r = V.read(p);
     if (r.error || !r.verb) return maskedWords(p);
-    return [r.verb].concat(r.params.map(([n, v]) => n + ":" + (SECRET_NAMES.includes(V.fold(n)) && v !== "" ? "•••" : show(v)))).join(" ");
+    // a secret of several words says how many (0.18.230): the user sees that password:"pw burn:500" is more than a password. Said as a
+    // count, not one ••• a word as Pandamonium Desktop 0.19.299 does: 24 of those made a restore with a 24-word phrase longer than the
+    // Touch ID prompt can show (120 characters), so it could no longer be armed on a Mac with Touch ID (0.18.196 requires it)
+    const hide = (v) => { const w = v.split(/\s+/).filter(Boolean); return w.length > 1 ? '"••• (' + w.length + ' words)"' : "•••"; };
+    return [r.verb].concat(r.params.map(([n, v]) => n + ":" + (SECRET_NAMES.includes(V.fold(n)) && v !== "" ? hide(v) : show(v)))).join(" ");
   }).join(" ; ");
 }
 function maskedWords(c) {
@@ -187,7 +191,8 @@ function repasted(command) {
  *   (main/cmdverb.js unclear, 0.18.219);  2c. a value the node would paste into a second command of its own as more parameters
  *   (repasted, 0.18.220);  2d. an escaped ";" or control character (cmdverb.smuggled), mds action:accept, a multisig spend, and a
  *   repeated parameter of a command that moves funds from a key or builds commands of its own (0.18.221); rpc (but its status and the
- *   gated listusers), slavenode enable:, webhooks action:add and mds actions (0.18.228);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   gated listusers), slavenode enable:, webhooks action:add and mds actions (0.18.228); a value that would rewrite the commands a
+ *   builder (sendfrom, rawfrom, multisig …) makes from it (cmdverb.builtProblem, 0.18.230);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
  *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
  *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
  */
@@ -197,6 +202,8 @@ async function checkCommand(command, io) {
   const unclear = V.unclear(command); if (unclear) throw new Error(unclear);   // refused, not guessed (0.18.219, main/cmdverb.js read)
   const pasted = repasted(command); if (pasted) throw new Error(pasted);
   const esc = V.smuggled(command); if (esc) throw new Error(esc);
+  // a value that would rewrite the commands a sendfrom, rawfrom, multisig … builds from it (0.18.230)
+  for (const part of V.parts(command)) { const built = V.builtProblem(part); if (built) throw new Error(built); }
   for (const part of V.parts(command)) {
     const twice = V.is(part, "send") ? V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
     if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");

@@ -244,7 +244,11 @@ test("must be armable: a restore with a 24-word phrase, wipekeys with a seed, lo
       if (kind === "change") assert.match(seen, mac ? /^make changes to this wallet's keys by running: vault action:\w+/ : /^This makes changes to this wallet's keys\./);
     }
   }
-  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), "vault action:restorekeys phrase:••• keyuses:5", "CHANGED on purpose (0.18.222): shown as the node reads it");
+  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys phrase:"••• (3 words)" keyuses:5', "CHANGED on purpose (0.18.222): shown as the node reads it; 0.18.230: with its word count");
+  // 0.18.230: a 24-word phrase is said as a count, so the Touch ID prompt (120 characters) can still show the restore whole
+  let tid = ""; const phr24 = Array.from({ length: 24 }, (_, i) => "word" + i).join(" ");
+  await G.create(SYS({ can: () => true, prompt: async (r) => { tid = r; } })).arm('vault action:restorekeys phrase:"' + phr24 + '"', "CHANGE KEYS");
+  assert.equal(tid, 'make changes to this wallet\'s keys by running: vault action:restorekeys phrase:"••• (24 words)"');
   await assert.rejects(G.create(SYS({})).arm("vault action:passwordunlock password:x", "SHOW SEED"), /Type CHANGE KEYS exactly/, "its own typed phrase");
   await assert.rejects(G.create(SYS({})).arm("vault action:restorekeys phrase:a phrase:b", "CHANGE KEYS"), /names phrase more than once/, "repeats are still refused");
   // only the Touch ID prompt, which cannot show more, refuses a command too long for it; the dialog shows it whole
@@ -279,7 +283,7 @@ test("masked: a secret holding a quote is hidden through the end of the node's t
   assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
   assert.equal(G.masked('vault password:hunter2"action":"passwordunlock"'), "vault password:•••");
   assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
-  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), "vault action:restorekeys phrase:••• keyuses:5", "a quoted value is still hidden whole (CHANGED on purpose, 0.18.222: shown as the node reads it)");
+  assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys phrase:"••• (3 words)" keyuses:5', "a quoted value is still hidden whole (CHANGED on purpose, 0.18.222: shown as the node reads it; 0.18.230: with its word count)");
 });
 
 // ---- 0.18.219 (as Pandamonium Desktop 0.19.266 / 0.19.250 / 0.19.290): one reader of command text, the node's own ----
@@ -428,4 +432,27 @@ test("rpc enable / password / adduser / removeuser, slavenode enable, webhooks a
   assert.deepEqual(sent, []);
   for (const c of ["rpc", "rpc action:listusers", "mds", "slavenode", "webhooks", "webhooks action:list", "webhooks action:clear", "network action:list"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }   // the gate stands in as passed (take: true)
   await assert.rejects(G.checkCommand("mds action:pending", { take: () => true, running: () => true }), /open this node to someone else/, "CHANGED on purpose (0.18.228): mds runs only as its gated listing");
+});
+
+// ---- 0.18.230 (as Pandamonium Desktop 0.19.299): a value that would rewrite the commands a builder (sendfrom, rawfrom, multisig …) makes from it is refused ----
+test("a multisig key carrying JSON, a multi-word password, a raw output with a space and an escaped quote in a state are refused; ordinary builder commands are not", async () => {
+  const V = require("../main/cmdverb"), user = "0x" + "B".repeat(64), att = "0x" + "A".repeat(64);
+  let fake = '0x00","2":"0","9":"['; fake = fake + "x".repeat(66 - fake.length - 1) + "]";
+  assert.equal(fake.length, 66, "it passes the node's own check (0x, 66 characters)");
+  const ms = "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att, fake]);
+  assert.match(V.builtProblem(ms), /builds further commands/, "its escaped quotes");
+  assert.match(V.builtProblem("multisig action:create id:pair amount:10 required:1 publickeys:" + JSON.stringify([user, "0x" + "Z".repeat(64)])), /must be 0x followed by 64 hexadecimal digits/);
+  assert.match(V.builtProblem("multisig action:create amount:1 required:1 publickeys:" + JSON.stringify([user]) + " root:0x" + "G".repeat(64)), /64 hexadecimal digits/);
+  const pw = "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att]) + ' password:"pw burn:500"';
+  assert.match(V.builtProblem(pw), /builds further commands from its values/);
+  assert.match(G.masked(pw), /password:"••• \(2 words\)"/, "the echo shows the password is more than one word");
+  for (const c of ['rawfrom inputs:[{"coinid":"0x01"}] outputs:[{"address":"0x02 burn:5","amount":"1","tokenid":"0x00"}]', 'sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:1 state:{"1":"a\\\\\\" b"}',
+    'sendfrom fromaddress:0x01 address:0x02 amount:1 tokenid:"0x00 burn:9" privatekey:0x03 keyuses:1', 'sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:1 script:RETURN"x'])
+    assert.match(V.builtProblem(c), /builds further commands/, c);
+  for (const c of ['sendfrom fromaddress:0x01 address:0x02 amount:1 script:"RETURN TRUE" privatekey:0x03 keyuses:1 state:{"1":"hello world"}', "multisig action:create id:pair amount:10 required:2 publickeys:" + JSON.stringify([user, att]),
+    'createtokenfrom fromaddress:0x01 name:"My Token" amount:10 privatekey:0x03 keyuses:1 script:"RETURN TRUE"', 'sphincs action:generate seed:"two words"', 'send amount:1 address:0x02 tokenid:"0x00"'])
+    assert.equal(V.builtProblem(c), "", c);
+  // through the real mcd:cmd handler
+  const sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  await assert.rejects(h(null, ms), /builds further commands/); await assert.rejects(h(null, pw), /builds further commands/); assert.deepEqual(sent, []);
 });
