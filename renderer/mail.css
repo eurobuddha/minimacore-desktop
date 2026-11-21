@@ -138,7 +138,7 @@
 .mailapp .mm-cbar { display: flex; align-items: center; background: var(--mm-surface); padding: 8px 12px 8px 6px; flex: 0 0 auto; border-bottom: 1px solid var(--mm-hairline); }
 .mailapp .mm-ctitles { flex: 1; min-width: 0; padding-left: 10px; }
 .mailapp .mm-ct { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mailapp .mm-cs { font-family: var(--mm-mono); font-size: 10.5px; color: var(--mm-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mailapp .mm-cs { font-family: var(--mm-mono); font-size: 10.5px; color: var(--mm-dim); overflow-wrap: anywhere; margin-top: 1px; }   /* an address shown whole, never cut (0.19.263) */
 .mailapp .mm-day { text-align: center; font-size: 11px; color: var(--mm-dim2); padding: 10px 0 8px; }
 .mailapp .mm-mrow { display: flex; padding: 1px 12px; }
 .mailapp .mm-mrow.mm-out { justify-content: flex-end; }

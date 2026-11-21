@@ -259,3 +259,18 @@ test("Copy the listed rows: a cell that leads with a formula trigger gets an apo
   const fc = fs.readFileSync(path.join(R, "futurecash.js"), "utf8");
   assert.ok(fc.includes('const unit = x.tokenid === "0x00" ? "MINIMA" : String(x.tokenid).toUpperCase() === FCN_MXUSD ? "MxUSD" : t("of the token {tokenid}", { tokenid: x.tokenid });') && fc.includes('t("{amount} {unit} is collected to its payout address:'), "the real unit, the token id whole");
 });
+
+// ---- 0.19.263: review nits: the Web Wallet send after a logout, identifiers never cut, fragments said in every language, the chat dialog's Escape ----
+test("C5: the Web Wallet send stops if logged out meanwhile and says main's reason translated; the Mail header and the Send picker never cut an identifier; the chat dialog removes its Escape listener", () => {
+  const raw = fs.readFileSync(path.join(R, "app.js"), "utf8");
+  const send = raw.slice(raw.indexOf("async function wwDoSend()"), raw.indexOf("function renderActive()"));
+  assert.ok(/const r = await AppsAct\.ww\.send\(api, f\);[\s\S]{0,300}if \(!wwAddr\) \{ renderWebWallet\(\); return; \}/.test(send) && /MainSaid\.say\(r\.message \|\| r\.err\)/.test(send) && !/"Sending\.\.\."/.test(send));
+  for (const w of ['return t("Unverified");', 'return t("just now");', 'th("awaiting payment")']) assert.ok(raw.includes(w), w);
+  assert.ok(!/return "Unverified";|return "just now";|"  awaiting payment"/.test(raw));
+  const mailCss = fs.readFileSync(path.join(R, "mail.css"), "utf8"), shellCss = fs.readFileSync(path.join(R, "shell.css"), "utf8");
+  assert.ok(!/\.mailapp \.mm-cs \{[^}]*text-overflow: ellipsis/.test(mailCss) && /\.mailapp \.mm-cs \{[^}]*overflow-wrap: anywhere/.test(mailCss), "the Mail header's address is whole");
+  assert.ok(/id="sTokId"/.test(raw) && /idb\.textContent = idb\.hidden \? "" : tid; idb\.onclick = \(\) => copy\(tid\);/.test(raw) && /\.send-tokid \{[^}]*overflow-wrap: anywhere/.test(shellCss), "the chosen token's whole id beside the picker, one click to copy");
+  const chat = fs.readFileSync(path.join(R, "chat.js"), "utf8");
+  assert.ok(/const done = \(v\) => \{ document\.removeEventListener\("keydown", esc\); ov\.remove\(\); resolve\(v\); \};/.test(chat), "no Escape listener is left behind by a button or a click outside");
+  for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); const cat = I18N.catalog(c); for (const k of ["just now", "awaiting payment", "Unverified", "Sending…"]) assert.ok(cat[k] && cat[k] !== k, c + ": " + k); }
+});

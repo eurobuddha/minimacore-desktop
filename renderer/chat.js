@@ -109,7 +109,7 @@
           ${opts.title ? `<div class="chat-dialog__title">${h(opts.title)}</div>` : ""}${opts.body || ""}
           <div class="chat-dialog__actions">${actions}</div></div></div></div>`);
       const ov = D.el("chatOv");
-      const done = (v) => { ov.remove(); resolve(v); };
+      const done = (v) => { document.removeEventListener("keydown", esc); ov.remove(); resolve(v); };   // the Escape listener goes with the dialog (0.19.263)
       ov.querySelectorAll(".chat-dialog__btn").forEach((b) => {
         const a = opts.actions[parseInt(b.dataset.i, 10)];
         b.onclick = () => { const v = typeof a.value === "function" ? a.value(ov) : a.value; if (v !== KEEP) done(v); };

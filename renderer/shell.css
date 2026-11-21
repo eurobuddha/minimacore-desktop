@@ -228,6 +228,7 @@ img.tray__ic[src$="minima-mark.svg"] { background: #fff; padding: 6px; }
   font: 400 15px/20px var(--sans); letter-spacing: .03em; appearance: none; -webkit-appearance: none; cursor: pointer; text-overflow: ellipsis;
   background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
   background-position: calc(100% - 19px) 21px, calc(100% - 14px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
+.send-tokid { display: block; width: 100%; margin-top: 4px; padding: 0; border: 0; background: none; color: var(--dim); font-size: 11px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .send-tok option { background: var(--surface2); color: var(--text); }
 .send-avail { margin-top: 6px; font: 400 12px/1.2 var(--sans); letter-spacing: .018em; color: var(--dim2); overflow-wrap: anywhere; user-select: text; min-height: 14px; }
 .send-line { display: flex; align-items: flex-end; }

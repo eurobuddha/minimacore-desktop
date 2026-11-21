@@ -1301,11 +1301,12 @@ async function wwDoSend() {
     setTimeout(() => { if (wwArmed) { wwArmed = false; if (btn.isConnected) btn.textContent = t("Send"); } }, 4000);
     return;
   }
-  wwArmed = false; btn.disabled = true; btn.textContent = "Sending...";
+  wwArmed = false; btn.disabled = true; btn.textContent = t("Sending…");
   const from = wwAddr.address;   // the wallet this send leaves: the screen may be logged out before the answer is here
   const r = await AppsAct.ww.send(api, f);
   if (r && r.ok) {
     toast(t("Your transaction has been successfully sent!{txnid}", { txnid: (r.txnid ? " " + r.txnid : "") }), "ok", r.txnid || null);
+    if (!wwAddr) { renderWebWallet(); return; }   // logged out while the send was at the node (0.19.263)
     wwForm.to = ""; wwForm.amt = "";
     wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
     wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
@@ -1314,12 +1315,12 @@ async function wwDoSend() {
     // M1: don't offer a one-click retry — surface the unknown state, refresh balances, and gate re-send behind
     // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while this wallet is in WW_UNKNOWN).
     wwUnknown(from, true);
-    toast(r.message || t("Send status unknown: check before trying again"), "err");
+    toast(r.message ? MainSaid.say(r.message) : t("Send status unknown: check before trying again"), "err");
     if (wwAddr) wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
     renderWebWallet();
   } else {
-    toast((r && (r.message || r.err)) || t("Send failed"), "err");
-    btn.disabled = false; btn.textContent = t("Send");
+    toast(r && (r.message || r.err) ? MainSaid.say(r.message || r.err) : t("Send failed"), "err");   // main's English said in the app's language (0.19.263)
+    if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Send"); }
   }
 }
 
@@ -2292,17 +2293,17 @@ function histWhen(ms) {
  */
 function chainStatus(j) {
   try {
-    if (!j || j.status !== true || j.pending === true) return "Unverified";
+    if (!j || j.status !== true || j.pending === true) return t("Unverified");
     const r = j.response;
-    if (!r || typeof r !== "object") return "Unverified";
+    if (!r || typeof r !== "object") return t("Unverified");
     if (r.found === false) return t("Not found on this node, unverified");
-    if (r.found !== true) return "Unverified";
-    if (typeof r.blockid !== "string" || !/^0x[0-9a-f]{64}$/i.test(r.blockid) || /^0x0+$/i.test(r.blockid)) return "Unverified";
+    if (r.found !== true) return t("Unverified");
+    if (typeof r.blockid !== "string" || !/^0x[0-9a-f]{64}$/i.test(r.blockid) || /^0x0+$/i.test(r.blockid)) return t("Unverified");
     const whole = (k) => { if (typeof r[k] !== "string" || !/^[0-9]{1,30}$/.test(r[k])) throw new Error(k); return BigInt(r[k]); };
     const block = whole("block"), tip = whole("tip"), depth = whole("confirmations");
-    if (block <= 0n || tip - block !== depth) return "Unverified";
+    if (block <= 0n || tip - block !== depth) return t("Unverified");
     return t("{n} #{block} · {depth} confirmations", { n: (depth >= 3n ? t("Confirmed") : t("In block")), block: block, depth: depth });
-  } catch (e) { return "Unverified"; }
+  } catch (e) { return t("Unverified"); }
 }
 // The counter (token) leg of a buy/sell row, read from the persisted difference map → {amt, name}.
 function tradeCounter(r) {
@@ -2367,7 +2368,7 @@ function showHistoryDetail(r) {
 function relTime(ms) {
   if (!ms) return "";
   const d = Date.now() - ms, m = Math.floor(d / 60000), h = Math.floor(d / 3600000), days = Math.floor(d / 86400000);
-  if (d < 60000) return "just now";
+  if (d < 60000) return t("just now");
   if (m < 60) return t("{m}m ago", { m: m });
   if (h < 24) return t("{h}h ago", { h: h });
   if (days < 30) return t("{days}d ago", { days: days });
@@ -3124,6 +3125,7 @@ function sendForm() {
     f.innerHTML = `
       <label class="eyebrow" for="sTok">${th("Token")}</label>
       <select class="send-tok" id="sTok">${tokenOptions()}</select>
+      <button class="send-tokid mono" id="sTokId" type="button" hidden title="${th("click to copy")}"></button>
       <div class="send-avail" id="sAvail"></div>
       <label class="eyebrow" for="sAmt">${th("Amount")}</label>
       <div class="send-line"><input class="send-in" id="sAmt" placeholder="0.0" inputmode="decimal" autocomplete="off" /><button class="btn btn--outline" id="sMax" type="button">${th("Max")}</button></div>
@@ -3139,6 +3141,7 @@ function sendForm() {
     const sendableOf = (tid) => tokOf(tid).sendable || "0";
     const refreshAvail = () => {
       const t = tokOf(el("sTok").value);
+      const tid = el("sTok").value, idb = el("sTokId"); idb.hidden = !tid || tid === MINIMA; idb.textContent = idb.hidden ? "" : tid; idb.onclick = () => copy(tid);   // the whole token id, one click to copy (0.19.263)
       el("sAvail").textContent = I18N.t("sendable {sendable}{held}", { sendable: TOK.tidyAmount(t.sendable || "0"), held: (t.held ? "  ·  " + t.held : "") });
     };
     el("sTok").onchange = refreshAvail;
@@ -3786,7 +3789,7 @@ async function renderShopSellOrder(ref) {
   if (!d || !d.order || d.order.role !== "sell") { shopFrame(t("Orders"), () => shopGo("inbox"), [], `<div class="mm-empty">${th("Order not found.")}</div>`); return; }
   const o = d.order, cur = SHOP.cur(o.currency), enquiry = o.status === "INQUIRY", next = SHOP.nextStatus(o);
   shopFrame((o.items && o.items[0] && o.items[0].product) || o.ref, () => shopGo("inbox"), [],
-    `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? ("  " + tr("paid {amount} {cur}", { amount: esc(o.paidAmount || o.amount), cur: esc(cur) })) : "  awaiting payment"}</span></div>
+    `<div class="mm-line">${shopPill(o.status)}<span class="${o.paid ? "mm-in" : "mm-dim"}">${o.paid ? ("  " + tr("paid {amount} {cur}", { amount: esc(o.paidAmount || o.amount), cur: esc(cur) })) : "  " + th("awaiting payment")}</span></div>
      <div class="mm-sec">${th("Items")}</div><div class="mm-card">${shopItems(o)}</div>
      ${shopKv(t("Buyer's total"), o.amount + " " + cur)}${shopCheckBlock(o, cur)}
      ${d.sharedRef ? `<div class="mm-warn" style="overflow-wrap:anywhere">${tr("Payments with the reference {wireRef} are shown on order {first}, which another buyer sent first. Received so far with that reference: {received} {cur}.", { wireRef: esc(o.wireRef), first: esc(d.sharedRef.ref), received: esc(d.sharedRef.received), cur: esc(cur) })}</div>` : ""}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Shop"), o.shopName || "")}
