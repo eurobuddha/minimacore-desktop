@@ -31,6 +31,12 @@ const BACKFILL_MAX_DEPTH = 256;   // the very first pass on a new store
 // blocks per pass, until it is covered or the node will not serve deeper. The first pass read 256 and then 64 for ever,
 // with the "done" mark in memory only: orders and payments made while the app was closed longer were never read.
 const WINDOW_DEPTH = 1024, GAP_MARGIN = 8, BACKFILL_CHUNK = 512;
+// How deep `coins address:` can read at all (0.18.276): without megammr:true (never passed here) the node walks only its in-memory
+// TxPoW tree (TxPoWSearcher.searchCoins: the walk ends where the tree ends, and it returns what it found: a list, never a refusal),
+// which holds the last GlobalParams.MINIMA_CASCADE_START_DEPTH = 1024 blocks. A deeper depth "succeeds" with no more than the tree,
+// so a backfill step past it read nothing older and was taken as covered. WINDOW_DEPTH is that tree; a gap below it is said, never
+// claimed read.
+const NODE_TREE_DEPTH = 1024;
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
 
@@ -420,14 +426,24 @@ async function scanOnce() {
     const a = await scanOrders(depth).catch(failed);
     const b = await scanPayments(depth).catch(failed);
     let changed = a || b;
-    if (tip && !readFailed) {
+    if (tip && !readFailed && prev && tip < prev) {
+      // the chain is BELOW what was read before (a fresh sync or a resync while the store persists, 0.18.276): the cursor is not moved
+      // down and the backfill waits; neither is a failure
+    } else if (tip && !readFailed) {
       const covered = tip - passServed;   // the oldest block this pass read
       // A new gap below this pass: the backfill reaches down to the oldest unread block and starts again just under this
       // pass (0.18.213: a gap that opened while an older backfill was pending was never registered).
       if (prev && prev < covered) { const t0 = Number(store.getMeta("bfTarget")) || 0; store.setMeta("bfTarget", t0 ? Math.min(t0, prev) : prev); store.setMeta("bfFloor", covered); }
       store.setMeta("scanTip", tip);
       const target = Number(store.getMeta("bfTarget")) || 0, floor = Number(store.getMeta("bfFloor")) || 0;
-      if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
+      if (target && floor && tip <= target) { /* the chain has not reached the gap yet: the backfill waits, not a failure (0.18.276) */ }
+      else if (target && floor && Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK) > NODE_TREE_DEPTH) {
+        // past the node's in-memory tree nothing older can be read (0.18.276): said, never taken as covered
+        const below = tip - NODE_TREE_DEPTH;
+        store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("unreadBelow", Math.max(below, Number(store.getMeta("unreadBelow")) || 0));
+        console.error("[miniMall] orders and payments older than block " + below + " could not be read: the node keeps only its last " + NODE_TREE_DEPTH + " blocks.");
+        changed = true;
+      } else if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK);
         passServed = deep;
         const c = await scanOrders(deep, floor).catch(failed), d = await scanPayments(deep, floor).catch(failed);
@@ -511,9 +527,10 @@ function scanState() {
   const target = Number(store.getMeta("bfTarget")) || 0, below = Number(store.getMeta("unreadBelow")) || 0, skipped = [...skippedPay.keys()].filter(skipping);
   const skippedText = skipped.map(a => "Payments to " + a + " are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.").join(" ");
   return { readFailed: lastPassFailed, catchingUpTo: target, unreadBelow: below, skipped,
-    text: [lastPassFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."
+    // the recent window is what fails now (0.18.276: a backfill step never reads past the node's tree), so it is said as recent
+    text: [lastPassFailed ? "Recent orders could not be read: the node did not answer. They are read again on the next block."
       : target ? "Reading orders and payments from while the app was closed (back to block " + target + ")."
-      : below ? "Orders and payments older than block " + below + " could not be read: the node serves no deeper history." : "", skippedText].filter(Boolean).join(" ") };   // a payout address skipped as not valid, whole (0.18.227)
+      : below ? "Orders and payments older than block " + below + " could not be read: the node keeps only its last " + NODE_TREE_DEPTH + " blocks, and the app was closed longer than that." : "", skippedText].filter(Boolean).join(" ") };   // a payout address skipped as not valid, whole (0.18.227)
 }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 

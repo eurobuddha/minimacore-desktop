@@ -473,36 +473,19 @@ test("vendor: the address buyers pay stays the same across restarts, and payment
 });
 
 // ---- 0.18.206: what was read is remembered; a gap is walked by a paced backfill ----
-test("an order sent while the app was closed for long is read after the restart (scan tip kept, gap backfilled); a node that serves no deeper ends the backfill", async () => {
-  let m = freshModules(); m.store.setMeta("vendorAddress", ""); m.store.setMeta("scanTip", 0); m.store.setMeta("bfTarget", 0); m.store.setMeta("bfFloor", 0);
-  const VADDR = "MxG0" + "7".repeat(56); let tip = 1000, maxServe = 100000, msg = []; const depths = [];
-  const runner = () => async (c) => {
-    if (c.startsWith("vault")) return { status: true, response: { phrase: "vendor seed h1" } };
-    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: VADDR } };
-    if (c === "block") return { status: true, response: { block: tip } };
-    const d = Number((/depth:(\d+)/.exec(c) || [])[1] || 0);
-    if (c.startsWith("coins address:" + m.shop.MINIMERCH)) { depths.push(d); if (d > maxServe) return { status: false }; return { status: true, response: msg.filter(x => tip - x.created <= d) }; }
-    return { status: true, response: [] };
-  };
-  m.store.saveShop({ shopId: "gap", shopName: "G", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "1", maxUnits: "5" }], shipping: [] });
-  m.shop._setRunner(runner()); await m.shop.init(); await m.shop.scanOnce();
-  assert.equal(depths[0], 256, "the very first pass"); assert.equal(Number(m.store.getMeta("scanTip")), 1000); m.store.flush();
-  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("gap buyer");
-  const sealed = "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref: "ORD-GAP", randomid: "g", from: buyer.publicId, to: me.publicId, date: 1, shopId: "gap", items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], amount: "1", currency: "Minima", shipping: "" })));
-  msg = [{ coinid: "0xGA1".replace("G", "6"), created: 1200, state: { "99": sealed } }];   // sent while closed: 1800 blocks before the next start
-  m = freshModules(); tip = 3000; depths.length = 0; m.shop._setRunner(runner()); await m.shop.init(); await m.shop.scanOnce();
-  assert.deepEqual(depths, [1024, 1536], "the window, then one backfill step of 512 more");
-  assert.equal(m.store.order("ORD-GAP"), null, "not reached yet"); assert.equal(Number(m.store.getMeta("bfTarget")), 1000);
-  tip = 3001; depths.length = 0; await m.shop.scanOnce();
-  assert.deepEqual(depths, [64, 2009], "the next pass reaches the old tip"); assert.ok(m.store.order("ORD-GAP"), "the order sent while closed is read");
-  assert.equal(Number(m.store.getMeta("bfTarget")), 0, "the backfill is done");
-  // a node that serves no deeper ends the backfill and says so
-  m.store.flush(); m = freshModules(); tip = 9000; maxServe = 1100; depths.length = 0; m.shop._setRunner(runner()); await m.shop.init();
-  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
-  try { await m.shop.scanOnce(); } finally { console.error = err; }
-  assert.match(errs.join(), /older than block \d+ could not be read: the node serves no deeper history/); assert.equal(Number(m.store.getMeta("bfTarget")), 0);
-});
-
+// CHANGED on purpose (0.18.276): `coins address:` without megammr walks only the node's in-memory tree, the last 1024 blocks
+// (TxPoWSearcher.searchCoins; GlobalParams.MINIMA_CASCADE_START_DEPTH), and returns what it found for any deeper depth, never a
+// refusal. The stand-in node below serves exactly that, so a backfill past the tree is never taken as covered: the gap is said.
+const treeNode = (m, st) => async (c) => {
+  if (c.startsWith("vault")) return { status: true, response: { phrase: "vendor seed h1" } };
+  if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: st.vaddr } };
+  if (c === "block") return { status: true, response: { block: st.tip } };
+  const d = Number((/depth:(\d+)/.exec(c) || [])[1] || 0);
+  if (c.startsWith("coins address:" + m.shop.MINIMERCH)) { st.depths.push(d);
+    if (st.mode === "refuse") return { status: false, error: "busy" }; if (st.mode === "throw") throw new Error("RPC timed out");
+    return { status: true, response: st.msg.filter(x => st.tip - x.created <= Math.min(d, 1024)) }; }   // the tree ends 1024 blocks down
+  return { status: true, response: [] };
+};
 // ---- 0.18.208: the same reference from two buyers; a retry needs a refused payment and nothing in flight ----
 test("two buyers' orders with the same reference are both kept and neither is paid automatically", async () => {
   const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
@@ -563,44 +546,47 @@ test("buyer: a retry pays only after a refused payment, never while one may be i
 });
 
 // ---- 0.18.213: a read the node did not answer advances nothing ----
-test("a failed or thrown read is not covered: nothing advances, the status says so, and the next pass reads the newest part of the gap; a gap that opens during a backfill is kept", async () => {
+test("an order sent within the node's last 1024 blocks is read after a restart; a gap older than that is said, never claimed read", async () => {
+  let m = freshModules(); m.store.setMeta("vendorAddress", ""); m.store.setMeta("scanTip", 0); m.store.setMeta("bfTarget", 0); m.store.setMeta("bfFloor", 0); m.store.setMeta("unreadBelow", 0);
+  const st = { vaddr: "MxG0" + "7".repeat(56), tip: 1000, msg: [], depths: [] };
+  m.store.saveShop({ shopId: "gap", shopName: "G", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "1", maxUnits: "5" }], shipping: [] });
+  m.shop._setRunner(treeNode(m, st)); await m.shop.init(); await m.shop.scanOnce();
+  assert.equal(st.depths[0], 256, "the very first pass"); assert.equal(Number(m.store.getMeta("scanTip")), 1000); m.store.flush();
+  const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("gap buyer");
+  const seal = async (ref, created) => ({ coinid: "0x" + Buffer.from(ref).toString("hex"), created, state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref, randomid: ref, from: buyer.publicId, to: me.publicId, date: 1, shopId: "gap", items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], amount: "1", currency: "Minima", shipping: "" }))) } });
+  st.msg = [await seal("ORD-OLD", 1200), await seal("ORD-NEW", 2500)];   // sent while closed: one older than the node's tree, one inside it
+  m = freshModules(); st.tip = 3000; st.depths.length = 0; m.shop._setRunner(treeNode(m, st)); await m.shop.init();
+  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
+  try { await m.shop.scanOnce(); } finally { console.error = err; }
+  assert.deepEqual(st.depths, [1024], "the window is the tree; no step past it is asked");
+  assert.ok(m.store.order("ORD-NEW"), "inside the tree: read"); assert.equal(m.store.order("ORD-OLD"), null, "older than the tree: not readable");
+  assert.equal(Number(m.store.getMeta("bfTarget")), 0); assert.equal(Number(m.store.getMeta("unreadBelow")), 1976);
+  assert.match(errs.join(), /older than block 1976 could not be read: the node keeps only its last 1024 blocks/);
+  assert.match(m.shop.scanState().text, /Orders and payments older than block 1976 could not be read: the node keeps only its last 1024 blocks, and the app was closed longer than that\./, "never claimed read");
+});
+test("a failed or thrown read is not covered: nothing advances and the status says recent orders could not be read; a chain below the cursor (a resync) moves nothing and is no failure", async () => {
   let m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
-  const VADDR = "MxG0" + "6".repeat(56); let tip = 1000, mode = "ok", msg = []; const depths = [];
-  m.shop._setRunner(async (c) => {
-    if (c.startsWith("vault")) return { status: true, response: { phrase: "vendor seed h1" } };
-    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: VADDR } };
-    if (c === "block") return { status: true, response: { block: tip } };
-    if (c.startsWith("coins address:" + m.shop.MINIMERCH)) { const d = Number(/depth:(\d+)/.exec(c)[1]); depths.push(d);
-      if (mode === "refuse") return { status: false, error: "busy" }; if (mode === "throw") throw new Error("RPC timed out");
-      return { status: true, response: msg.filter(x => tip - x.created <= d) }; }
-    return { status: true, response: [] };
-  });
+  const st = { vaddr: "MxG0" + "6".repeat(56), tip: 1000, msg: [], depths: [], mode: "ok" };
+  m.shop._setRunner(treeNode(m, st));
   m.store.saveShop({ shopId: "fail", shopName: "F", currency: "Minima", products: [{ id: "p1", name: "Tea", price: "1", maxUnits: "5" }], shipping: [] });
   await m.shop.init(); await m.shop.scanOnce(); assert.equal(Number(m.store.getMeta("scanTip")), 1000);
   const me = m.shop.myIdentity(), buyer = await m.sc.deriveIdentity("fail buyer");
-  const seal = async (ref, created) => ({ coinid: "0x" + Buffer.from(ref).toString("hex"), created, state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref, randomid: ref, from: buyer.publicId, to: me.publicId, date: 1, shopId: "fail", items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], amount: "1", currency: "Minima", shipping: "" }))) } });
-  msg = [await seal("ORD-NEWEST", 2990)];
+  st.msg = [{ coinid: "0x" + Buffer.from("ORD-NEWEST").toString("hex"), created: 1500, state: { "99": "0x" + await m.sc.seal(buyer, me.publicId, Buffer.from(JSON.stringify({ type: "ORDER", ref: "ORD-NEWEST", randomid: "n", from: buyer.publicId, to: me.publicId, date: 1, shopId: "fail", items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], amount: "1", currency: "Minima", shipping: "" }))) } }];
   for (const mo of ["refuse", "throw"]) {
-    mode = mo; tip = 3000; await m.shop.scanOnce();
+    st.mode = mo; st.tip = 2000; await m.shop.scanOnce();
     assert.equal(Number(m.store.getMeta("scanTip")), 1000, mo + ": the scan tip does not advance"); assert.equal(Number(m.store.getMeta("bfTarget") || 0), 0, mo + ": no backfill invented");
-    assert.match(m.shop.scanState().text, /Older orders could not be read yet/, mo);
+    assert.match(m.shop.scanState().text, /Recent orders could not be read: the node did not answer/, mo + " (CHANGED on purpose, 0.18.276: it is the recent window that failed)");
   }
-  mode = "ok"; tip = 3001; depths.length = 0; await m.shop.scanOnce();
-  assert.ok(m.store.order("ORD-NEWEST"), "the newest part of the gap is read once the node answers");
-  assert.equal(Number(m.store.getMeta("scanTip")), 3001); assert.equal(Number(m.store.getMeta("bfTarget")), 1000);
-  assert.match(m.shop.scanState().text, /Reading orders and payments from while the app was closed \(back to block 1000\)/);
-  // a backfill step that fails moves nothing
-  const floor = Number(m.store.getMeta("bfFloor")); mode = "refuse"; tip = 3002; await m.shop.scanOnce();
-  assert.equal(Number(m.store.getMeta("bfFloor")), floor); assert.equal(Number(m.store.getMeta("scanTip")), 3001);
-  // a second gap while the first backfill is pending: the target stays the oldest, the floor moves under the new window
-  mode = "ok"; tip = 9000; await m.shop.scanOnce();
-  assert.equal(Number(m.store.getMeta("bfTarget")), 1000); assert.ok(Number(m.store.getMeta("bfFloor")) > 7000, "the new gap is read too");
+  st.mode = "ok"; st.tip = 2001; await m.shop.scanOnce();
+  assert.ok(m.store.order("ORD-NEWEST"), "read once the node answers"); assert.equal(Number(m.store.getMeta("scanTip")), 2001); assert.equal(m.shop.scanState().text, "");
+  // a resync: the chain is below the cursor: nothing moves down, no failure is said, and a pending backfill waits
+  m.store.setMeta("bfTarget", 1900); m.store.setMeta("bfFloor", 1950); st.tip = 300; st.depths.length = 0; await m.shop.scanOnce();
+  assert.equal(Number(m.store.getMeta("scanTip")), 2001, "the cursor is not moved down"); assert.equal(m.shop.scanState().readFailed, false, "not a failure");
+  assert.equal(Number(m.store.getMeta("bfTarget")), 1900, "the backfill waits"); assert.ok(st.depths.every(d => d <= 1024), "no read past the tree");
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep, floor\)/.test(src), "a backfill step skips what an earlier pass read");
-  assert.ok(/ipcMain\.handle\("mcd:shopScanState", \(\) => shop\.scanState\(\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
+  assert.ok(/ipcMain\.handle\("mcd:shopScanState", \(\) => shop\.scanState\(\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")) && /const NODE_TREE_DEPTH = 1024;/.test(src));
   assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").includes("const scanLine = scan && scan.text ?"), "shown on the orders screen");
 });
-
 // ---- 0.18.217: an uncertain payment is shown as such, and the buyer can say it was not sent ----
 test("buyer: an in-flight or timed-out payment shows as 'may already have gone through'; 'it was not sent' clears it and offers Retry", async () => {
   const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
