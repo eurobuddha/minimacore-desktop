@@ -7,6 +7,22 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.272] — Web Wallet confirm: whole numbers, and the figure kept
+
+- A typed key-use count that is not plain digits is refused instead of rounded down, and the confirmation says the figure main kept. Test: `scripts/webwallet-ui-test.cjs`.
+
+## [0.18.271] — Web Wallet: limit messages that are true
+
+- A chain figure at the limit is said as being at the limit, because it can count more uses than the key signed. The messages no longer name a wallet to move the funds with, since any wallet would sign with this same key. This app simply will not sign from that address, and says why. Test: `scripts/inject-test.cjs`.
+
+## [0.18.270] — Web Wallet: a damaged old value read as a number
+
+- A damaged entry's old value written as a decimal string is read as the number (rounded up, a floor); one above the limit gets the over-count explanation. Test: `scripts/inject-test.cjs`.
+
+## [0.18.269] — key uses at most 262143 when restoring or resyncing
+
+- The restore and resync key-uses fields, and any command that names keyuses: (it sets every key's uses on restore, or is the leaf a builder signs at), take a whole number from 0 to 262143. A higher figure, or 4294967296, which the node reads as 0, made every key sign at leaf 0 again. "262144abc" is no longer read as 262144. Test: `scripts/cmdgate-test.cjs`.
+
 ## [0.18.268] — "PandaPools could not be asked"
 
 - The stop question says PandaPools could not be asked when its read failed or was late; it said the engine had not started. Test: `scripts/stopguard-test.cjs`.
