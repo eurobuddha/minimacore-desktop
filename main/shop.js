@@ -339,13 +339,16 @@ function badAddress(a) {
 // Inbox (scanState). Not read as "not answered", which held the cursor for good and read the widest window on every pass.
 const SKIP_MS = 5 * 60000, skippedPay = new Map();   // address -> skipped until
 const skipping = (a) => (skippedPay.get(a) || 0) > Date.now();
-async function scanPayments(depth, floor) {
+// Payments are judged without a block floor (0.19.337, as released 0.18.282): a payment seen while its order (below a window or step boundary)
+// was still unknown was not counted then, and judging a coin again is idempotent (recordPayment: a counted coin id is never counted twice, a
+// paid order says ALREADY, dust is gathered by coin id, same-reference orders are never paid automatically). Orders keep the floor.
+async function scanPayments(depth) {
   const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   let listed = [], any = false;
   let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
   for (const a of addrs) {
     const got = await coinsAt(a, depth, " relevant:true");
-    if (got) { any = true; listed = listed.concat(got.filter(c => !above(c, floor))); continue; }
+    if (got) { any = true; listed = listed.concat(got); continue; }
     if (badAddress(a)) { skippedPay.set(a, Date.now() + SKIP_MS); store.log("miniMall: the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address)."); any = true; continue; }
     missed = true;
   }
@@ -437,7 +440,7 @@ async function scanOnce() {
       if (target && floor && tip > floor) {
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, len > 0 ? len : Infinity);   // never past the tree (0.19.330)
         served = deep;
-        const c = await scanOrders(deep, floor).catch(() => null), d = await scanPayments(deep, floor).catch(() => null);
+        const c = await scanOrders(deep, floor).catch(() => null), d = await scanPayments(deep).catch(() => null);   // payments: no floor (0.19.337)
         changed = changed || !!(c || d);
         const reached = tip - served;
         if (c === null || d === null) stepFailed = true;   // nothing moves: the same step is tried on the next pass (0.19.249), said as OLDER orders (0.19.332)

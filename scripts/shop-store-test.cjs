@@ -678,3 +678,16 @@ test("vendor: after a reorganisation onto a lower branch and a fast catch-up, th
     assert.equal(store.order("ORD-RB1").paid, true, "and its payment counted"); assert.equal(store.getMeta("scanned_tip_block"), 1501);
   } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
 });
+
+// ---- 0.19.337 (as released 0.18.282): a payment read before its order (order below a window or step boundary) pays it once the order is read ----
+test("vendor: a payment above a cut window's boundary, read before its order below it, pays the order when a step reads the order; judged once", async () => {
+  const st = await javaSetup(3000);
+  try {
+    store.setMeta("scanned_tip_block", 2500);   // away for 500 blocks
+    st.msg.push(jOrder("ORD-ST1", 2700)); st.pay.push(jPay("ORD-ST1", 2800));   // the order below what the cut window reads, the payment above it
+    let cut = 1; st.hook = (addr, d) => addr === "M" && d > 300 && cut-- > 0 ? { status: true, response: { tooBig: true } } : null;   // the window's first channel answer cut
+    await shop.scanOnce(); jTip(st, 3001); await shop.scanOnce(); jTip(st, 3002); await shop.scanOnce();
+    assert.ok(store.order("ORD-ST1"), "the step read the order"); assert.equal(store.order("ORD-ST1").paid, true, "and the payment read before it pays it");
+    assert.equal(store.order("ORD-ST1").coins.length, 1, "counted once");
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
