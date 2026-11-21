@@ -78,8 +78,9 @@ function storePath() { return path.join(app ? app.getPath("userData") : ".", "we
 /**
  * The counters, read strictly (0.18.203). It returned {} on ANY error: a damaged or unreadable file made every address
  * start again at key use 0 (signing a one-time key a second time exposes it) and the next write wiped every other
- * address's counter. Now only a missing file is a fresh start; anything else, or a counter that is not a whole number
- * of at least 0, refuses with the reason and nothing is signed.
+ * address's counter. Now only a missing file is a fresh start; a file that cannot be read or is not an object refuses with
+ * the reason and nothing is signed. One damaged entry (0.18.215) refuses only that address: its counter is unknown, so it
+ * must be confirmed again (the screen asks for a whole number at least as high as the chain shows); others are untouched.
  */
 function loadStore() {
   let raw;
@@ -87,9 +88,6 @@ function loadStore() {
   catch (e) { if (e && e.code === "ENOENT") return {}; throw new Error("The Web Wallet's key-use counters (" + storePath() + ") cannot be read (" + ((e && e.code) || e) + "). Nothing was signed."); }
   let j; try { j = JSON.parse(raw); } catch (e) { j = undefined; }
   if (!j || typeof j !== "object" || Array.isArray(j)) throw new Error("The Web Wallet's key-use counters (" + storePath() + ") are damaged. Nothing was signed; keep that file and ask for help rather than deleting it.");
-  for (const [k, v] of Object.entries(j)) {
-    if (!v || typeof v !== "object" || !Number.isSafeInteger(v.keyuses) || v.keyuses < 0) throw new Error("The Web Wallet's key-use counter for " + k + " is damaged. Nothing was signed.");
-  }
   return j;
 }
 function writeStore(obj) {
@@ -101,7 +99,11 @@ function writeStore(obj) {
   // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
   try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
 }
-function entryFor(store, addr) { return Object.hasOwn(store, addr) ? store[addr] : { keyuses: 0, ack: false }; }
+const entryOk = (v) => !!v && typeof v === "object" && Number.isSafeInteger(v.keyuses) && v.keyuses >= 0;
+function entryFor(store, addr) {
+  if (!Object.hasOwn(store, addr)) return { keyuses: 0, ack: false };
+  return entryOk(store[addr]) ? store[addr] : { keyuses: 0, ack: false, damaged: true };   // unknown: must be confirmed again
+}
 
 /** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. */
 function ackKeyuses(address, count) {
@@ -110,14 +112,14 @@ function ackKeyuses(address, count) {
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // "1e309" was Infinity, stored as null, read back as 0 (0.18.203)
   const store = loadStore();
   const e = entryFor(store, address);
-  e.keyuses = Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss)
-  e.ack = true;
+  e.keyuses = e.damaged ? n : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown
+  delete e.damaged; e.ack = true;
   store[address] = e;
   writeStore(store);
   return { address, keyuses: e.keyuses, ack: true };
 }
 /** Current stored keyuses info for an address (does not mutate). */
-function keyusesInfo(address) { const e = entryFor(loadStore(), address); return { address, keyuses: e.keyuses || 0, ack: !!e.ack }; }
+function keyusesInfo(address) { const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
 /** RESERVE: durably advance the counter to n+1 and return n (the leaf to sign at). Reserve-before-sign. */
 function reserveKeyuse(address) { return reserveFrom(loadStore(), address); }
 function reserveFrom(store, address) {
@@ -155,20 +157,21 @@ async function nodeHasPubkey(pubkey) {
   const pk = String(pubkey).toLowerCase();
   return keys.some(k => k && k.publickey && String(k.publickey).toLowerCase() === pk);
 }
-/** The node's seed phrase, for the one comparison above; throws when it cannot be read (a locked vault). */
+/** The node's seed phrase, for the second comparison below; null when it cannot be read (a locked vault). */
 async function nodeSeedPhrase() {
   let r; try { r = await runner("vault action:seed"); } catch (e) { r = null; }
   const v = r && r.status === true ? resp(r) : null;
   const p = v && (v.phrase || v.seedphrase || v.seed);
-  if (typeof p !== "string" || !p) throw new Error(CANNOT_TELL);
-  return p;
+  return typeof p === "string" && p ? p : null;
 }
 
-/** Is the entered seed the running node's OWN wallet? True if the derived key-0 pubkey is in the node's key set,
- *  else if it is the node's seed phrase. Throws when either cannot be read. */
+/** Is the entered seed the running node's OWN wallet? True if the derived key-0 pubkey is in the node's key set, else if
+ *  it is the node's seed phrase. Throws only when the key list cannot be read (0.18.215): a readable list without the key
+ *  says the seed is foreign, and a locked vault does not change that. */
 async function isNodeOwnSeed(pubkey, seed) {
   if (await nodeHasPubkey(pubkey)) return true;
-  return String(await nodeSeedPhrase()) === String(seed);
+  const np = await nodeSeedPhrase();
+  return !!np && String(np) === String(seed);
 }
 
 /** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the
@@ -250,6 +253,7 @@ async function send(opts) {
   // ONE read of the counters for both the acknowledgement and the reservation (0.18.203): a read that fails refuses here
   let store; try { store = loadStore(); } catch (e) { privatekey = null; throw e; }
   const entry = entryFor(store, fromaddress);
+  if (entry.damaged) { privatekey = null; throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent."); }
   if (!entry.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
 
   // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).

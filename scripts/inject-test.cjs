@@ -103,8 +103,8 @@ test("Web Wallet counters: only a missing file is a fresh start; a damaged or un
   fs.writeFileSync(file, "{ not json");
   assert.throws(() => ww.keyusesInfo(A), /are damaged\. Nothing was signed/); assert.throws(() => ww.ackKeyuses(A, 9), /damaged/);
   assert.equal(fs.readFileSync(file, "utf8"), "{ not json", "a damaged file is never overwritten");
-  fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: -3, ack: true } })); assert.throws(() => ww.keyusesInfo(A), /counter for 0x.* is damaged/);
-  fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: null, ack: true } })); assert.throws(() => ww.keyusesInfo(A), /is damaged/, "a counter written as null (Infinity) is not taken as 0");
+  // CHANGED on purpose (0.18.215): one damaged entry refuses only that address, as unknown (must be confirmed again)
+  for (const bad of [-3, null]) { fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: bad, ack: true } })); assert.deepEqual(ww.keyusesInfo(A), { address: A, keyuses: 0, ack: false, damaged: true }, String(bad)); }
   fs.rmSync(file); fs.mkdirSync(file); assert.throws(() => ww.keyusesInfo(A), /cannot be read/); fs.rmSync(file, { recursive: true });
   fs.writeFileSync(file, good);
   // one read per send: the acknowledgement and the reservation come from the same read
@@ -130,8 +130,7 @@ test("Web Wallet: a failed key list or a locked vault refuses the send instead o
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: { txpowid: "0x01" } }; }); return sent; };
   for (const [keys, vault, what] of [[() => { throw new Error("timeout"); }, () => ({ status: true, response: { phrase: "x" } }), "the key list did not answer"],
     [() => ({ status: false, error: "busy" }), () => ({ status: true, response: { phrase: "x" } }), "the key list was refused"],
-    [() => ({ status: true, response: { keys: [] } }), () => ({ status: false, error: "Wallet is locked" }), "the vault is locked"],
-    [() => ({ status: true, response: { keys: [] } }), () => { throw new Error("timeout"); }, "the vault did not answer"]]) {
+    ]) {   // CHANGED on purpose (0.18.215): a readable key list without the key is a foreign seed, whatever the vault says
     const sent = rig2(keys, vault);
     await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /Could not tell whether this is the node's own wallet[\s\S]*Nothing was sent/, what);
     assert.ok(!sent.some(c => c.startsWith("sendfrom") || c.startsWith("send ")), what + ": nothing sent");
@@ -177,4 +176,25 @@ test("Vestr: state checked before use; collected exact; cadence a whole count; e
   step = { send: { status: false, error: "Insufficient funds" } }; await assert.rejects(vestr.create(Object.assign({}, base, { tokenid: "0x" + "AA".repeat(32) })), /Insufficient funds\. Nothing was sent/);
   step = {}; sent = []; assert.equal((await vestr.create(Object.assign({}, base, { tokenid: "0x" + "AA".repeat(32), graceHours: "168" }))).ok, true);
   assert.ok(sent.some(c => c.startsWith("send ") && c.includes('"4":"12096"') && c.includes('"7":"168"')), "a whole count of hours goes into the state");
+});
+
+// ---- 0.18.215: a readable key list decides; a damaged entry is that address's problem only ----
+test("Web Wallet: a locked vault with a readable key list is a foreign seed; one damaged counter refuses only its address and is confirmed again", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const A = "0x" + "A3".repeat(32), B = "0x" + "B3".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "B4".repeat(32);
+  fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: "x", ack: true }, [B]: { keyuses: 4, ack: true } }));
+  assert.deepEqual(ww.keyusesInfo(B), { address: B, keyuses: 4, ack: true }, "the other address is untouched");
+  let from = A; const sent = [];
+  ww._setRunner(async (c) => { sent.push(c);
+    return c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: from, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: false, error: "Wallet is locked" }
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: { txpowid: "0x01" } }; });
+  assert.equal((await ww.derive("alpha beta")).isNodeSeed, false, "locked vault, readable list: foreign");
+  await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /saved key-use count is damaged[\s\S]*Nothing was sent/);
+  assert.ok(!sent.some(c => c.startsWith("sendfrom")));
+  from = B; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).keyuse, 4, "another address still sends");
+  assert.equal(ww.ackKeyuses(A, 2).keyuses, 2, "confirmed again: the new figure (the screen asks for at least the chain's)");
+  from = A; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).keyuse, 2);
+  assert.equal(ww.keyusesInfo(B).keyuses, 5);
 });

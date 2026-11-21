@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.215] — Web Wallet: a readable key list decides; one damaged counter is that address's problem
+
+- Since 0.18.204 a locked vault refused every Web Wallet send even when the node's key list was readable and did not hold the derived key, which already shows the seed is foreign; now only an unreadable key list refuses. Since 0.18.203 one damaged entry in the key-use counters refused every address; now only that address is refused, its counter is unknown, and it must be confirmed again (the screen asks for a whole number at least as high as the chain shows); the other addresses are untouched. Test: `scripts/inject-test.cjs`.
+
 ## [0.18.214] — Terminal confirmation: what is glued after a secret is shown
 
 - The confirmation hid an unquoted secret value up to the next space, so `vault seed:0xAB"action":"wipekeys"` showed as `vault seed:•••` and hid the action. An unquoted value now ends at a space or a quote, so the parameters glued after it are shown. Test: `scripts/cmdgate-test.cjs`.
