@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.264] — a refused stop releases the hold too
+
+- When a stop the user agreed to is refused by the node (status:false, for example a restore with a wrong password) and the node keeps running, the next try is asked again; 0.18.257 did this only when the operation threw. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.263] — Web Wallet: the chain's floor for every first confirmation
+
+- A key-use count that is not yet confirmed (a first confirmation, or one after the counter file went missing) is accepted only at or above the chain's figure, checked in the main process, and refused while that figure cannot be read. Counts already confirmed are unchanged and need no new confirmation. Test: `scripts/inject-test.cjs`.
+
+## [0.18.262] — Web Wallet: the chain's key-use figure is read in the main process
+
+- The figure is read in the main process, for the key it derived itself, with the same pinned and bounded request as the window's check. A damaged counter is confirmed again only at or above that figure. Until now the floor was applied in the window only, so a faulty window could store a count below the chain's, and the next send would reuse a one-time signature key. Test: `scripts/inject-test.cjs`.
+
 ## [0.18.261] — sha3.js says "the same code"
 
 - main/sha3.js's header now says it is the same code as Pandamonium Desktop's, its comment apart. Test: `scripts/shop-test.cjs`.
@@ -25,7 +37,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.257] — a failed stop does not block a retry
 
-- When what a stop was for fails without stopping the node (a wrong password, an import that fails at once), the next try is asked again instead of refused for 30 seconds. Test: `scripts/stopguard-test.cjs`.
+- When what a stop was for fails without stopping the node (a wrong password, an import that fails at once), the next try is asked again instead of refused for 30 seconds (a refusal answered with status:false too, from 0.18.264). Test: `scripts/stopguard-test.cjs`.
 
 ## [0.18.256] — Terminal: Windows \\??\\UNC paths
 
