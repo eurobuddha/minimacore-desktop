@@ -293,7 +293,7 @@ test("stopGuard + main's held(): a failure that comes after another request's ye
   const { stopGuard } = require("../main/inflight.js"), main = read("main/main.js");
   let t = NOW; const node = { state: "running" }, asked = [];
   const g = stopGuard({ running: () => node.state === "running", gather: async () => With({ pools: [{ type: "ADD", ts: NOW - 60000 }] }), ask: async (w) => { asked.push(w.title); return true; }, log() {}, now: () => t });
-  const at = main.indexOf("async function held(op) {"); assert.ok(at > 0, "main has held()");
+  const at = main.indexOf("async function held(op"); assert.ok(at > 0, "main has held()");
   const held = new Function("stopGuard", "node", main.slice(at, main.indexOf("\n}\n", at) + 2) + "\nreturn held;")(g, node);
   let failA; const slowA = new Promise((res) => { failA = res; });   // A: a long import that ends with the node's refusal
   assert.equal(await g.pass(), true, "A: asked, yes");

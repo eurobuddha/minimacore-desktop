@@ -68,7 +68,7 @@ test("Terminal: what CAN be added to a typed MINIMA send is the old beacon-dust 
   assert.equal(termSendNote("send amount:1 address:0xCD fromaddress:0xEE"), ""); assert.equal(termSendNote("send amount:1 address:0xCD tokenid:0x7D39"), ""); assert.equal(termSendNote("status"), ""); assert.equal(termSendNote("sendpoll action:list"), "");
   { const h = mainJs.slice(mainJs.indexOf('ipcMain.handle("mcd:cmd"'), mainJs.indexOf("// Clipboard writes")), a = h.indexOf("restore.loadsBackupFile(command)"), b = h.indexOf("restore.backupCommandProblem(command)");
     assert.ok(a > 0 && b > a, "restore, restoresync and megammrsync file: are still refused on the command channel (read in order inside mcd:cmd since 0.19.298, not by a window)"); }
-  assert.ok(/const run = \(c\) => \(stops \? held : \(f\) => f\(\)\)\(\(\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\)\);/.test(mainJs), "a Terminal command goes through rpcCall (signing queue and coin guard) as the wallet");
+  assert.ok(/const run = \(c\) => \(stops \? \(f\) => held\(f, true\) : \(f\) => f\(\)\)\(\(\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\)\);/.test(mainJs), "a Terminal command goes through rpcCall (signing queue and coin guard) as the wallet");
 });
 test("Terminal (0.19.122): a chain is never pinned; the note agrees with the main process on what a MINIMA send is", async () => {
   const { pinMinimaSend, pinSend } = require("../main/sendpin"), A = "0x" + "AB".repeat(32); let asked = 0;

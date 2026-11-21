@@ -290,7 +290,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await held(() => runResync(command)), command); }   // secret parameters never echoed back (0.19.282)   // it ends by stopping the node: main's own question when anything is in flight (0.19.268)
   // quit, an archive / mysql / reset resync or import, megammr import: the node stops at the end (0.19.283): the same guard as every other stop
   const stops = restore.stopsNode(command); if (stops) await mayStop();
-  const run = (c) => (stops ? held : (f) => f())(() => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c));   // a stop the guard let go that failed ends its hold (0.19.319)
+  const run = (c) => (stops ? (f) => held(f, true) : (f) => f())(() => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c));   // a stop the node refused ends its hold (0.19.319); no answer does not (0.19.326)
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.
   const pinned = await pinMinimaSend(run, command, { minCoinage: 3 });   // it reads the verb as the node does (main/cmdverb.js) and passes anything that is not a MINIMA send unchanged; never a coin too young to spend
@@ -415,10 +415,12 @@ async function mayStop(ack, action) { if (!await stopGuard.pass(ack, action)) th
 node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happened ends the guard's hold (0.19.316)
 // What a yes let go, run so that a failure which left the node running ends the hold (0.19.319): a restore refused for a wrong
 // password, an import that fails fast or a settings save that throws, retried at once, was refused for up to 30 s.
-async function held(op) {
+// answerOnly (0.19.326, the Terminal's stopping commands): only the node's own refusal (status false) ends the hold; no answer does not,
+// because the node may be stopping: quit runs Main.shutdown before it replies, and the shutdown can cut the connection first.
+async function held(op, answerOnly) {
   const mine = stopGuard.holding();   // the hold this yes opened (0.19.322): ended only by its own failure, never another request's
   try { const r = await op(); if (r && r.status === false && node.state === "running") stopGuard.release(mine); return r; }
-  catch (e) { if (node.state === "running") stopGuard.release(mine); throw e; }
+  catch (e) { if (!answerOnly && node.state === "running") stopGuard.release(mine); throw e; }
 }
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one

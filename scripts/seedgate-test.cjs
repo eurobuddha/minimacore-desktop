@@ -640,7 +640,7 @@ test("a stop the guard let go that failed with the node still running ends the h
   const node = { state: "running", rpcPort: () => 0 }; let asked = 0, reply = { status: false, error: "wrong password" };
   const stopGuard = I.stopGuard({ running: () => node.state === "running", gather: async () => ({}), ask: async () => { asked++; return true; }, log() {} });   // nothing readable: always asked
   const mayStop = async (ack, action) => { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); };
-  const at = main.indexOf("async function held(op) {"); assert.ok(at > 0, "main has held()");
+  const at = main.indexOf("async function held(op"); assert.ok(at > 0, "main has held()");
   const held = new Function("stopGuard", "node", main.slice(at, main.indexOf("\n}\n", at) + 2) + "\nreturn held;")(stopGuard, node);
   new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
     { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async () => reply },
@@ -692,4 +692,27 @@ test("keyuses: past the key mode's last use (classic 262143, block 268435454) or
     const ok = "megammrsync action:resync host:h:1 phrase:\"a b\" anyphrase:true keyuses:" + (mode === "classic" ? "262143" : "300000");
     await hs["mcd:cmd"](null, ok); assert.deepEqual(sent, [ok], mode + ": within the bound it runs");
   }
+});
+
+// ---- 0.19.326: a Terminal stop with no answer (quit, whose own shutdown can cut the connection) keeps the guard's hold; a refusal ends it ----
+test("a quit or import whose connection is cut keeps the stop guard's hold; the node's own refusal still ends it; a restart that threw still ends it", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), I = require("../main/inflight.js"), main = SRC("main/main.js"), hs = {};
+  const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
+  const node = { state: "running", rpcPort: () => 0 }; let asked = 0, answer = () => { const e = new Error("socket hang up"); e.code = "ECONNRESET"; throw e; };
+  const stopGuard = I.stopGuard({ running: () => node.state === "running", gather: async () => ({}), ask: async () => { asked++; return true; }, log() {} });
+  const mayStop = async (ack, action) => { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); };
+  const at = main.indexOf("async function held(op"); assert.ok(at > 0);
+  const held = new Function("stopGuard", "node", main.slice(at, main.indexOf("\n}\n", at) + 2) + "\nreturn held;")(stopGuard, node);
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async () => answer() },
+    node, { rpcSecret: () => "" }, async (run, c) => c, mayStop, held);
+  await assert.rejects(hs["mcd:cmd"](null, "quit"), /socket hang up/); assert.equal(asked, 1);
+  await assert.rejects(hs["mcd:cmd"](null, "quit"), /already being stopped or restarted/, "no answer: the node may be stopping, the hold stays");
+  stopGuard.seen("stopped"); await assert.rejects(hs["mcd:cmd"](null, "archive action:import file:/Users/me/a.raw"), /socket hang up/);
+  await assert.rejects(hs["mcd:cmd"](null, "quit"), /already being stopped or restarted/, "an import with no answer too");
+  stopGuard.seen("stopped"); answer = () => ({ status: false, error: "wrong password" });
+  assert.equal((await hs["mcd:cmd"](null, "archive action:import file:/Users/me/a.raw")).status, false);
+  assert.equal((await hs["mcd:cmd"](null, "archive action:import file:/Users/me/a.raw")).status, false, "the node's own refusal ends the hold (0.19.319)"); assert.equal(asked, 4);
+  stopGuard.seen("stopped"); assert.equal(await stopGuard.pass(), true); await assert.rejects(held(async () => { throw new Error("config.json could not be written"); }), /could not be written/);
+  assert.equal(await stopGuard.pass(), true, "a restart or settings save that threw (no answerOnly) still ends its own hold");
 });
