@@ -657,3 +657,13 @@ test("a stop the guard let go that failed with the node still running ends the h
   await assert.rejects(hs["mcd:nodeRestart"](null, null, { heap: 2048 }), /could not be written/, "a settings save that threw: the retry is asked, not refused");
   assert.equal(asked, 5);
 });
+
+// ---- 0.19.320: a multisig file with a drive letter and forward slashes (C:/dir/x.txn) is a Windows path, not a pasted ":" ----
+test("multisig's file C:/dir/x.txn (a drive letter with forward slashes) runs; a ':' elsewhere is still refused", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  for (const c of ["multisig action:view file:C:/dir/x.txn", "multisigread action:view file:d:/a/b.txn"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+  for (const c of ["multisig action:view file:C:/dir/x:y.txn", "multisig action:view file:dir/C:/x.txn"]) await assert.rejects(hs["mcd:cmd"](null, c), /builds further commands/, c);
+});
