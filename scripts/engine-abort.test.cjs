@@ -123,6 +123,8 @@ test("PandaPools glue: held, no signing command reaches the node and no action s
     await api.init();
     const mds = mdsSeen[0], ask = (c) => new Promise(res => mds.cmd(c, res));
     await api.hold(1000);
+    assert.equal(await api.quiet(500), true, "quiet() says it went quiet (0.19.243)");
+    assert.ok(/if \(await quiet\(maxMs \|\| 15000\)\) releaseBuilds\(\);/.test(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8")), "builds are released only once it went quiet");
     sent.length = 0;
     const r = await ask("txnsign id:held publickey:auto");
     assert.equal(r.status, false); assert.match(r.error, /stopped while the wallet is being replaced/);
@@ -133,6 +135,38 @@ test("PandaPools glue: held, no signing command reaches the node and no action s
     assert.equal(mdsSeen.length, 1, "the same engine, not a new one");
     assert.equal((await ask("txnsign id:after publickey:auto")).status, true);
   } finally { api.release(); api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
+});
+
+// 0.19.243: hold() releases the engine's coin holds only once it went quiet; a store that cannot be moved aside is owed
+test("AtomiX glue: a hold that runs out with a command still at the node keeps the coin holds; quiet() says whether it went quiet", async () => {
+  const atomix = require("../main/atomix.js"), reserve = require("../main/reserve.js"), dir = tmp("ax-quiet-"), released = [];
+  atomix._setDataDir(dir); const real = reserve.releaseOwner; reserve.releaseOwner = (o) => { released.push(o); };
+  try {
+    let slow; atomix._setRunner((c) => (c === "txnpost id:slow" ? new Promise(r => { slow = () => r({ status: true }); }) : Promise.resolve({ status: true, response: {} })));
+    const mds = atomix._buildMds(), inflight = new Promise(res => mds.cmd("txnpost id:slow", res));
+    await atomix.hold(350);
+    assert.deepEqual(released, [], "still busy at the node: nothing released");
+    assert.equal(await atomix.quiet(250), false);
+    slow(); await inflight;
+    assert.equal(await atomix.quiet(2000), true, "quiet once the command ended");
+    atomix.release(); await atomix.hold(2000); assert.deepEqual(released, ["atomix"], "a hold that went quiet releases them");
+  } finally { reserve.releaseOwner = real; atomix.release(); atomix.stopLoop(); atomix.flush(); }
+});
+test("AtomiX glue: a store that cannot be moved aside on a wallet replacement is owed: invalidate says so and the engine does not start until it is moved", async () => {
+  const atomix = require("../main/atomix.js"), dir = tmp("ax-owed-"), db = path.join(dir, "atomix.sqlite");
+  atomix._setDataDir(dir); atomix._setRunner(async () => ({ status: false, error: "mock" }));
+  fs.writeFileSync(db, "the old wallet's claim secrets");
+  fs.chmodSync(dir, 0o500);   // the folder cannot be written: the rename fails
+  try {
+    assert.throws(() => atomix.invalidate(), /old swap database could not be moved aside .*AtomiX does not start until it is/);
+    await assert.rejects(atomix.init(), /AtomiX does not start: the replaced wallet's swap database could not be moved aside yet/);
+    await assert.rejects(atomix.init(), /could not be moved aside yet/, "and again, until it is");
+    assert.equal(fs.readFileSync(db, "utf8"), "the old wallet's claim secrets", "never opened, never changed");
+    fs.chmodSync(dir, 0o700);
+    await atomix.init().catch(() => {});
+    assert.ok(fs.readdirSync(dir).some(f => /^atomix\.sqlite-legacy-keys-\d{8}$/.test(f)), "moved aside at the next start: " + fs.readdirSync(dir).join(", "));
+    const kept = fs.readdirSync(dir).find(f => /legacy-keys/.test(f)); assert.equal(fs.readFileSync(path.join(dir, kept), "utf8"), "the old wallet's claim secrets");
+  } finally { try { fs.chmodSync(dir, 0o700); } catch (e) {} atomix.stopLoop(); atomix.flush(); }
 });
 
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });

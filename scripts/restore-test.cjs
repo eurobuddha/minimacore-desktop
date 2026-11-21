@@ -104,8 +104,10 @@ test("M1: a store of the old wallet is moved aside under a dated name, never del
 
 test("M1: the reset chain deletes no store: AtomiX's database and the mail store are set aside, the pools database is kept", () => {
   const read = (f) => fs.readFileSync(path.join(ROOT, "main", f), "utf8");
-  const ax = read("atomix.js"), inv = ax.slice(ax.indexOf("function invalidate()"), ax.indexOf("startLoop();\n}", ax.indexOf("function invalidate()")));
-  assert.ok(inv.includes('require("./restore").moveAside(path.join(dir(), "atomix.sqlite"))') && !/unlink|rmSync/.test(inv), "atomix.invalidate moves the swap database aside");
+  const ax = read("atomix.js"), inv = ax.slice(ax.indexOf("function invalidate()"), ax.indexOf("\n}\n", ax.indexOf("function invalidate()")));
+  // CHANGED on purpose (0.19.243): the move is moveStoreAside() (a failed one is owed: init throws until it is done)
+  const mv = ax.slice(ax.indexOf("function moveStoreAside()"), ax.indexOf("\n}\n", ax.indexOf("function moveStoreAside()")));
+  assert.ok(inv.includes("moveStoreAside();") && mv.includes('require("./restore").moveAside(path.join(dir(), "atomix.sqlite"))') && !/unlink|rmSync/.test(inv + mv), "atomix.invalidate moves the swap database aside");
   for (const f of ["atomix.js", "pandapools.js", "mail.js", "mail-store.js", "casino.js"]) assert.ok(!/(unlink|rm)(Sync)?\([^)]*(sqlite|mail\.json)/.test(read(f)), f + " deletes no store");
   const pp = read("pandapools.js"), ppInv = pp.slice(pp.indexOf("async function invalidate()"), pp.indexOf("// ---- helpers ----"));
   assert.ok(!/unlink|rename|rmSync/.test(ppInv), "pandapools.invalidate leaves pandapools.sqlite where it is");

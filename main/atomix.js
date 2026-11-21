@@ -222,6 +222,7 @@ async function init() {
   if (held) throw new Error(heldText());
   if (ready) return;
   if (initPromise) return initPromise;
+  if (storeMoveOwed) { try { moveStoreAside(); } catch (e) { throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + e.message + ")."); } }
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   if (!firstTry) firstTry = Date.now();
   initPromise = (async () => {
@@ -260,16 +261,19 @@ function flush() { try { if (sqlShim) sqlShim.flush(); } catch (e) {} }
 /** HOLD (above). Resolves once nothing of the engine's is at the node any more (three quiet looks), or after maxMs. */
 async function hold(maxMs = 15000) {
   if (!held) { held = true; heldLoop = !!pollTimer; stopLoop(); log("held: a command that may replace the wallet is about to run"); }
-  await quiet(maxMs);
-  require("./reserve").releaseOwner("atomix");   // the engine is stopped: its unfinished builds died with it (posted coins stay held)
+  // The engine is stopped: its unfinished builds died with it (posted coins stay held). Only once it went quiet (0.19.243):
+  // a build still at the node after maxMs may yet post, so its coins stay held until it ends.
+  if (await quiet(maxMs)) require("./reserve").releaseOwner("atomix");
+  else log("held, but still busy at the node after " + maxMs + " ms: its coin holds are kept");
 }
 /** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
  *  Also awaited before the node is told to quit (main.js onStopping): the engine outlives the node here, so the
  *  record it writes after a reply is written; this makes the reply arrive before the node goes. */
 async function quiet(maxMs = 10000) {
-  const end = Date.now() + maxMs;
-  for (let n = 0; n < 3 && Date.now() < end;) { await new Promise(r => setTimeout(r, 100)); n = busy ? 0 : n + 1; }
+  const end = Date.now() + maxMs; let n = 0;
+  while (n < 3 && Date.now() < end) { await new Promise(r => setTimeout(r, 100)); n = busy ? 0 : n + 1; }
   flush();
+  return n >= 3;   // true: it went quiet; false: maxMs ran out with work still at the node (0.19.243)
 }
 function release() { if (!held) return; held = false; log("released"); if (heldLoop) startLoop(); }
 /** A screen's action that can sign or lock: refused while held. */
@@ -371,13 +375,21 @@ function invalidate() {
   stopLoop();
   require("./reserve").releaseOwner("atomix");
   flush();
-  try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); }
-  catch (e) { log("wallet replaced: the old swap database could not be moved aside (" + e.message + ")"); }
+  // A store that cannot be moved aside is OWED (0.19.243): the engine does not start (init throws) until it is, else the
+  // new wallet's engine would open the old wallet's swap records; and the failure is said to the caller.
+  let moveFailed = null;
+  try { moveStoreAside(); } catch (e) { moveFailed = e; }
   ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null; initError = ""; firstTry = 0;
   vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
   ethRpcAppliedUrl = null;               // the new boot builds a fresh ctx.RPC → re-apply any saved custom RPC to it
   emitter.emit("update");
   startLoop();
+  if (moveFailed) throw new Error("the old swap database could not be moved aside (" + moveFailed.message + "); AtomiX does not start until it is");
+}
+let storeMoveOwed = false;
+function moveStoreAside() {
+  try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; }
+  catch (e) { storeMoveOwed = true; log("wallet replaced: the old swap database could not be moved aside (" + e.message + "); AtomiX does not start until it is"); throw e; }
 }
 
 /**

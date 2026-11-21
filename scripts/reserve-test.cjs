@@ -771,10 +771,11 @@ test("L2: a retried txnpost the node rejects does not release the coins the firs
 
 test("L3: AtomiX and PandaPools release their unfinished builds when they are stopped (held, or the wallet replaced)", () => {
   const ax = SRC("main/atomix.js"), pp = SRC("main/pandapools.js");
-  assert.match(ax, /async function hold\(maxMs = 15000\) \{[^}]*\}\s+await quiet\(maxMs\);\s+require\("\.\/reserve"\)\.releaseOwner\("atomix"\);/);
+  // CHANGED on purpose (0.19.243): released only once the engine went quiet (scripts/engine-abort.test.cjs drives it)
+  assert.match(ax, /async function hold\(maxMs = 15000\) \{[\s\S]{0,400}if \(await quiet\(maxMs\)\) require\("\.\/reserve"\)\.releaseOwner\("atomix"\);/);
   assert.match(ax, /function invalidate\(\) \{[\s\S]{0,400}stopLoop\(\);\s+require\("\.\/reserve"\)\.releaseOwner\("atomix"\);/);
   assert.match(pp, /function releaseBuilds\(\) \{ try \{ require\("\.\/reserve"\)\.releaseOwner\("pandapools"\); \} catch \(e\) \{\} \}/);
-  assert.match(pp, /await quiet\(maxMs \|\| 15000\);\s+releaseBuilds\(\);/);
+  assert.match(pp, /if \(await quiet\(maxMs \|\| 15000\)\) releaseBuilds\(\);/);
   assert.match(pp, /async function invalidate\(\) \{\s+quarantineRequired=true;stopLoop\(\);[^\n]*\n\s+releaseBuilds\(\);/);
 });
 

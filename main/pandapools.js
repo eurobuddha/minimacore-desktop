@@ -182,15 +182,19 @@ async function invalidate() {
 /** HOLD (above). Resolves once nothing of the engine's is at the node any more (three quiet looks), or after maxMs. */
 async function hold(maxMs) {
   if (!held) { held = true; heldLoop = !!scanTimer; stopLoop(); }
-  await quiet(maxMs || 15000);
-  releaseBuilds();   // the engine is stopped: its unfinished builds died with it (posted coins stay held)
+  // the engine is stopped: its unfinished builds died with it (posted coins stay held). Only once it went quiet (0.19.243):
+  // a build still at the node may yet post, so its coins stay held until it ends.
+  if (await quiet(maxMs || 15000)) releaseBuilds();
+  else console.log("[pandapools] held, but still busy at the node: its coin holds are kept");
 }
 /** Resolves once nothing of the engine's is at the node (three quiet looks), or after maxMs; then the store is written.
  *  Also awaited before the node is told to quit (main.js onStopping). */
 async function quiet(maxMs) {
   const end = Date.now() + (maxMs || 10000);
-  for (let n = 0; n < 3 && Date.now() < end;) { await new Promise(function (r) { setTimeout(r, 100); }); n = busy ? 0 : n + 1; }
+  let n = 0;
+  while (n < 3 && Date.now() < end) { await new Promise(function (r) { setTimeout(r, 100); }); n = busy ? 0 : n + 1; }
   flush();
+  return n >= 3;   // true: it went quiet; false: the time ran out with work still at the node (0.19.243)
 }
 function release() { if (!held) return; held = false; if (heldLoop) startLoop(); }
 
