@@ -119,7 +119,10 @@ const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the ch
 // USED" and signs at leaf 0 AGAIN (and getAsInt keeps only the low 32 bits of a larger figure), which reuses a one-time key. So the
 // last leaf that can sign is MAX_USES = 262143: a count to confirm is at most that, and a stored next leaf above it signs nothing.
 const TREE_LEAVES = 262144, MAX_USES = TREE_LEAVES - 1;
-const USED_UP = "The chain shows that this key has no one-time uses left (a key of this wallet has " + TREE_LEAVES + "). Nothing can be sent from this address with this wallet: move the funds with another wallet. Nothing was saved.";
+// The chain's figure is max(spend blocks, spent coins), and one signature can spend several coins, so a figure at the limit may count
+// more than the key signed (0.18.271: it was said as the key being used up, with advice to use another wallet, which would have to
+// sign with this same key); what is true is said: the figure is at the limit, and this app will not sign from this address.
+const USED_UP = (chain) => "The chain's figure for this key (" + chain + ") is at or above the limit of a key of this wallet (" + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + "). The figure can count more uses than the key signed, but this app will not sign from this address: signing past the last use would reuse a one-time key, which can lose funds. Nothing was saved.";
 const OVER_MAX = "The key-use count can be at most " + MAX_USES + " (a key of this wallet has " + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + "). Nothing was saved.";
 const FIRST_UNREAD = "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.";
 
@@ -138,7 +141,7 @@ async function ackKeyuses(address, count) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
     if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
-    if (chain > MAX_USES) throw new Error(USED_UP);   // never adopted: no leaf of this key is left (0.18.265)
+    if (chain > MAX_USES) throw new Error(USED_UP(chain));   // never adopted: no leaf of this key is left (0.18.265)
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
   // a damaged entry whose old value still reads as a whole number ("57", 57.4) is a floor too (0.18.267): that many leaves may be used
@@ -164,9 +167,10 @@ function keyusesInfo(address) { const e = entryFor(loadStore(), address); return
  *  confirmed above the ceiling (possible before 0.18.265, which advised that over-estimating is safe); the true count is unknown, so
  *  it is never lowered here. */
 function overCount(n) {
+  const why = " This app will not sign from this address: signing past the last use (" + MAX_USES + ") would reuse a one-time key, which can lose funds. Nothing was sent.";
   return n === TREE_LEAVES
-    ? "Every one-time use of this key has been used (" + TREE_LEAVES + "). Nothing can be sent from this address with this wallet: move the funds with another wallet. Nothing was sent."
-    : "This wallet's saved key-use count (" + n + ") is above the last one-time use a key of this wallet has (" + MAX_USES + "): the node would sign with its first one-time key again, which could lose the funds. It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. Nothing was sent. Move the funds with the wallet this seed was made in, which knows how many times its key signed.";
+    ? "This wallet's count for this key has reached the limit of a key of this wallet (" + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + ")." + why
+    : "This wallet's saved key-use count (" + n + ") is above the limit of a key of this wallet (" + TREE_LEAVES + " one-time uses, numbered 0 to " + MAX_USES + "). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered." + why;
 }
 /** RESERVE: durably advance the counter to n+1 and return n (the leaf to sign at). Reserve-before-sign. */
 function reserveKeyuse(address) { return reserveFrom(loadStore(), address); }

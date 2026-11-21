@@ -277,16 +277,16 @@ test("Web Wallet key uses have a ceiling of 262143: above it refused at confirm,
   let chain = 0; ww.setOnchain(async () => chain);
   for (const bad of [262144, 1000000, 4294967299, "262144"]) await assert.rejects(ww.ackKeyuses(FROM, bad), /can be at most 262143 \(a key of this wallet has 262144 one-time uses, numbered 0 to 262143\)/, String(bad));
   for (const bad of ["1e6", "0x10", " 5 ", "5 "]) await assert.rejects(ww.ackKeyuses(FROM, bad), /whole number of at least 0/, JSON.stringify(bad));
-  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 5), /this key has no one-time uses left \(a key of this wallet has 262144\)\. Nothing can be sent from this address with this wallet: move the funds with another wallet/, "a used-up chain figure is never adopted");
+  chain = 262144; await assert.rejects(ww.ackKeyuses(FROM, 5), /The chain's figure for this key \(262144\) is at or above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. The figure can count more uses than the key signed, but this app will not sign from this address/, "a used-up chain figure is never adopted");
   assert.ok(!fs.existsSync(file) || !JSON.parse(fs.readFileSync(file, "utf8"))[FROM], "nothing saved");
   chain = 100; assert.deepEqual(await ww.ackKeyuses(FROM, 262143), { address: FROM, keyuses: 262143, ack: true }, "the last leaf is accepted");
   // the boundary: the last leaf signs once, then nothing
   assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).keyuse, 262143); assert.deepEqual(signed, [262143]);
-  await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /Every one-time use of this key has been used \(262144\)\. Nothing can be sent/);
+  await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /count for this key has reached the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. This app will not sign from this address/);
   assert.deepEqual(signed, [262143], "no send at leaf 262144 (the node would sign at leaf 0)"); assert.equal(ww.keyusesInfo(FROM).keyuses, 262144, "nothing reserved by the refusal");
   // a count over-confirmed by an older version: refused with why and what to do, never lowered
   fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: 1000000, ack: true } }));
-  await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /saved key-use count \(1000000\) is above the last one-time use a key of this wallet has \(262143\)[\s\S]*not lowered\. Nothing was sent\. Move the funds with the wallet this seed was made in/);
+  await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /saved key-use count \(1000000\) is above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)[\s\S]*not lowered\. This app will not sign from this address[\s\S]*Nothing was sent\.$/);
   assert.equal(ww.keyusesInfo(FROM).keyuses, 1000000, "never lowered"); assert.deepEqual(signed, [262143]);
   ww.setOnchain(async () => null);
   const app = rd("renderer/app.js");
@@ -319,7 +319,14 @@ test("Web Wallet: a damaged old value above the ceiling gives the over-count exp
   await ww.derive("alpha beta"); ww.setOnchain(async () => 10);
   for (const old of ["1000000", 1000000.5]) {
     fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
-    await assert.rejects(ww.ackKeyuses(FROM, 100), (e) => /is above the last one-time use a key of this wallet has \(262143\)/.test(e.message) && !/Confirm at least/.test(e.message), JSON.stringify(old));
+    await assert.rejects(ww.ackKeyuses(FROM, 100), (e) => /is above the limit of a key of this wallet \(262144 one-time uses/.test(e.message) && !/Confirm at least/.test(e.message), JSON.stringify(old));
   }
   ww.setOnchain(async () => null);
+});
+
+// ---- 0.18.271: the used-up wording says what is true: the chain's figure can over-count, and no wallet is named to move the funds with ----
+test("Web Wallet: the limit messages say the figure is at the limit and this app will not sign; never that the key has no uses left, never 'move the funds with another wallet'", () => {
+  const src = rd("main/webwallet.js");
+  assert.ok(!/no one-time uses left|move the funds with another wallet|Move the funds with the wallet/.test(src), "no claim the figure cannot make, no advice that is not safe");
+  assert.ok(src.includes("The figure can count more uses than the key signed, but this app will not sign from this address"));
 });
