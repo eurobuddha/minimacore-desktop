@@ -218,7 +218,7 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "vestr.js"), "utf8");
   assert.equal(require("crypto").createHash("sha256").update(vestr.CLEAN_SCRIPT).digest("hex"), "ec2dfe508c24ea1c46431a3629ac391ffdeb03f8bcb7c107d52e004b48f6fb11", "the covenant text");
   assert.equal(vestr.CONTRACT, "0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE");
-  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "97dd6d2f377ffe6af20f6dc04189087a452c1ddfca30848c4121283e94422b92", "main/vestr.js is the file of 0.19.107: this phase changed screens only");
+  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "bfe6984553095e9c253ad485d2a5e58237e4d008a09c45a4e13ef4f2b63fdc8d", "main/vestr.js is the file of 0.19.194 (changed on purpose: every command through rpc.oneCommand; before that, of 0.19.107)");
   const state = [[0, BEN], [1, "1000"], [2, "2400000"], [3, "2555520"], [4, "1728"], [5, "1"], [6, "2"], [7, "24"], [8, "3"], [199, "0xUID"]].map(([port, data]) => ({ port, data }));
   const reg = createRegistry({ now: () => 1e12, log: () => {}, sends: "enforce" });
   // another owner holds an unrelated wallet coin: the guard is awake, and still passes every Vestr command unchanged
@@ -350,7 +350,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop-store.js again in 0.19.170 (counted coins bounded per order; wrong coins never kept)
   // main/shop.js again in 0.19.171 (advanceStatus takes only the order's next step, by SHOP.nextStatus)
   // main/shop.js again in 0.19.174 (a payment coin whose order is not here yet is read again)
-  for (const [f, want, ver] of [["main/shop.js", "3a950d6cb8c5012d5836cecb22c63234f789331bd3b938806d7345389a3a31f9", "0.19.174"], ["main/shop-store.js", "5a910736b1e8379d4fee3a97632893fddd0a7115205872e3f66182002b99c37b", "0.19.174"],
+  // main/shop.js again in 0.19.194 (every command through rpc.oneCommand)
+  for (const [f, want, ver] of [["main/shop.js", "c39ee8e45c56de73c2cddc240f53eaacbdc9955fea5547ccf9100804e2b23c2a", "0.19.194"], ["main/shop-store.js", "5a910736b1e8379d4fee3a97632893fddd0a7115205872e3f66182002b99c37b", "0.19.174"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 
@@ -429,7 +430,7 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
   assert.ok(/function wwLock\(\) \{ wwSeed = null;/.test(ww), "Logout clears the seed");
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
-  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "e8957bd3b8cdbd8f7d0c7653e4addb45f8ed1da0a04cb32acda873c0d0023252", "main/webwallet.js is the file of 0.19.107");
+  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "0f98bab58690e40001e9443dd5d77d4f37070efca8441a01c1b061aea00b0fbb", "main/webwallet.js is the file of 0.19.194 (changed on purpose: every command through rpc.oneCommand, a phrase with ; refused; before that, of 0.19.107)");
 });
 // 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
 // redirects, and an unread figure counted as 0.

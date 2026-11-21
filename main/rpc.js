@@ -95,7 +95,9 @@ function rpcCall(port, secret, command, opts) {
   const raw = (c) => rawCall(port, secret, c);
   return r.run(command, (c) => reserve.guard(opts && opts.owner, c, raw, opts), opts);
 }
+// oneCommand: main/cmdverb.js (0.19.194), re-exported here where the released desktop has it
+const { oneCommand } = V;
 /** One read for the reservation's own upkeep (its sweep, its wallet id): never queued, never guarded. */
 const rpcRead = (port, secret, command) => rawCall(port, secret, command);
 
-module.exports = { rpcCall, rpcRead, _timeoutFor: timeoutFor };
+module.exports = { rpcCall, rpcRead, oneCommand, _timeoutFor: timeoutFor };

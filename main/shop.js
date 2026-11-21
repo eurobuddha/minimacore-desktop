@@ -11,7 +11,7 @@ const EventEmitter = require("events");
 const crypto = require("crypto");
 const config = require("./config");
 const node = require("./node-manager");
-const { rpcCall } = require("./rpc");
+const { rpcCall } = require("./rpc"), { oneCommand } = require("./cmdverb");
 const { pinMinimaSend } = require("./sendpin");
 const sc = require("./shopcrypto");
 const store = require("./shop-store");
@@ -38,7 +38,7 @@ let scanTimer = null, lastTip = 0, scanning = false, backfilled = false;
 
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
-async function nodeCmd(cmd) { return runner(cmd); }
+async function nodeCmd(cmd) { return runner(oneCommand(cmd)); }   // ONE command each (main/rpc.js, 0.19.194)
 
 function tokenFor(currency) { return String(currency).toUpperCase() === "USDT" || String(currency).toLowerCase() === "mxusdt" ? MXUSD_TOKEN : MINIMA_TOKEN; }
 function randomId() { return crypto.randomBytes(16).toString("hex"); }

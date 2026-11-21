@@ -359,6 +359,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["MAIN_TOO_LARGE_64", I18N.N_("That file is larger than 64 MB.")],
     ["MAIN_SHOP_FILE", I18N.N_("Not a valid .shop file.")],
     // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
+    ["RPC_ONE_COMMAND", I18N.N_("This command holds \";\", which would start a second command. Nothing was sent.")],
     ["MAIN_SEND_REPEATED", I18N.N_("This send names {names} more than once (the node would use only the last). Write each once.")],
     ["MAIN_CONTROL_CHAR", I18N.N_("This command holds a control character. Type it again without one.")],
     ["SG_GATED_SEED", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.")],

@@ -14,7 +14,7 @@
  */
 const { EventEmitter } = require("events");
 const crypto = require("crypto");
-const { rpcCall } = require("./rpc");
+const { rpcCall } = require("./rpc"), { oneCommand } = require("./cmdverb");
 const { pinMinimaSend } = require("./sendpin");
 const V = require("./validate");
 let app = null; try { app = require("electron").app; } catch (e) {}
@@ -39,10 +39,13 @@ let ready = false, initPromise = null;
 let pollTimer = null, lastTip = null;
 const LOG_RING = [];
 
-let runner = (cmd) => {
+let runner0 = (cmd) => {
   const config = require("./config"), node = require("./node-manager");
   return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 };
+// every command this module sends is ONE command (main/rpc.js oneCommand, 0.19.194): a contract coin's state is the chain's,
+// anyone can make one that names this wallet, and a ";" in it started a second command through runscript / txnstate
+const runner = (cmd) => { try { return runner0(oneCommand(cmd)); } catch (e) { return Promise.reject(e); } };
 function log(line) { const e = new Date().toISOString().slice(11, 19) + " " + String(line); LOG_RING.push(e); if (LOG_RING.length > 200) LOG_RING.shift(); console.log("[vestr]", String(line)); }
 
 // ---- helpers ----
@@ -201,5 +204,5 @@ function status() { return { ready, address: scriptAddress, contract: CONTRACT, 
 module.exports = {
   emitter, init, startLoop, stopLoop, status,
   list, tokens, myAddress, create, collect, calculate,
-  _setRunner: (fn) => { runner = fn; }, CONTRACT, CLEAN_SCRIPT
+  _setRunner: (fn) => { runner0 = fn; }, CONTRACT, CLEAN_SCRIPT
 };

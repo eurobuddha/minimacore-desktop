@@ -19,7 +19,7 @@ const EventEmitter = require("events");
 const crypto = require("crypto");
 const config = require("./config");
 const node = require("./node-manager");
-const { rpcCall } = require("./rpc");
+const { rpcCall } = require("./rpc"), { oneCommand } = require("./cmdverb");
 const store = require("./chat-store");
 const schema = require("./chatschema");
 const chatfiles = require("./chatfiles");
@@ -103,7 +103,7 @@ let lastErr = "";
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
 async function nodeCmd(cmd) {
-  const r = await runner(cmd);
+  const r = await runner(oneCommand(cmd));   // ONE command each (main/rpc.js, 0.19.194)
   const j = typeof r === "string" ? JSON.parse(r) : r;
   if (!j || j.status !== true) throw new Error((j && j.error) || "keets command failed");
   return j.response;
@@ -334,7 +334,8 @@ async function fetchMedia(ref) {
   // An inbound ref is attacker-adjacent data: no whitespace (would inject
   // command params) and the extension comes from an ALLOWLIST match, never a
   // raw slice (a crafted "extension" with ../ walked out of mediaDir).
-  if (!/^keets:\/\/\S+$/.test(ref)) throw new Error("bad media ref");
+  // 0.19.194 (released 0.18.177): \S allowed ";", ":" and quotes, so a peer's ref could carry a second command into keets action:fetch.
+  if (typeof ref !== "string" || !/^keets:\/\/[A-Za-z0-9._~\/-]{1,400}(\?[A-Za-z0-9._~=&%-]{0,200})?$/.test(ref)) throw new Error("bad media ref");
   const key = crypto.createHash("sha256").update(ref).digest("hex").slice(0, 40);
   const clean = ref.split("?")[0].toLowerCase();
   const m2 = clean.match(/\.(ogg|m4a|webm|wav|png|jpe?g)$/);

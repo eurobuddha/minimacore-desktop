@@ -32,17 +32,18 @@
 const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
-const { rpcCall } = require("./rpc");
+const { rpcCall } = require("./rpc"), { oneCommand } = require("./cmdverb");
 const { pinMinimaSend } = require("./sendpin");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const emitter = new EventEmitter();
 const LOG_RING = [];
 
-let runner = (cmd) => {
+let runner0 = (cmd) => {
   const config = require("./config"), node = require("./node-manager");
   return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 };
+const runner = (cmd) => { try { return runner0(oneCommand(cmd)); } catch (e) { return Promise.reject(e); } };   // ONE command each (main/rpc.js, 0.19.194)
 function log(line) { const e = new Date().toISOString().slice(11, 19) + " " + String(line); LOG_RING.push(e); if (LOG_RING.length > 200) LOG_RING.shift(); }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +63,7 @@ function looksLikeMinimaAddress(a) {
 // desktop restore flow's guard (renderer/app.js:293-294): NOT a word-count or dictionary check.
 function isPhrase(s) {
   if (typeof s !== "string" || s.length === 0 || s.length > 1024) return false;
-  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c < 32 || c === 34 || c === 92) return false; }  // reject control chars, double-quote(34) and backslash(92)
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c < 32 || c === 34 || c === 92 || c === 59 || c === 127) return false; }  // reject control chars, double-quote(34), backslash(92), ";"(59: the node starts a second command there, 0.19.194) and DEL
   return true;
 }
 function isAmount(a) { return typeof a === "string" && /^\d{1,30}(\.\d{1,30})?$/.test(a) && Number(a) > 0; }
@@ -263,7 +264,7 @@ function status() { return { log: LOG_RING.slice(-20) }; }
 module.exports = {
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses,
-  _setRunner: (fn) => { runner = fn; },
+  _setRunner: (fn) => { runner0 = fn; },
   // exported for unit tests
   _validators: { looksLikeMinimaAddress, isPhrase, isAmount, isTokenid, isScript, isPrivKey }
 };

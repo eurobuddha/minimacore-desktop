@@ -579,3 +579,25 @@ test("what the engine says to the screens is listed (mainsaid FC_*), each templa
   }
   I18N.set("en");
 });
+
+// 0.19.194: every command Future Cash Next sends is ONE command (main/rpc.js oneCommand, released 0.18.177). It sends no
+// chain on purpose: each step of a collect or a sweep is its own command, built from its own checked values.
+test("one command each: main.js wraps the engine's runner in rpc.oneCommand; a stake whose state carries ';' never puts one on the wire", async () => {
+  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(main.includes('run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), { owner: "futurecash" })'), "every command through oneCommand");
+  const { oneCommand } = require("../main/rpc");
+  assert.throws(() => oneCommand("txnbasics id:a;txnpost id:a"), /second command\. Nothing was sent/);
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "futurecash.js"), "utf8");
+  assert.ok(!/["'`][^"'`\n]*;\s*(txn|send|coins|keys|newscript|newaddress)/.test(src), "no chain is written into the engine's commands");
+  const evil = stake(3, PAY0 + ";send amount:5 address:" + SAFE_HEX, { mature: 100, amount: "4" }), evil2 = stake(4, "0x01;vault", { mature: 100 });
+  const s0 = stake(1, PAY0, { mature: 100, amount: "3" }), s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s0, s1, evil, evil2] } }, { auto: true });
+  await e.pass(150);
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  await e.pass(152);
+  await e.lock("1", 72, "");
+  assert.ok(node.sent.some(c => c.startsWith("txnpost id:")) && node.sent.some(c => c.startsWith("send ")), "collects, a sweep and a lock were sent");
+  assert.deepEqual(node.sent.filter(c => c.includes(";")), [], "no command with ';' was built");
+  for (const c of node.sent) assert.equal(oneCommand(c), c);
+});

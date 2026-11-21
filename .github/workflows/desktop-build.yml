@@ -85,6 +85,10 @@ jobs:
       - name: Verify mail invariants
         run: npm run test:mail
 
+      # A command the app builds is one command: no ";" from a pasted seed, a peer or the chain starts a second one.
+      - name: Verify no command injection
+        run: npm run test:inject
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a
