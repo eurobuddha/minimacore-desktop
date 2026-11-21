@@ -211,6 +211,47 @@ test("PandaPools glue: createPool only for MxUSD with the node's decimals, swap 
   } finally { api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
 });
 
+// 0.19.271: a queue slot always settles: a throw in a callback the engine calls later rejects that slot, and the next action runs
+test("PandaPools glue: a throw inside the engine's later callback (a malformed amount, a record written while the engine is gone) settles the slot; amounts are checked before the queue", async () => {
+  const dir = tmp("pp-wedge-"), contexts = [], stores = [];
+  const actualSql = require("../main/pandapools/sqlshim"), loader = require("../main/pandapools/loader");
+  const exports = {};
+  const sandbox = { module: { exports }, exports, console, setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, AbortController, AbortSignal, Promise, require: (n) => {
+    if (n === "electron") return { app: { getPath: () => dir, getVersion: () => "test" } };
+    if (n === "./config") return { rpcSecret: () => "" }; if (n === "./node-manager") return { rpcPort: () => 0 };
+    if (n === "./rpc") return { rpcCall: async () => { throw new Error("TEST LEAK: rpcCall"); } }; if (n === "./netfetch") return { fetchJson: async () => null };
+    if (n === "./noderun") return require("../main/noderun.js");
+    if (n === "./pandapools/loader") return { ...loader, createContext: (mds, ...rest) => { const c = loader.createContext(mds, ...rest); contexts.push(c); return c; } };
+    if (n === "./pandapools/sqlshim") return { makeSqlShim: async (file) => { const sql = await actualSql.makeSqlShim(file); stores.push(sql); return sql; } };
+    return require(n);
+  } };
+  vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
+  const api = sandbox.module.exports; api._setDataDir(dir);
+  const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  api._setRunner((c) => Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } }
+    : c === "tokens tokenid:" + MXUSD ? { status: true, response: { tokenid: MXUSD, decimals: "8" } } : { status: false }));
+  const within = (p, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ": the slot never settled")), 1500))]);
+  try {
+    await api.init();
+    const P = contexts[0].PoolMgr, S = contexts[0].Store, engine = [];
+    S.ownRecord = () => {}; S.lpRecord = () => {}; S.actRecord = () => {};
+    for (const [x, y] of [["abc", "1"], ["100", ""], ["-1", "1"], ["0", "1"], [null, "1"], ["1", { a: 1 }]]) {
+      await assert.rejects(api.createPool(MXUSD, 8, x, y), /plain numbers above zero/, JSON.stringify([x, y]));
+    }
+    // the engine throws on its first call (inside the node's decimals reply): the slot is rejected, not left taken
+    P.createPool = () => { engine.push("create"); throw new Error("[DecimalError] Invalid argument: 1x"); };
+    await assert.rejects(within(api.createPool(MXUSD, 8, "100", "1"), "createPool"), /Creating the pool stopped \(\[DecimalError\] Invalid argument: 1x\)\. It may have been posted/);
+    // the swap's answer comes after the engine went (its store gone): the record throws, the slot is rejected, the queue goes on
+    P.swap = (route, m2t, cb) => { engine.push("swap"); setTimeout(() => cb.ok("0xS"), 5); };
+    S.actRecord = () => { throw new TypeError("Cannot read properties of null (reading 'Store')"); };
+    const q = api._stashQuote({ route: { ok: true, id: "R1", totalIn: 1, totalOut: 2 }, minimaToToken: true, tokenLabel: "MxUSD" });
+    await assert.rejects(within(api.swap(q), "swap"), /Swap stopped .*It may have been posted: check Activity/);
+    S.actRecord = () => {}; P.createPool = (tok, dec, x, y, cb) => { engine.push("create2"); setTimeout(() => cb.created({ address: "0xP", reserveM: "1", reserveT: "1" }, "0xT"), 5); };
+    assert.equal((await within(api.createPool(MXUSD, 8, ".5", "1"), "the next action")).txpowid, "0xT", "the queue is not wedged");
+    assert.deepEqual(engine, ["create", "swap", "create2"]);
+  } finally { api.stopLoop(); for (const c of contexts) { try { c.ActivityChain.stop(); } catch (e) {} } for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } }
+});
+
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });
 
 // 0.19.267: the owed move aside is on disk (config.json), so a restart does not open the old wallet's store under the new one

@@ -271,6 +271,15 @@ function queuedAction(label, run) {
     .catch(function (e) { gaveUp = true; throw e; });
 }
 
+/** A callback the engine calls LATER (a node reply, a key check, a post's answer), after the slot's own try/catch has
+ *  returned (0.19.271): a throw in it settled nothing, the slot stayed taken and every later fund action waited for good.
+ *  It rejects the slot instead, saying it may have been posted (a throw can come after the post). */
+const QUEUE_THROW = "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.";
+function caught(reject, label, fn) {
+  return function () { try { return fn.apply(this, arguments); } catch (e) { reject(new Error(QUEUE_THROW.replace("{label}", label).replace("{error}", (e && e.message) || String(e)))); } };
+}
+// a decimal the engine's Decimal reads, above zero (the screens send what they typed, ".5", or a worked-out figure)
+const plainAmount = (v) => { const t = String(v); return (typeof v === "string" || typeof v === "number") && t.length <= 80 && /^(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t) && /[1-9]/.test(t.split(/[eE]/)[0]); };
 /** Deadline for the pre-spend guards, stamped when a slot is ENTERED (never at enqueue time). */
 function execDeadline() { return Date.now() + ACTION_EXEC_MS - 10000; }
 
@@ -544,14 +553,14 @@ async function swap(quoteId) {
     var deadline = execDeadline();
     if (!ready || !ctx || Date.now() > deadline) { reject(new Error("Swap: the pool engine is not running — nothing was posted. Retry.")); return; }
     ctx.PoolMgr.swap(route, minimaToToken, {
-      ok: function (txpowid) {
+      ok: caught(reject, "Swap", function (txpowid) {
         // Always frame from MINIMA's side: paying MINIMA to get the token = SOLD MINIMA; paying the token to get
         // MINIMA = BOUGHT MINIMA. (minimaToToken → totalIn is the MINIMA leg; else totalOut is the MINIMA leg.)
         var minimaAmt = minimaToToken ? route.totalIn : route.totalOut;
         var tokenAmt = minimaToToken ? route.totalOut : route.totalIn;
         ctx.Store.actRecord("SWAP", (minimaToToken ? "Sold " : "Bought ") + s(minimaAmt) + " MINIMA for " + s(tokenAmt) + " " + (q.tokenLabel || "token"), txpowid, lastTip, "");
         emitter.emit("update"); resolve({ txpowid: txpowid, totalIn: s(route.totalIn), totalOut: s(route.totalOut) });
-      },
+      }),
       fail: function (msg) { reject(new Error(msg)); },
     });
   });
@@ -636,22 +645,23 @@ function nodeDecimals(tokenid) {
 async function createPool(tokenid, tokDecimals, x0, y0) {
   await init();
   if (!isMarketFed(tokenid)) throw new Error("PandaPools creates MINIMA / MxUSD pools only (the token with a market price). Nothing was sent.");
+  if (!plainAmount(x0) || !plainAmount(y0)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the queue (0.19.271)
   return queuedAction("Creating the pool", function (resolve, reject) {
     var deadline = execDeadline();
-    nodeDecimals(USDT_TOKENID).then(function (dec) {
+    nodeDecimals(USDT_TOKENID).then(caught(reject, "Creating the pool", function (dec) {
       if (dec == null) { reject(new Error("The token's decimals could not be read from the node. Nothing was sent.")); return; }
       if (tokDecimals != null && String(tokDecimals) !== "" && Number(tokDecimals) !== dec) { reject(new Error("The node says this token has " + dec + " decimals, not " + tokDecimals + ". Nothing was sent; open Create again.")); return; }
       if (!ready || !ctx || Date.now() > deadline) { reject(new Error("Creating the pool: timed out before the token was read — nothing was posted. Retry.")); return; }
       ctx.PoolMgr.createPool(USDT_TOKENID, dec, x0, y0, {
-      created: function (p, txpowid) {
+      created: caught(reject, "Creating the pool", function (p, txpowid) {
         ctx.Store.ownRecord(p);                                         // recovery recipe (Layer 1)
         ctx.Store.lpRecord(p.address, p.reserveM, p.reserveT, lastTip); // LP fee/IL baseline
         ctx.Store.actRecord("CREATE", "Created a pool with " + s(p.reserveM) + " MINIMA", txpowid, lastTip, p.address);
         emitter.emit("update"); resolve({ txpowid: txpowid, address: p.address });
-      },
+      }),
       fail: function (msg) { reject(new Error(msg)); },
       });
-    });
+    }));
   });
 }
 
@@ -661,7 +671,7 @@ function actionOnPool(addr, fn, label, summary) {
     if (!p) return Promise.reject(new Error("Pool not found in the current scan — try again in a moment."));
     return queuedAction(label, function (resolve, reject) {
       fn(p, {
-        ok: function (txpowid) { ctx.Store.actRecord(label, (typeof summary === "function" ? summary() : summary) || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); },
+        ok: caught(reject, label, function (txpowid) { ctx.Store.actRecord(label, (typeof summary === "function" ? summary() : summary) || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); }),
         fail: function (m) { reject(new Error(m)); },
       });
     });
@@ -709,31 +719,32 @@ function ensureOwnerKey(opk, cb) {
 function closePool(addr) {
   return actionOnPool(addr, function (p, d) {
     var deadline = execDeadline();
-    ensureOwnerKey(p.opk, function (foreign) {
+    ensureOwnerKey(p.opk, caught(function (e) { d.fail(e.message); }, "WITHDRAW", function (foreign) {
       if (foreign) { d.fail(UNAVAILABLE_KEY_MSG); return; }
       if (Date.now() > deadline) { d.fail("timed out before the owner key was ready — nothing was posted. Retry."); return; }
       ctx.PoolMgr.close(p, {
-        ok: function (txpowid) {
+        ok: caught(function (e) { d.fail(e.message); }, "WITHDRAW", function (txpowid) {
           ctx.Store.setRetired(p.address, 1, function () {});
           // Queue the payout address BEFORE any forward, so a crash between the close and the forward still
           // leaves the job recorded. The service pass finishes it and keeps going until the address is empty.
           ctx.Store.collectAdd(p.oadr, function () { ctx.PoolMgr.collectSweep(function () { emitter.emit("update"); }); });
           d.ok(txpowid);
-        },
+        }),
         fail: function (m) { d.fail(m); } });
-    });
+    }));
   }, "WITHDRAW", "Withdrew a pool's reserves");
 }
 async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
+  if (!plainAmount(newX) || !plainAmount(newY)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the queue (0.19.271)
   return queuedAction("Migrate", function (resolve, reject) {
     var deadline = execDeadline();
-    ensureOwnerKey(p.opk, function (foreign) {
+    ensureOwnerKey(p.opk, caught(reject, "Migrate", function (foreign) {
       if (foreign) { reject(new Error(UNAVAILABLE_KEY_MSG)); return; }
       if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — nothing was posted. Retry.")); return; }
-      ctx.PoolMgr.migrate(p, newX, newY, { created: function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }, fail: function (m) { reject(new Error(m)); } });
-    });
+      ctx.PoolMgr.migrate(p, newX, newY, { created: caught(reject, "Migrate", function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }), fail: function (m) { reject(new Error(m)); } });
+    }));
   });
 }
 

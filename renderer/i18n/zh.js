@@ -5305,7 +5305,9 @@
   "Keep it running": "保持运行",
   "The node keeps running: nothing was stopped.": "节点保持运行：没有停止任何内容。",
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "无法检查 P2P Chance：此钱包在链上有投注，尚未读取是否仍有未结束的投注。请稍候再试。",
-  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "无法读取链上此密钥的数字（密钥使用服务可能无法访问），因此您确认的次数无法与之核对。未保存任何内容；可读取时请再次确认。"
+  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "无法读取链上此密钥的数字（密钥使用服务可能无法访问），因此您确认的次数无法与之核对。未保存任何内容；可读取时请再次确认。",
+  "A pool's amounts are plain numbers above zero. Nothing was sent.": "资金池的金额必须是大于零的普通数字。未发送任何内容。",
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} 已停止（{error}）。它可能已经提交：重试前请检查活动记录和余额。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5393,5 +5395,7 @@
   "Keep it running",
   "The node keeps running: nothing was stopped.",
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.",
-  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read."
+  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.",
+  "A pool's amounts are plain numbers above zero. Nothing was sent.",
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying."
 ] });

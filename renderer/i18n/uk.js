@@ -5318,7 +5318,9 @@
   "Keep it running": "Залишити працювати",
   "The node keeps running: nothing was stopped.": "Вузол працює далі: нічого не зупинено.",
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "P2P Chance не вдалося перевірити: цей гаманець має ставки в мережі, і ще не прочитано, чи якась із них досі відкрита. Зачекайте трохи й спробуйте знову.",
-  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "Не вдалося прочитати дані мережі для цього ключа (сервіс використань ключів може бути недоступний), тож число, яке ви підтверджуєте, не можна з ними звірити. Нічого не збережено; підтвердьте знову, коли їх можна буде прочитати."
+  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "Не вдалося прочитати дані мережі для цього ключа (сервіс використань ключів може бути недоступний), тож число, яке ви підтверджуєте, не можна з ними звірити. Нічого не збережено; підтвердьте знову, коли їх можна буде прочитати.",
+  "A pool's amounts are plain numbers above zero. Nothing was sent.": "Суми пулу мають бути простими числами більше нуля. Нічого не надіслано.",
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.": "{label} зупинено ({error}). Можливо, транзакцію вже надіслано: перевірте «Активність» і баланс, перш ніж повторювати."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5406,5 +5408,7 @@
   "Keep it running",
   "The node keeps running: nothing was stopped.",
   "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.",
-  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read."
+  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.",
+  "A pool's amounts are plain numbers above zero. Nothing was sent.",
+  "{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying."
 ] });
