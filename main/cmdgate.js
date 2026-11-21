@@ -192,7 +192,7 @@ function repasted(command) {
  *   (repasted, 0.18.220);  2d. an escaped ";" or control character (cmdverb.smuggled), mds action:accept, a multisig spend, and a
  *   repeated parameter of a command that moves funds from a key or builds commands of its own (0.18.221); rpc (but its status and the
  *   gated listusers), slavenode enable:, webhooks action:add and mds actions (0.18.228); a value that would rewrite the commands a
- *   builder (sendfrom, rawfrom, multisig …) makes from it (cmdverb.builtProblem, 0.18.230);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   builder (sendfrom, rawfrom, multisig …) makes from it (cmdverb.builtProblem, 0.18.230); a file parameter on another computer (0.18.237);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
  *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
  *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
  */
@@ -222,6 +222,10 @@ async function checkCommand(command, io) {
       || (V.is(part, "slavenode") && names.includes("enable")) || (V.is(part, "webhooks") && action === "add")
       || (V.is(part, "mds") && action !== "" && action !== "list" && action !== "accept"))
       throw new Error("This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.");
+    // a file on another computer (a UNC path, \\host\share or //host/share): a Windows node would connect to that share (0.18.237)
+    if (["reset", "archive", "restore", "restoresync", "backup", "mysql", "mysqlcoins", "megammr", "megammrsync", "decryptbackup"].some(v => V.is(part, v))
+      && V.read(part).params.some(([n, v]) => /^(file|archivefile|folder)$/i.test(n) && /^(\\\\|\/\/)/.test(v)))
+      throw new Error("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.");
     if (V.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
     if ((V.is(part, "multisig") || V.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
   }

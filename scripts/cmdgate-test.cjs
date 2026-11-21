@@ -477,3 +477,13 @@ test("the node log hides privatekey: whether written 0x… or Mx…", () => {
     }
   }
 });
+
+// ---- 0.18.237 (as Pandamonium Desktop 0.19.303): a UNC path in a file parameter is refused (a Windows node would connect to that share) ----
+test("a file parameter on another computer (\\\\host\\share or //host/share) is refused; a local or drive path is not", async () => {
+  const B = String.fromCharCode(92), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  for (const c of ["reset action:chainsync archivefile:" + B + B + "evil" + B + "share" + B + "a.gz", "backup file:" + B + B + "host" + B + "s" + B + "b.bak", "mysql action:reset file:" + B + B + "h" + B + "x", "megammrsync action:resync host:h:9001 file://evil/share/b.bak"])
+    await assert.rejects(h(null, c), /A file on another computer/, c);
+  await assert.rejects(h(null, "archive action:import file://evil/share/a.gz"), /A file on another computer|second command it runs itself/, "refused (its ':' is refused first as a pasted value)");
+  assert.deepEqual(sent, []);
+  for (const c of ["backup file:/Users/me/b.bak", "backup file:C:" + B + "b.bak", "archive action:export file:/x/a.gz"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
+});
