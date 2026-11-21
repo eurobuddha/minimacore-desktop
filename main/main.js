@@ -267,7 +267,7 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
     // family and peers action:publish read files too: every MiniFile.createBaseFile / new File of a parameter is file, folder,
     // archivefile or output (0.19.317: decryptbackup writes the DECRYPTED wallet to output:), and any …file name is taken with them;
     // a name is matched folded, which over-blocks a name the node would not read as file (harmless))
-    if (cmdverb.read(part).params.some(([n, v]) => /^(?:folder|output|\w*file)$/.test(cmdverb.fold(n)) && /^[\\/]{2}/.test(v)))
+    if (cmdverb.read(part).params.some(([n, v]) => /^(?:folder|output|\w*file)$/.test(cmdverb.fold(n)) && /^[\\/](?:[\\/]|\?\?[\\/])/.test(v)))   // and the NT prefix \??\ (0.19.318: \??\UNC\host\share is a share to Windows)
       throw new Error("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.");
     if (cmdverb.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
     if ((cmdverb.is(part, "multisig") || cmdverb.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");

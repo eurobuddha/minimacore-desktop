@@ -619,3 +619,16 @@ test("decryptbackup's output on another computer is refused (the decrypted walle
   const ok = "decryptbackup file:b.bak password:x output:/Users/me/plain.bak"; await hs["mcd:cmd"](null, ok).catch(() => {});
   assert.ok(!sent.length || sent[0] === ok, "a local output is not refused by this rule");
 });
+
+// ---- 0.19.318: Windows' NT-namespace prefix \??\ (\??\UNC\host\share) is a file on another computer too ----
+test("a path with the NT prefix (\\??\\UNC\\host\\share, /??/UNC/…) is refused as a file on another computer; a local path runs", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), B = String.fromCharCode(92), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  for (const c of ["backup file:" + B + "??" + B + "UNC" + B + "host" + B + "share" + B + "b.bak", "backup file:/??/UNC/host/share/b.bak", "txnimport file:" + B + "??/UNC/host/share/x.txn",
+    "decryptbackup file:b.bak password:x output:/??" + B + "UNC" + B + "host" + B + "share" + B + "x"])
+    await assert.rejects(hs["mcd:cmd"](null, c), /A file on another computer/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["txnimport file:/Users/me/x.txn", "txnimport file:C:" + B + "x.txn", "txnimport file:" + B + "x.txn"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+});
