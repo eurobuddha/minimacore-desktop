@@ -560,3 +560,12 @@ test("a Turkish İ in a verb or an action is read as the node on a Turkish JVM r
   const nm = rd("main/node-manager.js");
   assert.ok(nm.includes('const JVM_LOCALE = ["-Duser.language=en", "-Duser.country=US"];') && nm.includes("const args = [...JVM_LOCALE, \"-jar\", this.jarPath(),") && /const args = \[\n\s*\.\.\.JVM_LOCALE,[^\n]*\n\s*"-Xmx"/.test(nm), "before -jar on the minima kind, before the -D properties on the Parlons kind");
 });
+
+// ---- 0.18.255: decryptbackup's output: (where the DECRYPTED backup, the wallet in plain text, is written) on another computer is refused ----
+test("decryptbackup output: on another computer is refused; a local output runs", async () => {
+  const B = String.fromCharCode(92), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  for (const c of ["decryptbackup file:b.bak password:x output:" + B + B + "host" + B + "share" + B + "x", "decryptbackup file:b.bak password:x output://host/share/x"])
+    await assert.rejects(h(null, c), /A file on another computer/, c);
+  assert.deepEqual(sent, []);
+  const ok = "decryptbackup file:b.bak password:x output:/Users/me/x"; await h(null, ok); assert.deepEqual(sent, [ok]);
+});

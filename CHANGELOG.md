@@ -49,7 +49,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.244] — Terminal: no file on another computer, for every command
 
-- Any file, folder or …file parameter that starts with two slashes of either kind is refused for every command, not a list. Test: `scripts/cmdgate-test.cjs`.
+- Any file, folder or …file parameter that starts with two slashes of either kind is refused for every command, not a list (decryptbackup's output: from 0.18.255, Windows \\??\\UNC paths from 0.18.256). Test: `scripts/cmdgate-test.cjs`.
 
 ## [0.18.243] — Terminal: no array or object in a builder's state
 
