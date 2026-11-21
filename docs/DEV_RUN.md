@@ -118,7 +118,7 @@ The source tree itself names no flavour, so `npm run dist:mac:signed` is the rel
 | Linux autostart file (not used: never registered) | `minimacore.desktop` | `pandamonium-desktop.desktop` |
 | Router port-mapping label | `minimaCore Minima node` | `Pandamonium Desktop Minima node` |
 | Artifacts | `minimaCore-<version>-arm64.dmg` | `PandamoniumDesktop-<version>-arm64.dmg` |
-| Node jars | `parlons-node` 0.2.152, the shipped `minima.jar` (classic keys only) | `parlons-node` 0.2.153, `minima` 1.1.2.31-euro5 (block and classic keys), pinned in `package.json` `flavors.pandamonium.jars` |
+| Node jars | `parlons-node` 0.2.162, the shipped `minima.jar` 1.1.2.3-euro8 (classic keys only) | `parlons-node` 0.2.160, `minima` 1.1.2.31-euro14 (block and classic keys), pinned in `package.json` `flavors.pandamonium.jars` |
 
 Ports, all from the base port (`node-manager.ports()`):
 

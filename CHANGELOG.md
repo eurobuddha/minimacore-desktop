@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.342] — The node jars with the command-injection fix and the RPC hardening
+
+- **Released identity:** `resources/minima.jar` is minima-core 1.1.2.3-euro8 (sha256 `fc63eb672374e7ceb7cfba17d0e098e3c2991c9a0ef124b0a14fae111c088ef9`), and the Parlons node pin moves to 0.2.162 (`parlonsNode` / `parlonsNodeSha256` `65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1`; fetched from the maxima release `node-v0.2.162`). Both carry the 21 Nov 2026 fix set: built sub-commands are never re-parsed from text (no `;` / quote injection), the RPC binds 127.0.0.1 unless `-rpcbind`, checks Host and browser Origin, reads its body by bytes with a cap, a read-mode RPC user runs as non-admin, and non-admin callers only create plain `.txn` files in the base folder. The app already talks to its node on 127.0.0.1 and passes no flag these jars refuse.
+- **Pandamonium flavour** (`flavors.pandamonium.jars`): minima 1.1.2.31-euro14 (block-mode line, `e9399cce238971138d5efe7aa2fba93bfc601bce9e536fcf7477c3c2970e72e0`) and parlons-node 0.2.160 (`e40ad7bc812285ba49a93715df6a9e855dcc7bfd3df9c450bee58b8b89558a39`), the same fixes on the block-capable line.
+- Not in these jars (owner, 21 Nov 2026): the wallet-key capacity guard; the node wallet's own keys on the 1.1.2.3 / 1.1.2.4 lines still restart at leaf 0 past 262144 uses, as upstream.
+- Test: `scripts/flavor-test.cjs` pins the new digests.
+
 ## [0.19.177] — The seed gate covers keys action:genkey too
 
 - **Parity with the released desktop (its 0.18.173, `84d946b`, `main/cmdgate.js`):** `keys action:genkey` prints a new private key, so it is gated like `seedrandom` (SHOW KEY, Touch ID where there is one, that exact command once within 60 seconds), in the main process and in the Terminal's question. Other `keys` commands are unchanged.

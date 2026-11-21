@@ -45,7 +45,7 @@ test("the released flavour is the released identity, name for name as in 0.18.69
   assert.equal(PKG.flavor, "", "the source tree names no flavour: a plain build is the released app");
   assert.equal(flavor.resolve(PKG), flavor.RELEASED); assert.equal(flavor.resolve({}), flavor.RELEASED);
   assert.equal(PKG.productName, "minimaCore"); assert.equal(PKG.build.appId, "com.eurobuddha.minimacore"); assert.equal(PKG.build.productName, "minimaCore");
-  assert.deepEqual([PKG.parlonsNode, PKG.parlonsNodeSha256], ["0.2.152", "1b3a0dc7921675d54e96a611be5a37194116227c4529e32d8aeb74bb72ec1fd1"], "the released app's jar pin is untouched");
+  assert.deepEqual([PKG.parlonsNode, PKG.parlonsNodeSha256], ["0.2.162", "65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1"], "the released app's jar pin (0.19.342: the command-injection / RPC hardening node)");
   assert.deepEqual(PKG.build.extraResources.slice(0, 2), [{ from: "resources/minima.jar", to: "minima.jar" }, { from: "resources/parlons-node.jar", to: "parlons-node.jar" }]);
   const b = build("");
   try {
@@ -251,7 +251,7 @@ test("the build of a flavour: its name, id and artifact names, the flavour writt
   assert.deepEqual(cfg.mac.extendInfo, { NSCameraUsageDescription: "Pandamonium Desktop uses your camera to scan QR codes.", NSMicrophoneUsageDescription: "Pandamonium Desktop uses your microphone to record a Chat voice note when you choose Voice note." });
   assert.match(PKG.build.mac.extendInfo.NSMicrophoneUsageDescription, /^Minima Core uses your microphone/);
   assert.throws(() => builderConfig(PKG, ""), /name a flavour/); assert.equal(F.basePort, 17001);
-  assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.153", "c2b8cb33b07b78197cc4ed0b5c82cf3f14b6407095f20963971d6b932b25e6af", "1.1.2.31-euro5", "93111abb83f2239970257e692026b6033f3b1caeaf31db52604b9f531a0617ea"]);
+  assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.160", "e40ad7bc812285ba49a93715df6a9e855dcc7bfd3df9c450bee58b8b89558a39", "1.1.2.31-euro14", "e9399cce238971138d5efe7aa2fba93bfc601bce9e536fcf7477c3c2970e72e0"]);
   // the jar check, on stand-in files
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flavor-jars-")), sha = (s) => require("crypto").createHash("sha256").update(s).digest("hex");
   try {

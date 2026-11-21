@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.19.341",
+  "version": "0.19.342",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -186,8 +186,8 @@
     "qrcode-generator": "^2.0.4",
     "sql.js": "^1.13.0"
   },
-  "parlonsNode": "0.2.152",
-  "parlonsNodeSha256": "1b3a0dc7921675d54e96a611be5a37194116227c4529e32d8aeb74bb72ec1fd1",
+  "parlonsNode": "0.2.162",
+  "parlonsNodeSha256": "65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1",
   "flavor": "",
   "flavors": {
     "pandamonium": {
@@ -203,10 +203,10 @@
       "autostartFile": "pandamonium-desktop.desktop",
       "jars": {
         "dir": "resources-pandamonium",
-        "parlonsNode": "0.2.153",
-        "parlonsNodeSha256": "c2b8cb33b07b78197cc4ed0b5c82cf3f14b6407095f20963971d6b932b25e6af",
-        "minima": "1.1.2.31-euro5",
-        "minimaSha256": "93111abb83f2239970257e692026b6033f3b1caeaf31db52604b9f531a0617ea"
+        "parlonsNode": "0.2.160",
+        "parlonsNodeSha256": "e40ad7bc812285ba49a93715df6a9e855dcc7bfd3df9c450bee58b8b89558a39",
+        "minima": "1.1.2.31-euro14",
+        "minimaSha256": "e9399cce238971138d5efe7aa2fba93bfc601bce9e536fcf7477c3c2970e72e0"
       }
     }
   }
