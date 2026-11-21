@@ -697,3 +697,17 @@ test("M1: on a classic key wallet the guardian signs for one address at most sig
   assert.equal(e.activity().filter(l => /^Daily limit of unattended signatures reached \(3\)/.test(l.msg)).length, 1, "said once");
   assert.equal((await e.setSignCap("0")).ok, false); assert.equal((await e.status()).signCap, 3);
 });
+
+test("M2: an at-risk collect whose coin is never found ends COLLECTED_UNFOUND after 120 blocks: logged, no longer work under way, cleared by Reset history", async () => {
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  await e.pass(150);
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });   // spent, and nothing ever lands on PAY1
+  await e.pass(151);
+  assert.equal(e._store().collect(ID(2)).status, "COLLECTED"); assert.equal(e.activeWork().posted, 1);
+  await e.pass(269); assert.equal(e._store().collect(ID(2)).status, "COLLECTED", "still looked for");
+  await e.pass(270);
+  assert.equal(e._store().collect(ID(2)).status, "COLLECTED_UNFOUND"); assert.equal(e.activeWork().posted, 0);
+  assert.ok(e.activity().some(l => l.msg.startsWith("Collected coin not found on its payout address 120 blocks after the collect")));
+  await e.resetHistory(); assert.equal(e._store().collect(ID(2)), null);
+});

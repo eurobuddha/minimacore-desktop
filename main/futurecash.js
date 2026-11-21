@@ -54,6 +54,9 @@ const MIN_AUTO_DEFAULT = "1", REREAD_BLOCKS = 30;
 // so the guardian signs for one address at most sign_cap times a day by itself (review M1; default 50); past it, it
 // logs once and waits for the next day or a Sweep by hand. A block key wallet counts block heights, not signatures.
 const SIGN_CAP_DEFAULT = "50";
+// An at-risk collect whose coin is not found on its payout address this many blocks after the collect (review M2) ends
+// as COLLECTED_UNFOUND: logged, no longer counted as work under way (Freeze, a wallet replacement), cleared by Reset history.
+const UNFOUND_BLOCKS = 120;
 
 /** Cfg.java key names (the MiniDapp's keypair keys). */
 const K = { ENABLED: "enabled", AUTO_COLLECT_SAFE: "auto_collect_safe", SAFE_ADDRESS: "safe_address", SAFE_MODE: "safe_mode", CLEAN_ADDR: "clean_addr",
@@ -61,7 +64,7 @@ const K = { ENABLED: "enabled", AUTO_COLLECT_SAFE: "auto_collect_safe", SAFE_ADD
   NOTIFY: "notify", MIN_AUTO: "min_auto", SIGN_CAP: "sign_cap", SIGN_COUNT: "sign_count", SCRIPT_ADDRESS: "script_address", LAST_TIP: "last_tip", LAST_ACTION: "last_action", LOG: "fc_log", AUDIT_LOGGED_N: "audit_logged_n", GUARDIAN_ON: "guardian_on" };
 /** Store.java status words. */
 const S = { DETECTED: "DETECTED", COLLECT_POSTED: "COLLECT_POSTED", COLLECT_POSTED_SAFE: "COLLECT_POSTED_SAFE", COLLECTED: "COLLECTED", COLLECTED_SAFE: "COLLECTED_SAFE",
-  SWEEP_QUEUED: "SWEEP_QUEUED", PENDING: "PENDING", SWEEP_POSTED: "SWEEP_POSTED", SWEPT: "SWEPT", TAKEN: "TAKEN" };
+  SWEEP_QUEUED: "SWEEP_QUEUED", COLLECTED_UNFOUND: "COLLECTED_UNFOUND", PENDING: "PENDING", SWEEP_POSTED: "SWEEP_POSTED", SWEPT: "SWEPT", TAKEN: "TAKEN" };
 
 // ---- shapes: the one gate between data (the chain, the audit service, the screen) and a command string (Node.java) ----
 const HEX = /^0x[0-9a-fA-F]{2,}$/, MX = /^M[xX][0-9A-Za-z]{30,100}$/, HEX64 = /^0x[0-9a-fA-F]{64}$/, AMOUNT = /^[0-9]+(\.[0-9]+)?$/;
@@ -786,14 +789,20 @@ function create(o) {
       if (res.refused) store.setCollectStatus(row.coinid, S.DETECTED);
     }
   }
-  async function detectCollectedForSweep(budget) {
+  async function detectCollectedForSweep(budget, t) {
     const claimed = new Set(store.sweepIds().map(lc));
     for (const row of store.collects(S.COLLECTED)) {
       if (budget.sweepReads-- <= 0) return;
       const r = await call("coins address:" + row.payout + " checkmempool:true");
       const found = (ok(r) && Array.isArray(r.response) ? r.response : []).find(c => c && c.spent !== true && HEX64.test(String(c.coinid || "")) && !claimed.has(lc(c.coinid))
         && lc(c.tokenid) === lc(row.tokenid) && decEq(outAmount(c), row.amount) && !(num(c.created) > 0 && num(c.created) < row.collectBlock));
-      if (!found) continue;
+      if (!found) {
+        if (t && row.collectBlock && t - row.collectBlock >= UNFOUND_BLOCKS) {
+          store.setCollectStatus(row.coinid, S.COLLECTED_UNFOUND);
+          activity("warn", "Collected coin not found on its payout address " + UNFOUND_BLOCKS + " blocks after the collect: no longer followed. Check that address | stake:" + row.coinid + " | on:" + row.payout);
+        }
+        continue;
+      }
       claimed.add(lc(found.coinid));
       store.insertSweep(String(found.coinid), String(found.address || row.payout), String(found.tokenid || "0x00"), outAmount(found));
       store.setCollectStatus(row.coinid, S.SWEEP_QUEUED);
@@ -1081,7 +1090,7 @@ function create(o) {
         await settleDetected(seen, budget, t);
         await reconcileCollects(t, budget);
         await reconcileSweeps(t, safe, budget);
-        if (go) await detectCollectedForSweep(budget);
+        if (go) await detectCollectedForSweep(budget, t);
         if (go && canSweep) { await detectStrandedForSweep(sets, budget); await sweepPending(t, safe, sets, budget); }
         if (go) await collectMatured(t, seen, kv().is(K.AUTO_COLLECT_SAFE, false), rescueOn, (await verdict()).ok, canSweep && !badSafe, sets, budget);
         syncHolds();

@@ -100,7 +100,7 @@ async function open(file, o = {}) {
     ready: (tip, risk) => all("SELECT out_amount FROM fc_collect WHERE status=? AND mature_block>0 AND mature_block<=? AND tokenid='0x00' AND at_risk=?", ["DETECTED", tip, risk ? 1 : 0]).map(r => String(r.out_amount)),
     pendingRisk: (tip) => all("SELECT out_amount, mature_block FROM fc_collect WHERE status=? AND at_risk=1 AND mature_block>? AND tokenid='0x00'", ["DETECTED", tip]).map(r => ({ amount: String(r.out_amount), mature: Number(r.mature_block) || 0 })),
     /** Store.resetHistory: completed records go, anything still in flight stays. */
-    resetHistory: () => { run("DELETE FROM fc_sweep WHERE status IN (?,?)", ["SWEPT", "TAKEN"]); run("DELETE FROM fc_collect WHERE status IN (?,?,?)", ["DETECTED", "SWEEP_QUEUED", "COLLECTED_SAFE"]); },
+    resetHistory: () => { run("DELETE FROM fc_sweep WHERE status IN (?,?)", ["SWEPT", "TAKEN"]); run("DELETE FROM fc_collect WHERE status IN (?,?,?,?)", ["DETECTED", "SWEEP_QUEUED", "COLLECTED_SAFE", "COLLECTED_UNFOUND"]); },
     // ---- fc_retired ----
     addRetired: (address, mx, script, block) => run("INSERT OR REPLACE INTO fc_retired (address, mx, script, at, block) VALUES (?,?,?,?,?)", [address, mx || "", script || "", now(), block || 0]),
     retired: () => all("SELECT * FROM fc_retired ORDER BY at").map(r => ({ address: String(r.address), mx: String(r.mx || ""), script: String(r.script || ""), at: Number(r.at) || 0, block: Number(r.block) || 0 })),
