@@ -542,7 +542,7 @@ test("the store is this wallet's, moved aside (never deleted) when the wallet is
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
   assert.ok(hook.includes('await each("Future Cash Next", () => futurecash.invalidate());'));
   assert.equal((main.match(/futurecash: await Promise\.resolve\(\)\.then\(\(\) => futurecash\.activeWork\(\)\)\.catch\(\(\) => null\)/g) || []).length, 2, "the restore gate and Quit / Shutdown: a failed read is null");
-  assert.ok(main.includes('if (!freeze.start("futurecash")) return;'), "frozen: no pass");
+  assert.ok(main.includes('frozen: () => freeze.isFrozen("futurecash")') && main.includes('!freeze.isFrozen("futurecash")) { fcBlock = b;'), "frozen: no start, no pass");
   assert.ok(/futurecash: \{ start: whenRunning\(\(\) => futurecash\.start\(\)\), stop: \(\) => futurecash\.stop\(\), blockers:/.test(main));
 });
 
@@ -710,4 +710,16 @@ test("M2: an at-risk collect whose coin is never found ends COLLECTED_UNFOUND af
   assert.equal(e._store().collect(ID(2)).status, "COLLECTED_UNFOUND"); assert.equal(e.activeWork().posted, 0);
   assert.ok(e.activity().some(l => l.msg.startsWith("Collected coin not found on its payout address 120 blocks after the collect")));
   await e.resetHistory(); assert.equal(e._store().collect(ID(2)), null);
+});
+
+test("M3: a failed start is tried again with growing pauses for the whole node session, and said once while background signing is allowed", async () => {
+  let t = 0, fails = 3, frozen = false, starts = 0; const said = [];
+  const st = FC.createStarter({ start: async () => { starts++; if (fails-- > 0) throw new Error("locked"); }, frozen: () => frozen, granted: () => true, notify: () => said.push(1), now: () => t });
+  assert.equal(await st.tick(), false); assert.equal(said.length, 1);
+  assert.equal(await st.tick(), false); assert.equal(starts, 1, "not again before the pause");
+  t += 30000; assert.equal(await st.tick(), false); assert.equal(starts, 2);
+  t += 30000; await st.tick(); assert.equal(starts, 2, "the pause doubled");
+  t += 30000; await st.tick(); assert.equal(starts, 3); assert.equal(said.length, 1, "said once while failing");
+  t += 600000; assert.equal(await st.tick(), true); assert.equal(starts, 4, "started: never given up");
+  frozen = true; t += 1e7; assert.equal(await st.tick(), false); assert.equal(starts, 4, "frozen: not started");
 });

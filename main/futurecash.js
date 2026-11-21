@@ -1144,5 +1144,28 @@ function create(o) {
     _store: () => store, _scripts: (f) => scriptTable(f), _atRisk: () => atRisk, _tip: tip, get walletKey() { return walletKey; } };
 }
 
-module.exports = { create, SCRIPT, KNOWN_ADDRESS, SECONDS_PER_BLOCK, K, S, CAP_POSTS, CAP_READS, SCRIPTS_EVERY, MIN_DEFAULTS_KEEP, FRESH_MS, MAX_MS,
+/**
+ * Starting the engine with the node (review M3): a start that fails (a locked node, a store not readable yet) is tried
+ * again with growing pauses (30 s, doubling, at most 10 min) for as long as the node runs, never given up for the node's
+ * session; while it is failing and background signing was allowed, the user is told once (notify), and told nothing more
+ * until it has started again. o = { start() -> promise, frozen() -> bool, granted() -> bool, notify(), now() }.
+ */
+function createStarter(o) {
+  const now = o.now || Date.now;
+  let retryAt = 0, pause = 30000, said = false, busy = null;
+  function tick() {
+    if (o.frozen()) return Promise.resolve(false);
+    if (busy) return busy;
+    if (now() < retryAt) return Promise.resolve(false);
+    busy = Promise.resolve().then(o.start).then(() => { retryAt = 0; pause = 30000; said = false; return true; },
+      () => { retryAt = now() + pause; pause = Math.min(pause * 2, 600000); if (!said && o.granted()) { said = true; try { o.notify(); } catch (e) {} } return false; })
+      .finally(() => { busy = null; });
+    return busy;
+  }
+  /** The node stopped: the next node starts afresh. */
+  function reset() { retryAt = 0; pause = 30000; said = false; }
+  return { tick, reset };
+}
+
+module.exports = { create, createStarter, SCRIPT, KNOWN_ADDRESS, SECONDS_PER_BLOCK, K, S, CAP_POSTS, CAP_READS, SCRIPTS_EVERY, MIN_DEFAULTS_KEEP, FRESH_MS, MAX_MS,
   gateCheck, canon, mxToHex, scriptAddress, state, outAmount, sum, decEq, looksLikeFutureCash, isStake, matured, hasOwnKey, usesFingerprint, validAddr, validHexAddr, validMx };

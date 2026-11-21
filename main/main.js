@@ -442,11 +442,15 @@ const futurecash = require("./futurecash").create({ run: (c) => rpc.rpcCall(node
 reserve.setHoldSource("futurecash", () => futurecash.coinHolds());   // what it is about to sweep: no other part of the app may spend it first
 const fcPush = () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:futurecash"); };
 let fcBlock = 0;
+// A failed start is tried again with growing pauses for as long as the node runs (review M3), and said once when
+// background signing was allowed: the guardian is then not watching although the user asked it to.
+const fcStarter = require("./futurecash").createStarter({ start: () => futurecash.start(), frozen: () => freeze.isFrozen("futurecash"),
+  granted: () => { const g = config.load().fcGrant; return !!(g && typeof g === "object" && Object.keys(g).length); },
+  notify: () => { try { const n = new Notification({ title: "Future Cash Next", body: lang.t("Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself."), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) {} } });
 node.on("status", (s) => {
-  if (s.state !== "running") { fcBlock = 0; futurecash.stop().catch(() => {}); return; }
-  if (!freeze.start("futurecash")) return;   // frozen (Apps tab): no store open, no pass; a failed start waits for the next node
+  if (s.state !== "running") { fcBlock = 0; fcStarter.reset(); futurecash.stop().catch(() => {}); return; }
   const b = s.health && s.health.block;
-  futurecash.start().then(() => { if (b && b !== fcBlock) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});
+  fcStarter.tick().then(() => { if (b && b !== fcBlock && !freeze.isFrozen("futurecash")) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});   // frozen (Apps tab): no store opened, no pass
 });
 // The screens' calls, by name: nothing else reaches the engine.
 const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),

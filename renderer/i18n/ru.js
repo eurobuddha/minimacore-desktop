@@ -5177,7 +5177,8 @@
   "The rescue destination changed while you were asked. Nothing was allowed.": "Адрес для спасения изменился, пока вас спрашивали. Ничего не разрешено.",
   "Daily signature limit per address": "Дневной лимит подписей на адрес",
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "Каждый перевод без вашего участия подписывается одноразовым ключом этого адреса. После такого числа за день защитник ждёт следующего дня; перевод вручную по-прежнему работает.",
-  "Enter a whole number of at least 1.": "Введите целое число не меньше 1."
+  "Enter a whole number of at least 1.": "Введите целое число не меньше 1.",
+  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next не удалось запустить, поэтому его защитник не следит за вашими ставками. Попытка повторится сама."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5252,5 +5253,6 @@
   "The rescue destination changed while you were asked. Nothing was allowed.",
   "Daily signature limit per address",
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
-  "Enter a whole number of at least 1."
+  "Enter a whole number of at least 1.",
+  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself."
 ] });
