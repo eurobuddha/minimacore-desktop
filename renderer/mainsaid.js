@@ -279,8 +279,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     // ---- PandaPools glue (main/pandapools.js, 0.19.271) ----
     ["PP_AMOUNTS", I18N.N_("A pool's amounts are plain numbers above zero. Nothing was sent.")],
     ["PP_QUEUE_THROW", I18N.N_("{label} stopped ({error}). It may have been posted: check Activity and your balance before retrying.")],
-    ["SHOP_PAYOUT_UNCHECKED", I18N.N_("The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.")],
-    ["SHOP_PAYOUT_REFUSED", I18N.N_("The node says the payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.")],
+    ["SHOP_PAYOUT_BAD", I18N.N_("The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.")],
     ["SHOP_SENDING", I18N.N_("This payment is being sent to the node now. Wait for its answer.")],
     ["SHOP_NO_VENDOR", I18N.N_("Missing vendor address for retry.")],
     ["SHOP_NOT_DUE", I18N.N_("This order is not paid by what your shop says is due. Check it by hand first.")],

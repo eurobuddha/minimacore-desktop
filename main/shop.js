@@ -323,19 +323,27 @@ function payAddresses() {
   for (const s of store.shops()) if (s && looksLikeMinimaAddress(s.vendorAddress)) out.add(String(s.vendorAddress));
   return [...out];
 }
-// Payout addresses the node itself says are not valid (0.19.273): not read again this session and logged once, whole. One such
-// address used to count as "not answered", so the cursor never moved and every pass read the widest window again.
-const refusedPay = new Set();
-/** Does the node say this address is not valid? true / false, or null when it did not answer. */
-async function nodeRefuses(a) { let r; try { r = await nodeCmd("checkaddress address:" + a); } catch (e) { return null; } return !r ? null : r.status === false; }
+/** Can this payout address never be valid (0.19.284)? Decided here, never from a node error: an Mx whose checksum is wrong (the
+ *  node's own Address.convertMinimaAddress: SHA3 of the 32-byte address, as main/futurecash.js mxToHex reads it), or an 0x that is
+ *  not 64 hexadecimal digits (checkaddress's length rule). 0.19.273 took any status:false of checkaddress for "invalid", and a
+ *  wallet error during a resync or a restore then skipped a real payout address for the whole session. */
+function badAddress(a) {
+  a = String(a == null ? "" : a).trim();
+  if (/^0x/i.test(a)) return !/^0x[0-9a-fA-F]{64}$/.test(a);
+  return !/^M[xX]/.test(a) || !require("./futurecash").mxToHex(a);
+}
+// Payout addresses that can never be valid and whose coins the node did not list: skipped for SKIP_MS, logged whole, said on the
+// Inbox (scanState). Not read as "not answered", which held the cursor for good and read the widest window on every pass.
+const SKIP_MS = 5 * 60000, skippedPay = new Map();   // address -> skipped until
+const skipping = (a) => (skippedPay.get(a) || 0) > Date.now();
 async function scanPayments(depth) {
-  const addrs = payAddresses().filter(a => !refusedPay.has(a)); if (!addrs.length) return false;
+  const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   let listed = [], any = false;
   let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
   for (const a of addrs) {
     const got = await coinsAt(a, depth, " relevant:true");
     if (got) { any = true; listed = listed.concat(got); continue; }
-    if (await nodeRefuses(a) === true) { refusedPay.add(a); store.log("miniMall: the node says the payout address " + a + " is not a valid address, so payments to it are not read. Correct it in miniMall Studio (the shop's payout address)."); any = true; continue; }
+    if (badAddress(a)) { skippedPay.set(a, Date.now() + SKIP_MS); store.log("miniMall: the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address)."); any = true; continue; }
     missed = true;
   }
   if (!any) return null;
@@ -417,16 +425,14 @@ function checkImported(cfg) {
 
 // ---- read-model for the renderer ----
 function myShops() { return store.shops(); }
-/** A shop's payout address is checked by the node when it is new or changed (0.19.273): one with the right shape and a wrong
- *  checksum was saved, and its payments could never be read. */
+/** A shop's payout address is checked when it is new or changed (0.19.273; 0.19.284: here, by its checksum, not by asking the
+ *  node): one with the right shape and a wrong checksum was saved, and its payments could never be read. */
 async function saveShop(cfg) {
   const addr = String((cfg && cfg.vendorAddress) || "").trim(), was = cfg && store.shop(cfg.shopId);
   if (addr && !(was && String(was.vendorAddress || "").trim() === addr)) {
     if (!looksLikeMinimaAddress(addr)) throw new Error("This shop's payout address is invalid.");
-    const no = await nodeRefuses(addr);
-    if (no === null) throw new Error("The payout address could not be checked: the node did not answer. Nothing was saved; try again when the node is running.");
-    if (no) throw new Error("The node says the payout address " + addr + " is not a valid Minima address. Nothing was saved; check the address and save again.");
-    refusedPay.delete(addr);
+    if (badAddress(addr)) throw new Error("The payout address " + addr + " is not a valid Minima address. Nothing was saved; check the address and save again.");
+    skippedPay.delete(addr);
   }
   store.saveShop(cfg); emitter.emit("update"); return cfg;
 }
@@ -462,7 +468,7 @@ function paymentNotSent(ref) {
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read, for the Inbox's status line (0.19.249): the last pass failed (the node did not answer;
  *  read again on the next block), and the oldest block below which a long absence left orders and payments unread. */
-function scanState() { return { readFailed: lastPassFailed, unreadBelow: Number(store.getMeta("unread_below_block")) || 0 }; }
+function scanState() { return { readFailed: lastPassFailed, unreadBelow: Number(store.getMeta("unread_below_block")) || 0, skipped: [...skippedPay.keys()].filter(skipping) }; }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {

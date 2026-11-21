@@ -5326,7 +5326,9 @@
   "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "Замовлення, надіслані до блоку {block}, могли бути не прочитані: застосунок був закритий довше, ніж охоплює одне читання. Платежі не губляться: вузол показує кожну невитрачену монету цього гаманця.",
   "Need {need} USDT or more for that — you have {have} USDT.": "Для цього потрібно {need} USDT або більше — у вас {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "Не вдалося прочитати використання цього ключа в мережі із сервісу використань ключів (eurobuddha.com). Доки їх не можна прочитати, з цього гаманця нічого не можна надіслати: занизьке число може призвести до втрати коштів. Перевірте з'єднання й знову натисніть «Підтвердити».",
-  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "Не вдалося прочитати використання в мережі із сервісу використань ключів (eurobuddha.com). Нічого не змінено, і з цього гаманця нічого не можна надіслати, доки їх не можна прочитати."
+  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "Не вдалося прочитати використання в мережі із сервісу використань ключів (eurobuddha.com). Нічого не змінено, і з цього гаманця нічого не можна надіслати, доки їх не можна прочитати.",
+  "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Адреса для виплат {address} не є дійсною адресою Minima. Нічого не збережено; перевірте адресу й збережіть знову.",
+  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "Платежі на {address} не читаються: це недійсна адреса Minima. Виправте адресу для виплат магазину в miniMall Studio."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5422,5 +5424,7 @@
   "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
   "Need {need} USDT or more for that — you have {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
-  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can."
+  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
+  "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
+  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio."
 ] });

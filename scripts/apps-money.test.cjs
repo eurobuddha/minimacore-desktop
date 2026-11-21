@@ -373,9 +373,10 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop-store.js again in 0.19.248 (an order's dust coins counted together once they cover what is still due)
   // main/shop.js again in 0.19.249 (a failed read at any payout address advances nothing; scanState)
   // main/shop.js again in 0.19.273 (a payout address the node refuses is skipped and logged; checked by the node when a shop is saved; the Inbox notice cleared by a later full pass)
+  // main/shop.js again in 0.19.284 (a payout address is judged by its checksum, never by a node error; a skip runs out after five minutes and is said on the Inbox)
   // main/shop-store.js again in 0.19.272 (gathered dust bounded at 256 with a running exact sum; a coin not larger than the smallest kept is not kept)
   // main/shop.js again in 0.19.265 (no "not sent" or Retry while the payment is at the node; none once the vendor acknowledged it; unpaid cleared on a send that went)
-  for (const [f, want, ver] of [["main/shop.js", "a9e9715034444174f282e5cce7659a7aa88187fffe64a422a0d52afbe788743a", "0.19.273"], ["main/shop-store.js", "e78b1c2ea386442f8fbc1927b06d481728e9a587aca4fbe05d3fd9cadb431797", "0.19.272"],
+  for (const [f, want, ver] of [["main/shop.js", "06875b6db01dc3faea0b059c94bb5223ade11c17d3ed6ab1e69566d4aea2ead3", "0.19.284"], ["main/shop-store.js", "e78b1c2ea386442f8fbc1927b06d481728e9a587aca4fbe05d3fd9cadb431797", "0.19.272"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

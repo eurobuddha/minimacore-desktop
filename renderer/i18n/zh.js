@@ -5313,7 +5313,9 @@
   "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.": "区块 {block} 之前发送的订单可能未被读取：应用离开的时间超过了一次读取的范围。付款不会遗漏：节点会列出此钱包的每个未花费币。",
   "Need {need} USDT or more for that — you have {have} USDT.": "这需要 {need} USDT 或更多 — 您有 {have} USDT。",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.": "无法从密钥使用服务（eurobuddha.com）读取此密钥的链上使用次数。在读取之前，此钱包无法发送任何内容：过低的数字可能导致资金损失。请检查网络连接，然后再次点击“确认”。",
-  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "无法从密钥使用服务（eurobuddha.com）读取链上使用次数。未做任何更改，在读取之前此钱包无法发送任何内容。"
+  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.": "无法从密钥使用服务（eurobuddha.com）读取链上使用次数。未做任何更改，在读取之前此钱包无法发送任何内容。",
+  "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "收款地址 {address} 不是有效的 Minima 地址。未保存任何内容；请检查地址后再保存。",
+  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "发往 {address} 的付款不会被读取：它不是有效的 Minima 地址。请在 miniMall Studio 中更正商店的收款地址。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5409,5 +5411,7 @@
   "Orders sent before block {block} may not have been read: the app was away longer than one pass reads. Payments are not missed: the node lists every unspent coin of this wallet.",
   "Need {need} USDT or more for that — you have {have} USDT.",
   "This key's on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing can be sent from this wallet until they can: a figure that is too low could lose funds. Check your connection and press Confirm again.",
-  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can."
+  "The on-chain uses could not be read from the key-use service (eurobuddha.com). Nothing was changed, and nothing can be sent from this wallet until they can.",
+  "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
+  "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio."
 ] });
