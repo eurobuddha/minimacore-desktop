@@ -345,6 +345,21 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.19.200 | security | miniMall dust rule (released 0.18.181 / 0.18.185): not counted, kept, saved or toward the 500-coin bound; judged again; payments oldest first with a second pass over dust | `shop-store-test.cjs` |
 | 0.19.201 | security | First run: a wallet-replacing megammrsync closes `mcd:firstRunSeed` for the launch (main.js `runResync`) | `seedgate-test.cjs` |
 | 0.19.202 | CI | `npm run test:chat` in CI (released 0.18.182) | |
+| 0.19.203 | 5c review H1 | Future Cash Next: separate post budgets (collects 8, sweeps 8) and read budgets; a pass settles and sweeps before it collects; unattended work only for MINIMA of at least `min_auto` (default 1, Guardian tab); `parts()` refusal never claims; unresolved rows re-read every 30 blocks | `futurecash-test.cjs` H1 x2 |
+| 0.19.204 | 5c review H2 | A failed manual Sweep gives a queued sweep back to the guardian (PENDING, held) | H2 |
+| 0.19.205 | 5c review H3 | The grant is `{ at, safe }`; `running()` needs the current safe; a new destination drops it and stops the guardian; main reads the safe again after the native question | H3 |
+| 0.19.206 | 5c review M1 | Classic keys: at most `sign_cap` (default 50) unattended signatures per address per day, said once | M1 |
+| 0.19.207 | 5c review M2 | An at-risk collect whose coin is not found ends COLLECTED_UNFOUND after 120 blocks; Reset history clears it | M2 |
+| 0.19.208 | 5c review M3 | `createStarter`: a failed start retried (30 s doubling to 10 min) for the node session; one notification while granted | M3 |
+| 0.19.209 | 5c review M4 | Over 5,000 stake rows: detection skipped, known rows settled and swept, a banner says so | M4 |
+| 0.19.210 | 5c review L1 | The grant checked before every unattended post and signature; Revoke works with no store (all grants) | L1 |
+| 0.19.211 | 5c review L2 | `reserve.js` ENFORCED: Future Cash Next's holds kept from Send / Consolidate even when sends are observed | L2 |
+| 0.19.212 | 5c review L3 | Retire names the apps that handed the address out (Mail, miniMall, AtomiX; Chat in general); Stop / Take back / Freeze ask while retired addresses exist | L3 |
+| 0.19.213 | 5c review L4 | main's runner keeps the caller's options (the send pin's `unfiltered`) | L4 |
+| 0.19.214 | 5c review L5 | Activity lines cut past 1,000 characters at a space: ids never cut | L5 |
+| 0.19.215 | 5c review L6 | Click reads bounded: 500 coins per address read, 64 Harden addresses, the retire gate's chain-wide read over 5,000 rows refuses | L6 |
+| 0.19.216 | 5c review L7 | The native's canSweep(payout) before an at-risk collect | L7 |
+| 0.19.217 | 5c review L8 | Stored token ids and payouts shape-checked before a command | L8 |
 
 Version line (19 Nov 2026): the released main line owns 0.18.65 to 0.18.69 (its Mail work). This branch reused those numbers, up to 0.18.148, for unpushed commits; they are not renumbered. `v0.18.69` was merged at 0.19.0 and every later change on this branch is 0.19.x.
 
@@ -489,8 +504,12 @@ The contract: `RETURN (@BLOCK GTE PREVSTATE(1) OR @COINAGE GTE PREVSTATE(4)) AND
 
 Differences from the phone, on purpose: no minimaWallet (its keys, its rescue path, its StakeScan read); a clean stake collected elsewhere ends COLLECTED_SAFE (the phone marks it COLLECTED and then sweeps it too); an Mx recipient is decoded locally with its checksum (the phone asks `checkaddress`); hex and Mx spellings compare equal (`canon` decodes Mx); amounts summed exactly (the phone sums doubles and shows 4 decimals); every id whole and copyable; the guardian runs while the app runs (no Android service): with the app quit nothing is watched.
 
+Review of 20/21 Nov 2026 (three HIGH, four MEDIUM, eight LOW; 0.19.203 to 0.19.217): all fixed, each with a test that fails on the version before it (`scripts/futurecash-test.cjs` H1 to L8). What changed for the user: the guardian collects and sweeps by itself only MINIMA coins of at least the unattended minimum (1 MINIMA by default, Guardian tab); smaller coins and tokens wait for Collect / Sweep / Recover by hand. On a classic key wallet it signs at most 50 times a day per address by itself (Guardian tab). The grant names the safe destination: changing it asks the question again. The coins it must sweep are kept from Send and Consolidate even while sends are only observed.
+
 Owed after 0.19.186 (none built):
 - Notifications from the engine are English (the phone translates them); the activity log stays English as every log.
+- **The phone has the same drain (other repo, read only, nothing changed there):** Pandamonium's Future Cash Next (`apks/base` `integrated/futurecash-next`, and its standalone source per `sources.lock.json`) collects every matured stake paying the wallet and sweeps every coin on an at-risk or retired address with no amount floor and no rate limit (`Guardian.collectMatured`, `detectStrandedForSweep`, `sweepPending`). Anyone can lock dust to a wallet's address: on an at-risk payout each dust stake costs one unattended signature of that address's one-time key (review M1). The desktop's floor and daily cap (0.19.203, 0.19.206) are the fix to port.
+- Token stakes and token coins are never collected or swept by themselves (no amount of a token compares with the MINIMA floor): by hand only.
 - A collected at-risk coin is held by the coin guard only once the pass has found it (same pass as the collect is seen spent); between the two another engine could take it.
 - Sends and Consolidate respect the holds only when the coin guard's sends are set to enforce.
 - Token stakes: the sign gate refuses a token output whose `tokenamount` the node's `txnlist` does not state (fail closed; MINIMA stakes are the native's only lock).
@@ -755,6 +774,10 @@ Phases 0 to 2 were verified by tests and a browser preview only. The app has not
 - [ ] Future Cash Next: with an at-risk payout (a test wallet with a reused key) and an external safe: a matured stake is collected, the coin found and swept with the explicit key, "Secured …"; the coin is listed as held for Future Cash Next in the coins dialog meanwhile.
 - [ ] Future Cash Next: Retire an empty at-risk default address with the guardian on: it leaves `getaddress`'s answers; a payment to it is swept by the next pass; AtomiX, PandaPools, Dexicon and Send work after it.
 - [ ] Future Cash Next: Freeze refused while a collect is posted; frozen, no pass in the log; Quit names a posted collect; a seed restore is refused while one is posted, and afterwards the old store is beside the new under its dated name.
+- [ ] Future Cash Next (review fixes): a dust stake (below 1 MINIMA) paying this wallet is listed and not collected by itself; Collect by hand works on it; the unattended minimum and the daily signature limit change from the Guardian tab.
+- [ ] Future Cash Next: change the safe destination with the guardian running: it stops, the log says why, and Start guardian asks the native question again naming the new address.
+- [ ] Future Cash Next: with the node locked at start, the guardian starts by itself once it is unlocked (no restart), and one notification said it was not watching.
+- [ ] Future Cash Next: with sends only observed, a Send that would take a coin held for Future Cash Next is pinned off it or refused.
 - [ ] Future Cash Next: the audit reaches eurobuddha.com with the node's keys and the safe destination's hex in the /reuse batch; a vault-locked node says "vault locked" and posts no at-risk collect.
 
 ## 10. Proposed addition to the Parlons node (for the owner to approve; nothing in the maxima repo was changed)
