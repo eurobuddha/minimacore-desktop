@@ -26,9 +26,21 @@
  * A QUEUED SIGNER ITS CALLER GAVE UP ON IS NEVER SENT. run(command, raw, { signal }): if the signal is aborted by the
  * time the entry reaches the head of the queue, it is rejected there and the node never sees it.
  */
-const SIGNING = /^\s*(?:(?:send|sendpoll|sendsign|txnsign|txnauto|sign|signfrom|consolidate|tokencreate|multisig)\b|txnpost\s+[^;]*\b(?:auto:true\b|burn:))/i;
-const signs = (command) => String(command).split(";").some((part) => SIGNING.test(part));
-const verb = (command) => (/^\s*(\w+)/.exec(String(command)) || [])[1] || "?";   // never log a whole command: it can carry a private key
+// WHICH COMMAND IT IS is read the way the node reads it (main/cmdverb.js, 0.19.189): the node trims every character up to
+// U+0020, takes a "quoted" first word as the verb, reads ":" as a token of its own and drops quotes. A /^\s*send\b/ test let
+// `"send" amount:1 …`, a control character before send, or s"en"d through UNQUEUED, so two signings could share a key use.
+// Every reading the node may make counts (over-serialising is harmless), in every ";" piece.
+const V = require("./cmdverb");
+const SIGNERS = new Set(["send", "sendpoll", "sendsign", "txnsign", "txnauto", "sign", "signfrom", "consolidate", "tokencreate", "multisig"]);
+function signsOne(part) {
+  const vs = V.verbs(part);
+  if (vs.some((v) => SIGNERS.has(v))) return true;
+  return vs.includes("txnpost") && /(?:^|\s)(?:auto:true\b|burn:)/i.test(V.paramsText(part));
+}
+const signs = (command) => V.parts(command).some(signsOne);
+/** Kept under its old name for the callers that test one command with it: SIGNING.test(command) = it is queued. */
+const SIGNING = { test: (command) => signs(command) };
+const verb = (command) => (V.verbs(V.parts(command)[0] || "")[0] || "?").replace(/[^\w.-]/g, "").slice(0, 40) || "?";   // never log a whole command: it can carry a private key
 
 function createNodeRunner(raw, opts = {}) {
   let tail = Promise.resolve();

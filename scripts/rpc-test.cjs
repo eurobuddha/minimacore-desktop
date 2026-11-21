@@ -90,6 +90,18 @@ test('the SIGNING pattern: every command that signs is queued, nothing else is',
   assert.ok(SIGNING.test('sign data:0x01') && !SIGNING.test('signature'), 'the verb is matched whole');
 });
 
+// 0.19.189: the verb read as the node reads it (main/cmdverb.js). Each of these is run by the node as a signing command and
+// slipped past the old /^\s*send\b/: two signings could then share a key use.
+test('the signing queue reads a command the way the node does: quoted, control-character and ":"-spaced signers are queued', () => {
+  const q = createNodeRunner(async () => ({}));
+  for (const c of ['"send" amount:1 address:0x00', '\u0001send amount:1 address:0x00', 's"en"d amount:1 address:0x00', '"send"amount:1 address:0x00',
+    'send:amount:1 address:0x00', '"txnsign" id:a publickey:auto', '\u0002txnsign id:a publickey:auto', 'tx"nsi"gn id:a publickey:auto', 'CONSOLIDATE tokenid:0x00',
+    '"consolidate" tokenid:0x00', 'txnpost id:a "burn":0.1', 'txnpost id:a burn : 0.1', '"txnpost" id:a auto : true', 'txnpost id:a "auto":"true"',
+    'balance;"send" amount:1 address:0x00', 'status;\u0001txnsign id:b publickey:auto', '\u212aeys action:list;"sign" data:0x01'])
+    assert.equal(q.signing(c), true, 'queued: ' + JSON.stringify(c));
+  for (const c of ['"balance"', 'txnpost id:a', '"txnpost" id:a', 'sendfrom amount:1 address:0x00', '"sendnosign" amount:1', 'signature']) assert.equal(q.signing(c), false, 'not queued: ' + JSON.stringify(c));
+});
+
 test('a signer that timed out holds the queue until the node answers a read; the next signer never overlaps it', async () => {
   const seen = []; let probes = 0; const warned = [];
   const raw = async (c) => {
