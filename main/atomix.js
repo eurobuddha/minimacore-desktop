@@ -207,7 +207,7 @@ async function init() {
   if (initPromise) return initPromise;
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   initPromise = (async () => {
-    const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"));
+    const shim = await makeSqlShim(path.join(dir(), "atomix.sqlite"), log);   // an empty file found is said in AtomiX's own log (0.18.233)
     if (gen !== generation) { try { shim.dispose(); } catch (e) {} return; }   // invalidated mid-init → drop it, never written (0.18.212)
     sqlShim = shim;
     ctx = createContext(buildMds());

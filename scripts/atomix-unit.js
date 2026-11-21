@@ -75,9 +75,16 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
 
   await okA("the database file: 0 bytes opens fresh, content that is not SQLite is refused, no tables writes nothing, saves are synced (0.18.212)", async () => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), "axsql2-")), f = path.join(d, "x.sqlite");
-    fs.writeFileSync(f, ""); const s0 = await makeSqlShim(f);   // what older versions wrote when the engine stopped before any table
-    assert.equal(s0.flush(), true); assert.equal(fs.readFileSync(f).length, 0, "a flush with no tables writes nothing");
-    fs.rmSync(f); const s1 = await makeSqlShim(f); assert.equal(s1.flush(), true); assert.ok(!fs.existsSync(f), "no 0-byte file is created");
+    // CHANGED on purpose (0.18.233): a 0-byte file on disk is said, with the file whole, and kept under a dated name before a new
+    // database starts in its place; it is still never refused
+    const said = []; fs.writeFileSync(f, ""); const s0 = await makeSqlShim(f, (l) => said.push(l));   // what older versions wrote when the engine stopped before any table
+    const kept = fs.readdirSync(d).find(n => /^x\.sqlite-empty-\d{8}$/.test(n)); assert.ok(kept && !fs.existsSync(f), fs.readdirSync(d).join(", "));
+    assert.equal(fs.readFileSync(path.join(d, kept)).length, 0, "kept as it was");
+    assert.deepEqual(said, ["the database " + f + " was an empty file (0 bytes): it is kept as " + path.join(d, kept) + " and a new database is started in its place"]);
+    assert.equal(s0.flush(), true); assert.ok(!fs.existsSync(f), "a flush with no tables writes nothing");
+    fs.writeFileSync(f, ""); await makeSqlShim(f, (l) => said.push(l)); assert.ok(fs.existsSync(path.join(d, kept + "-2")), "a second one the same day: -2");
+    fs.rmSync(f, { force: true }); const s1 = await makeSqlShim(f, (l) => said.push(l)); assert.equal(s1.flush(), true); assert.ok(!fs.existsSync(f), "no 0-byte file is created");
+    assert.equal(said.length, 2, "no file: a new database, nothing said");
     fs.writeFileSync(f, "x".repeat(4096)); await assert.rejects(makeSqlShim(f), /is damaged \(not an SQLite file\)/); assert.equal(fs.readFileSync(f, "utf8"), "x".repeat(4096), "left as it is");
     fs.rmSync(f); const s2 = await makeSqlShim(f); s2.sql("CREATE TABLE t (a int)"); s2.sql("INSERT INTO t VALUES (7)"); assert.equal(s2.flush(), true);
     const s3 = await makeSqlShim(f); assert.equal(s3.sql("SELECT a FROM t").rows[0].A, 7, "a real file reopens");
