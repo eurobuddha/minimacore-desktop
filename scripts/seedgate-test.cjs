@@ -209,6 +209,7 @@ test("a gated command is shown whole with its secret values hidden: a repeated p
 
 test("syscheck: refused (not phrase only) once Touch ID worked here and cannot be asked; the marker is written only after a prompt succeeded and names this Mac", async () => {
   await assert.rejects(os({ can: false, seen: true }).check("r", "d"), /Touch ID has worked in this app on this Mac before but cannot be asked now[\s\S]*lock the screen and log in again[\s\S]*delete this file: \/x\/touchid-seen/);
+  await assert.rejects(os({ can: false, seen: true }).check("r", "d"), /so nothing was shown\. If the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again\. If Touch ID is locked/, "the commonest reason first (0.19.251)");
   const bx = os({ can: false, seen: true }); await assert.rejects(bx.check("r", "d")); assert.deepEqual(bx.boxes, [], "no fall-back to a box while it is remembered");
   let marked = 0;
   await assert.rejects(SC.create({ can: () => true, prompt: async () => { throw new Error("no"); }, confirm: async () => true, seen: () => false, markSeen: () => { marked++; }, where: () => "" }).check("r", "d"), /Cancelled/);

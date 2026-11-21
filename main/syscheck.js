@@ -40,7 +40,7 @@ function create(io, t) {
     let seen = false; try { seen = !!io.seen(); } catch (e) { seen = true; }
     if (seen) {
       let where = ""; try { where = String(io.where() || ""); } catch (e) {}
-      throw new Error("Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown. If Touch ID is locked after too many tries, lock the screen and log in again with your password; Touch ID then works again. If this Mac no longer has Touch ID, quit the app and delete this file: " + where + " . The app then asks with a confirmation window instead.");
+      throw new Error("Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown. If the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again. If Touch ID is locked after too many tries, lock the screen and log in again with your password; Touch ID then works again. If this Mac no longer has Touch ID, quit the app and delete this file: " + where + " . The app then asks with a confirmation window instead.");
     }
     let ok = false; try { ok = await io.confirm(say(detail, tt)); } catch (e) { ok = false; }
     if (!ok) throw new Error("Cancelled");

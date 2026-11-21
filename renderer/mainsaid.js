@@ -397,7 +397,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SG_NO_CHECK", I18N.N_("This command needs no check.")],
     ["SG_REPEATED", I18N.N_("This command names {names} more than once (the node would keep only the last). Write each parameter once. Nothing was run.")],
     // ---- the system check of every secret gate (main/syscheck.js, 0.19.188) ----
-    ["SC_TOUCHID_LOCKED", I18N.N_("Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown. If Touch ID is locked after too many tries, lock the screen and log in again with your password; Touch ID then works again. If this Mac no longer has Touch ID, quit the app and delete this file: {where} . The app then asks with a confirmation window instead.")],
+    ["SC_TOUCHID_LOCKED", I18N.N_("Touch ID has worked in this app on this Mac before but cannot be asked now, so nothing was shown. If the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again. If Touch ID is locked after too many tries, lock the screen and log in again with your password; Touch ID then works again. If this Mac no longer has Touch ID, quit the app and delete this file: {where} . The app then asks with a confirmation window instead.")],
     ["SG_NO_SEED", I18N.N_("Couldn't read the seed.")]
   ];
 
