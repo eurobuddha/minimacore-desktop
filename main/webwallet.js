@@ -141,6 +141,12 @@ async function ackKeyuses(address, count) {
     if (chain > MAX_USES) throw new Error(USED_UP);   // never adopted: no leaf of this key is left (0.18.265)
     if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
   }
+  // a damaged entry whose old value still reads as a whole number ("57", 57.4) is a floor too (0.18.267): that many leaves may be used
+  if (was.damaged) {
+    const raw = (loadStore()[address] || {}).keyuses;
+    const old = typeof raw === "string" && /^\s*\d{1,15}\s*$/.test(raw) ? Number(raw.trim()) : typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.ceil(raw) : 0;
+    if (n < old) throw new Error("This key's saved count read " + old + " before it was damaged. Confirm at least that many. Nothing was saved.");
+  }
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
   e.keyuses = e.damaged ? n : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown

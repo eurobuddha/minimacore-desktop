@@ -292,3 +292,20 @@ test("Web Wallet key uses have a ceiling of 262143: above it refused at confirm,
   const app = rd("renderer/app.js");
   assert.ok(!app.includes("Over-estimating is safe;") && app.includes("is safe only up to 262143, the last one a key of this wallet has") && /id="wwKuIn" type="number" min="0" max="262143"/.test(app), "the screen's wording is true, and the input has its maximum");
 });
+
+// ---- 0.18.267: a damaged entry's old value that still reads as a whole number is a floor ----
+test("Web Wallet: a damaged entry whose old value reads as a whole number (\"57\", 57.4) is confirmed again only at or above it", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "A9".repeat(32), PK = "0x" + "B9".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C9".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 10);
+  for (const [old, floor] of [["57", 57], [" 57 ", 57], [57.4, 58]]) {
+    fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
+    assert.equal(ww.keyusesInfo(FROM).damaged, true, JSON.stringify(old));
+    await assert.rejects(ww.ackKeyuses(FROM, floor - 1), new RegExp("saved count read " + floor + " before it was damaged\\. Confirm at least that many"), JSON.stringify(old));
+    assert.equal((await ww.ackKeyuses(FROM, floor)).keyuses, floor);
+  }
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "x", ack: true } })); assert.equal((await ww.ackKeyuses(FROM, 10)).keyuses, 10, "an unreadable old value: the chain's figure is the floor");
+  ww.setOnchain(async () => null);
+});
