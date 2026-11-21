@@ -7,6 +7,90 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.239] — a long command with non-ASCII text reaches the node whole
+
+- A command over 6000 characters goes to the node as a POST, and the node reads its Content-Length as characters, not bytes. With an accented letter or an emoji in it the app sent the byte count, so the node waited for characters that never came until the app timed out, and then ran what it had read. The header now counts characters the way the node does. Test: `scripts/rpc-test.cjs`.
+
+## [0.18.238] — Web Wallet: "could not be read", not "cannot be reached"
+
+- When the key-use service's figure cannot be used, Confirm and Check on-chain now say it could not be read from the key-use service (eurobuddha.com). "Cannot be reached" was not true when the service answered with an error, another key's row or a count that is not a whole number. Test: `scripts/webwallet-ui-test.cjs`.
+
+## [0.18.237] — Terminal: no file on another computer
+
+- A file parameter (file:, archivefile:, folder:) of the backup, restore, archive, reset, mysql and MegaMMR commands that names a file on another computer (a path starting with \\ or //) is refused: a Windows node would connect to that share. Local and drive-letter paths still run. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.236] — AtomiX: the old wallet's swap records are never opened by the new wallet
+
+- If the old wallet's swap database cannot be moved aside after a wallet replacement, AtomiX does not start until it can be (it went on and opened the old records under the new wallet). The debt is written to config.json before the move, names the file it is for, survives a quit or a crash, and is cleared after the move; the new wallet's own database is never moved by mistake. Test: `scripts/atomix-unit.js`.
+
+## [0.18.235] — the node log hides a private key in either form
+
+- A privatekey: written in its Mx form, spaced, quoted or in another letter case is hidden in the node log as well as the plain 0x form. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.234] — ETH Wallet: a refused saved endpoint is said once
+
+- A saved Ethereum endpoint that is refused (a name or password in its URL) is said in the log once, not again on every balance refresh; the URL is never logged. Test: `scripts/atomix-unit.js`.
+
+## [0.18.233] — an empty database file is said and kept
+
+- A 0-byte AtomiX, PandaPools or history database found on disk is said in the log with its path whole and kept under a dated name before a new database starts in its place; it opened as fresh with no word, so an emptied store went unnoticed. Test: `scripts/atomix-unit.js`.
+
+## [0.18.232] — saved settings: no MDS, a rescue node is host:port
+
+- An MDS parameter is never passed to the node, and -rescuenode takes host:port only, because the node pastes it into a command it runs; an unsafe value is refused when saved and never passed, and -rescuenode in the extra arguments is refused. Test: `scripts/config-keys-test.cjs`.
+
+## [0.18.231] — Terminal: only a real escape is refused
+
+- An escaped backslash followed by plain text (\\u003b) is ordinary text to the node and is no longer refused; a real \u escape of a semicolon or a control character still is. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.230] — Terminal: no value can rewrite the commands a builder makes
+
+- The commands that build further commands from their values (sendfrom, rawfrom, rawtxnfrom, createtokenfrom, consolidatefrom, constructfrom, createfrom, signfrom, postfrom, multisig, multisigread, txnauto, sphincs) refuse a value with white space, a colon, a quote or a backslash escape where it would become part of those commands. multisig create takes only public keys of 0x and 64 hexadecimal digits (a crafted key made a multisig coin anyone could spend; a password with a space could add a hidden burn). A secret of several words is shown with its word count. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.229] — PandaPools: a stuck action no longer blocks every later one
+
+- An error inside the engine's later answer (a key check, a post's answer) left the action's place in the queue taken, so every later add, withdraw and migrate waited for good. Such an error now ends that action with "it may have been posted: check Activity and your balance", and the next one runs. A new pool's and a migration's amounts must be plain numbers above zero. Test: `scripts/pandapools-queue.test.cjs`.
+
+## [0.18.228] — Terminal: the node is never opened to someone else
+
+- rpc with any parameter but the gated action:listusers (it could turn RPC authentication off, replace the app's password or add a login), slavenode enable:, webhooks action:add and mds actions other than list are refused. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.227] — miniMall: an invalid payout address no longer stalls the order scan
+
+- A payout address with a wrong checksum is skipped for five minutes, logged and shown on the orders screen with the address whole; it held the scan for good before. miniMall Studio refuses to save such an address. Test: `scripts/shop-test.cjs`.
+
+## [0.18.226] — miniMall: gathered dust is bounded and still pays
+
+- At most 256 dust coins per order are gathered, with a running exact sum; a flood no longer costs a second per block, and gathered dust that covers what is due is counted (1000 coins never fit beside the order's other coins). Test: `scripts/shop-test.cjs`.
+
+## [0.18.225] — a miniMall payment in progress is part of the stop question
+
+- Stopping or restarting the node while a miniMall payment is at the node now asks first, and says to wait for its answer. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.224] — miniMall: no second payment while the first is at the node
+
+- "I checked my History: it was not sent" and Retry are refused while the order's payment is still being sent, and once the vendor has marked the order paid or later; the screens say the payment is being sent. A payment that went clears the unpaid mark. Test: `scripts/shop-test.cjs`.
+
+## [0.18.223] — every node stop or restart asks first when work is in flight
+
+- The tray's Restart node, the Node tab's Restart and Reclaim, the node kind switch, the setup screen's restart, Contribute, the Web Wallet's MegaMMR switch, a chat backup restore and Terminal commands that stop the node (quit, resyncs, imports, restores) now ask "Stop the node anyway / Keep it running" when AtomiX swaps, a market, OTC, recent pool transactions or P2P Chance could be interrupted or could not be checked. Settings are saved only when the restart goes ahead. Test: `scripts/stopguard-test.cjs`.
+
+## [0.18.222] — Terminal: no secret is shown
+
+- privatekey: is hidden like phrase, password, confirm and seed; the Terminal echoes commands with secret values hidden and keeps them out of the history; the node's reply never shows a secret of the typed command. rpc action:listusers, mds and sphincs action:generate need SHOW KEY. A gated command with an empty secret is refused. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.221] — Terminal: no second command through an escape code
+
+- A \u escape that decodes to a semicolon or a control character is refused for every command; multisig spends and mds action:accept are not run from the Terminal; -mds… extra node arguments are refused. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.220] — Terminal: values the node pastes into its own commands
+
+- reset, archive import, mysql reset / setlogin and txpow refuse a value with white space, a colon, a quote or a semicolon, which the node would turn into more parameters (a seed phrase among them) of a command it runs itself. Windows paths still run. Test: `scripts/cmdgate-test.cjs`.
+
+## [0.18.219] — Terminal: commands are read exactly as the node reads them
+
+- Every check now reads a command with a port of the node's own reader; a command that moves funds or keys and that the node would read differently from how it looks is refused. Test: `scripts/cmdgate-test.cjs`, `scripts/fixtures/node-command-reading.json`.
+
 ## [0.18.218] — small fixes from the review
 
 - A second buyer's copy of a reference says which order shows the payments with that reference and how much has come in. An order whose older verdict was kept but that is not paid (for example confirmed or shipped by an older version without a payment this version sees) can be checked by hand; it could never move on. The amount a swap needs is cut exactly for an exponent form too (toFixed rounded it). Tests: `scripts/shop-test.cjs`, `scripts/shop-migrate-test.cjs`, `scripts/rpc-test.cjs`.
