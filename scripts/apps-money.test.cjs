@@ -369,7 +369,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.232 (the stored vendor address kept; every shop's payout address read; a saved scan cursor)
   // both again in 0.19.241 (as released 0.18.208 / 0.18.217 / 0.18.218: the same ref from a second buyer kept under ref~<buyer id>, both
   // checked by hand; Retry only behind "unpaid" with an on-disk in-flight mark; paymentNotSent; sharedRef)
-  for (const [f, want, ver] of [["main/shop.js", "73ef815086af49796b3e761188965a5e287d7103b81937a568bcff7b475fcaa2", "0.19.241"], ["main/shop-store.js", "e350676d63ed24c6144aefe9e5ec23fec76b4f66a8f25432b335cb1ce361f598", "0.19.241"],
+  // main/shop-store.js again in 0.19.247 (an older store migrated at load: a kept verdict, an old figure without its coins counted again)
+  for (const [f, want, ver] of [["main/shop.js", "73ef815086af49796b3e761188965a5e287d7103b81937a568bcff7b475fcaa2", "0.19.241"], ["main/shop-store.js", "230678f34cd5648f58536de0ab837338843b8fb5fe1a2f4960131775409464b2", "0.19.247"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

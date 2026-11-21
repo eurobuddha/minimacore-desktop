@@ -29,9 +29,28 @@ function ensureLoaded() {
   try {
     const j = JSON.parse(raw);
     if (j) { mem.shops = j.shops || {}; mem.orders = j.orders || {}; mem.chat = j.chat || {}; mem.meta = j.meta || {}; }
+    for (const o of Object.values(mem.orders)) migrate(o);
   } catch (e) {
     // Source of truth — never silently clobber a corrupt file; preserve it and start fresh.
     try { fs.renameSync(filePath(), filePath() + ".corrupt-" + Date.now()); } catch (e2) {}
+  }
+}
+/**
+ * An order stored before the listing check (0.19.166) or the coin lists (0.19.167), here or by the released 0.18.69, read
+ * once at load (0.19.247, as released 0.18.195 / 0.18.218; this store's own layout):
+ *  - already paid, or confirmed / shipped / delivered, before the listing check: its verdict is kept (no check against the
+ *    shop as it is now, no Unchecked banner); one moved on without a payment this version can see is checked by hand;
+ *  - money counted but no coin list: the coins are counted again from what the node still shows (legacyPaid keeps the old
+ *    figure for the screen). It errs towards underpaid and a check by hand, never towards paid: the old figure plus a coin
+ *    seen again would count that coin twice.
+ * An order whose items were not kept is Unchecked by the listing check itself ("the order has no items that can be read").
+ */
+function migrate(o) {
+  if (!o || typeof o !== "object" || o.role !== "sell") return;
+  if (!Array.isArray(o.problems) && (o.paid || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.CONFIRMED)) { o.legacyVerdict = true; o.problems = []; o.due = ""; return; }
+  if (!o.paid && !Array.isArray(o.coins) && decCmp(o.paidAmount || "0", "0") === 1) {
+    o.legacyPaid = String(o.paidAmount); o.paidAmount = "0"; o.coins = [];
+    if ((STATUS_RANK[o.status] || 0) < STATUS_RANK.PAID) o.status = "PENDING";
   }
 }
 function persistSoon() {
@@ -198,7 +217,8 @@ function flagDuplicate(ref, problem) {
 function handCheck(ref) {
   ensureLoaded(); const o = order(ref);
   if (!o || o.role !== "sell") return false;
-  ensureChecked(o); if (!o.problems.length) return false;
+  // also an order an older version counted money for, and one whose older verdict was kept but that is not paid (0.19.247)
+  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid)) return false;
   o.handChecked = true; flush(); return true;
 }
 /** May the vendor confirm / ship / deliver this order? Paid by the listing's figure, or checked by hand. */
