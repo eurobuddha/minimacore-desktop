@@ -78,7 +78,7 @@ var BOOT_RETRY_PACE_MS = 55000, HOLD_SECONDS = 8, REFRESH_EVERY_TICKS = 6;
 var IDENTITY_CONTEXT = 'decks';   // protocol constant from the working title; renaming it would re-derive every identity (SPEC §2)
 var ticks = 0, myAddresses = {}, coinLocks = {};   // coinid -> unix ms the lock expires (3 min)
 var LOCK_MS = 180000;
-var TICKING = false, tickStartedMs = 0, TICK_WATCHDOG_MS = 120000;
+var TICKING = false, tickStartedMs = 0, TICK_WATCHDOG_MS = 120000, tickSeq = 0;
 var lastPdBootMs = 0;
 var STORE_MINE = false;   // FOREIGN STORE (header): true once the store is known to be this wallet's
 
@@ -193,8 +193,10 @@ function tick(done) {
         log('tick watchdog: the previous cycle never finished after ' + (TICK_WATCHDOG_MS / 1000) + ' s — starting a new one');
     }
     TICKING = true; tickStartedMs = Date.now();
-    var finished = false;
-    function end() { if (finished) return; finished = true; TICKING = false; done(); }
+    // Each cycle has its own number (0.19.242): a cycle the watchdog gave up on that finishes late must not clear the guard
+    // of the cycle running now (two cycles would then overlap on the same takes and coins).
+    var finished = false, mySeq = ++tickSeq;
+    function end() { if (finished) return; finished = true; if (mySeq === tickSeq) TICKING = false; done(); }
     ticks++;
     // review 7 Nov (C-1): about once a minute, free resting input claims whose post provably never happened
     // (two-phase in PoolInputClaims: held >= 10 min, the coin unspent and NOT in the mempool)

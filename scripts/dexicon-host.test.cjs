@@ -1175,3 +1175,21 @@ test("the page cannot make the engine sign or steer it without the native window
   answer = true; await merge("mm_config", JSON.stringify({ enabled: true, levels: 6 })); assert.deepEqual(await comms("dexicon", "LADDER", {}), { status: true }, "its wake-up goes with it");
   await assert.rejects(host.command({ op: "intent", type: "LIMIT", buy: true, price: "1", amount: "1", epoch: host.status().epoch }), /bad intent/, "the frame's calls (they carry an epoch) cannot record one");
 });
+
+// ---- 0.19.242: a cycle the watchdog gave up on that ends late does not clear the guard of the cycle running now ----
+test("the tick guard: a stuck cycle's late end leaves the new cycle's guard set; only the current cycle clears it", () => {
+  const vm = require("vm"), src = fs.readFileSync(path.join(M.root, "main/dexicon/service.desktop.js"), "utf8");
+  const at = src.indexOf("function tick(done) {"); let i = src.indexOf("{", at), depth = 0;
+  for (; i < src.length; i++) { if (src[i] === "{") depth++; else if (src[i] === "}" && --depth === 0) break; }
+  const held = [], ctx = { READY: true, ticks: 0, now: 1000, logged: [], RELAY: { relays: [] }, held,
+    loadRelays: (cb) => held.push(cb), log: (m) => ctx.logged.push(m), logOnce() {}, voidSweep() {}, Date: { now: () => ctx.now } };
+  vm.createContext(ctx);
+  vm.runInContext(src.match(/^var TICKING = .*$/m)[0] + "\n" + src.slice(at, i + 1) + "\nthis.tick = tick; this.guard = () => TICKING;", ctx);
+  let dones = 0; const done = () => dones++;
+  ctx.tick(done); assert.equal(ctx.guard(), true); assert.equal(held.length, 1);
+  ctx.tick(done); assert.equal(held.length, 1, "a second tick inside the watchdog window does not start"); assert.equal(dones, 1);
+  ctx.now += 120001; ctx.tick(done); assert.equal(held.length, 2, "past the watchdog a new cycle starts"); assert.match(ctx.logged.join(), /tick watchdog/);
+  held[0](); assert.equal(ctx.guard(), true, "the stuck cycle ending late does not clear the running cycle's guard");
+  ctx.tick(done); assert.equal(held.length, 2, "so no third cycle overlaps the second");
+  held[1](); assert.equal(ctx.guard(), false, "the running cycle clears it"); assert.equal(dones, 4, "done once per call on every path");
+});
