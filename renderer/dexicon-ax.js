@@ -24,9 +24,11 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const mx = (s) => { const t = String(s == null ? "" : s); return (MS ? MS.say(t) : t).replace(/mxusdt/gi, "MxUSD"); };
   const tok = (t) => { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = t.toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "MxUSD"; } return ccyName(t); };
   /** A number's exact decimal text, never an exponent (1e-7 is 0.0000001), or "" when it is not a plain number. */
+  // a number is taken at 15 significant figures first (0.19.277): a double's last digits are noise (4.35 * 100 is 434.99999999999994)
   const plainNum = (x) => {
-    let t = String(typeof x === "number" ? x : x == null ? "" : x).trim(), neg = "";
+    let t = String(typeof x === "number" ? (Number.isFinite(x) ? parseFloat(x.toPrecision(15)) : x) : x == null ? "" : x).trim(), neg = "";
     if (t[0] === "-") { neg = "-"; t = t.slice(1); }
+    if (/^\.\d/.test(t)) t = "0" + t;   // ".5" is 0.5 (it read as no number, so fmtPx(".5") was "0")
     const m = /^(\d+)(?:\.(\d*))?e([+-]?\d+)$/i.exec(t);
     if (m) { const d = m[1] + (m[2] || ""), pt = m[1].length + Number(m[3]); t = pt <= 0 ? "0." + "0".repeat(-pt) + d : pt >= d.length ? d + "0".repeat(pt - d.length) : d.slice(0, pt) + "." + d.slice(pt); }
     return /^\d+(\.\d*)?$/.test(t) ? neg + t : "";
@@ -43,7 +45,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** a book size, cut: "k" from 1000 (the panel's fmtAbbrev) */
   const abbrev = (v) => { v = Number(v); if (!(v > 0)) return "—"; const trim = (x) => { const f = Math.pow(10, x < 10 ? 2 : 1); return (Math.floor(x * f) / f).toString(); }; return v >= 1000 ? trim(v / 1000) + "k" : trim(v); };
   /** an amount for display, CUT to dp decimals from its exact decimal text, never rounded (0.19.256: it was rounded to nine decimals first) */
-  const cut = (n, dp) => { const t = plainNum(n); if (!t) return String(Number(n)); const i = t.indexOf("."); return (i < 0 ? t : t.slice(0, i + 1 + (dp == null ? 6 : dp))).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; };
+  const cut = (n, dp) => { const t = plainNum(n); if (!t) return String(Number(n)); const i = t.indexOf("."); return ((i < 0 ? t : t.slice(0, i + 1 + (dp == null ? 6 : dp))).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0").replace(/^-0$/, "0"); };   // never "-0"
   /** the panel's ax6: the live estimate, floored to 6 decimals */
   const ax6 = (x) => (isFinite(x) && x > 0 ? String(Math.floor(x * 1e6) / 1e6) : "");
   /** A typed amount as a plain number text. A comma or a second point is never read as anything ("" = no amount):
@@ -188,11 +190,24 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const RUNGS = 6;
   const n0 = (v) => Number(v) || 0;
   const clampLevels = (v) => Math.max(1, Math.min(RUNGS, Math.floor(n0(v)) || 1));
-  /** The prices the editor writes into the visible rungs from mid, step % and skew % (skew is held to ±20 %). */
+  /** A plain number as an exact fraction [numerator, denominator] (BigInt), or null. */
+  const ratOf = (v) => { const t = plainNum(v); if (!t) return null; const neg = t[0] === "-", [i, f = ""] = (neg ? t.slice(1) : t).split("."); const n = BigInt((i || "0") + f); return [neg ? -n : n, 10n ** BigInt(f.length)]; };
+  /** n / d as exact decimal text, enough digits for six significant figures; 0 or less is "0". */
+  const ratText = (n, d) => {
+    if (n <= 0n) return "0";
+    let r = n % d, s = (n / d).toString() + ".", sig = (n / d) > 0n ? (n / d).toString().length : 0;
+    for (let k = 0; k < 400 && r && sig < 7; k++) { r *= 10n; const q = r / d; s += q.toString(); r %= d; if (sig || q) sig++; }
+    return s.replace(/\.$/, "");
+  };
+  /** The prices the editor writes into the visible rungs from mid, step % and skew % (skew is held to ±20 %). Exact decimal
+   *  arithmetic (0.19.277): in floats 0.7 * 0.98 is 0.68599999…, so a rung was cut one below its price (0.685999 for 0.686, an
+   *  ask of 0.00379499 for 0.003795: published below the price meant). */
   function ladderPrices(mid, step, bias, levels) {
-    const m = n0(mid), st = n0(step), quoted = m * (1 + Math.max(-20, Math.min(20, n0(bias))) / 100), out = [];
-    if (!(m > 0 && st > 0)) return out;
-    for (let i = 0; i < clampLevels(levels); i++) out.push({ bid: fmtPx(quoted * (1 - (i + 1) * st / 100)), ask: fmtPx(quoted * (1 + (i + 1) * st / 100)) });
+    const m = ratOf(mid), st = ratOf(step), out = []; let b = ratOf(bias) || [0n, 1n];
+    if (!m || !st || m[0] <= 0n || st[0] <= 0n) return out;
+    if (b[0] > 20n * b[1]) b = [20n, 1n]; else if (b[0] < -20n * b[1]) b = [-20n, 1n];
+    const qn = m[0] * (100n * b[1] + b[0]), qd = m[1] * 100n * b[1], d = qd * 100n * st[1];   // quoted = mid × (100 + skew) / 100
+    for (let k = 1n; k <= BigInt(clampLevels(levels)); k++) out.push({ bid: fmtPx(ratText(qn * (100n * st[1] - k * st[0]), d)), ask: fmtPx(ratText(qn * (100n * st[1] + k * st[0]), d)) });
     return out;
   }
   /** A rung's size as the editor writes it from the size field: the number as typed, in plain decimals. Never six

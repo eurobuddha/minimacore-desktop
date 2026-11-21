@@ -116,7 +116,9 @@ test("amounts are cut, never rounded; prices keep six significant figures; sizes
   assert.equal(AX.cut(0.9999999999, 6), "0.999999"); assert.equal(AX.cut(1e-7, 9), "0.0000001"); assert.equal(AX.cut("12.3400", 2), "12.34");
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "dexicon-ax.js"), "utf8");
   const fmt = src.slice(src.indexOf("const plainNum = "), src.indexOf("const ax6 = "));
-  assert.ok(fmt.length > 200 && !/toPrecision\(|toFixed\(/.test(fmt), "no rounding in the screens' price and amount formatters");
+  // 0.19.277: one toPrecision(15) is allowed, in plainNum, and only on a number: a double's digits past the 15th are noise of its
+  // binary form (4.35 * 100 is 434.99999999999994), not a figure anyone wrote; nothing else rounds
+  assert.ok(fmt.length > 200 && !/toFixed\(/.test(fmt) && (fmt.match(/toPrecision\(/g) || []).length === 1 && fmt.includes('typeof x === "number" ? (Number.isFinite(x) ? parseFloat(x.toPrecision(15)) : x)'), "no rounding in the screens' price and amount formatters");
   assert.equal(AX.abbrev(10199.9), "10.1k"); assert.equal(AX.abbrev(9.999), "9.99"); assert.equal(AX.abbrev(0), "—");
 });
 test("the token is MxUSD wherever a user reads it; USDT names only the Ethereum leg", () => {
@@ -216,12 +218,19 @@ for (const c of FORMS) test(`Save & publish, ${c.name}: the same call and the sa
 test("the editor's prices from mid, step and skew are the old editor's, rung for rung", async () => {
   for (const [mid, step, bias, levels] of [["1", "1", "0", "3"], ["0.00332683", "0.5", "-2", "6"], ["1.0004", "2.5", "35", "2"], ["1", "1", "0", "0"], ["", "1", "0", "3"], ["1", "0", "0", "3"]]) {
     const was = old(`ladder|${[mid, step, bias, levels].join("/")}`);
-    // CHANGED on purpose (0.19.256): a price is cut to six significant figures, never rounded: each is the old editor's, or
-    // the old one was rounded UP from it by one in the sixth figure
-    const now = AX.ladderPrices(mid, step, bias, levels), near = (a, b) => a === b || (Number(a) < Number(b) && Number(b) - Number(a) <= Math.pow(10, Math.floor(Math.log10(Number(b))) - 5) * (1 + 1e-9));
-    assert.equal(now.length, was.length, [mid, step, bias, levels].join(" / "));
-    now.forEach((r, i) => { assert.ok(near(r.bid, was[i].bid) && near(r.ask, was[i].ask), [mid, step, bias, levels].join(" / ") + ": " + JSON.stringify([r, was[i]])); });
+    // CHANGED on purpose (0.19.256): a price is cut to six significant figures, never rounded; 0.19.277: worked out in exact
+    // decimals, so each rung is its price cut, the same as the old editor's wherever its rounding did not round up
+    assert.equal(AX.ladderPrices(mid, step, bias, levels).length, was.length, [mid, step, bias, levels].join(" / "));
   }
+  // the exact rungs (worked out apart, in Python's Decimal at 80 digits, then cut to six significant figures)
+  const R = (...p) => p.map(([bid, ask]) => ({ bid, ask }));
+  for (const [args, want] of [[["1", "1", "0", "3"], R(["0.99", "1.01"], ["0.98", "1.02"], ["0.97", "1.03"])],
+    [["0.00332683", "0.5", "-2", "6"], R(["0.00324399", "0.00327659"], ["0.00322769", "0.00329289"], ["0.00321138", "0.00330919"], ["0.00319508", "0.00332549"], ["0.00317878", "0.0033418"], ["0.00316248", "0.0033581"])],
+    [["1.0004", "2.5", "35", "2"], R(["1.17046", "1.23049"], ["1.14045", "1.2605"])], [["1", "1", "0", "0"], R(["0.99", "1.01"])], [["", "1", "0", "3"], []], [["1", "0", "0", "3"], []],
+    [["0.7", "1", "0", "6"], R(["0.693", "0.707"], ["0.686", "0.714"], ["0.679", "0.721"], ["0.672", "0.728"], ["0.665", "0.735"], ["0.658", "0.742"])],
+    [["0.0033", "3", "0", "6"], R(["0.003201", "0.003399"], ["0.003102", "0.003498"], ["0.003003", "0.003597"], ["0.002904", "0.003696"], ["0.002805", "0.003795"], ["0.002706", "0.003894"])]])
+    assert.deepEqual(AX.ladderPrices(...args), want, args.join(" / "));
+  assert.equal(AX.fmtPx(".5"), "0.5"); assert.equal(AX.cut(-0.001, 2), "0"); assert.equal(AX.cut(4.35 * 100), "435"); assert.equal(AX.cut("434.99999999"), "434.999999", "a typed figure is cut as written");
 });
 for (const confirm of [true, false]) test(`Publish and Withdraw (${confirm ? "confirmed" : "closed"}): axMakerPublish at once, axMakerWithdraw only after the old confirm`, async () => {
   const was = old(`makerWithdrawPublish|${confirm}`);
