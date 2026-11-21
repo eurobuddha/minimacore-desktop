@@ -10,7 +10,8 @@
  * from the engines' own read models (main/atomix.js activeWork, main/pandapools.js activeWork); null always means "could not
  * be asked", and is SAID, never read as idle. Pure: no electron; scripts/stopguard-test.cjs runs it.
  *
- *   work = { atomix: activeWork() | null, pools: activity rows | null, casinoOn: the settle loop is switched on }
+ *   work = { atomix: activeWork() | null, pools: activity rows | null, casinoOn: the settle loop is switched on,
+ *            casino: { offers, bets } read from this wallet's coins at the contract | null (could not be read), shop: payments at the node }
  */
 "use strict";
 const V = require("./cmdverb");
@@ -51,8 +52,11 @@ function inFlight(work, nowMs) {
     if (k) busy.push((k === 1 ? "1 pool transaction" : k + " pool transactions") + " sent in the last hour " + (k === 1 ? "is" : "are") + " not confirmed yet. The app cannot check or finish them while the node is stopped.");
   }
   if (work.shop > 0) busy.push("A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.");
-  // P2P Chance: this desktop has no count of open bets to read, so with the settle loop on they are said as not checked
-  if (work.casinoOn) unread.push("P2P Chance bets (their reveals and payouts run only while the node runs)");
+  // P2P Chance (0.18.249): this wallet's open offers and bets, counted from its coins at the contract; said as not checked only when
+  // that read failed (it said so on every stop while the loop was on)
+  const c = work.casino;
+  if (work.casinoOn && c && (c.offers || c.bets)) busy.push("P2P Chance: " + c.bets + (c.bets === 1 ? " bet" : " bets") + " and " + c.offers + (c.offers === 1 ? " offer" : " offers") + " still open. They are revealed and paid out only while the node runs; a bet that is not settled before its deadline can be claimed by the other side.");
+  else if (work.casinoOn && !c) unread.push("P2P Chance bets (their reveals and payouts run only while the node runs)");
   const lines = busy.slice();
   if (unread.length) lines.push("Could not be checked: " + unread.join("; ") + ".");
   return { busy, unread, any: lines.length > 0,

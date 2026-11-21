@@ -155,7 +155,16 @@ function requireRunning() {
 // not checkable, main asks first (this desktop shows no warning in the window), and a no refuses the stop with nothing changed.
 const stopguard = require("./stopguard");
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  casinoOn: !!config.load().casinoEnabled, shop: shop.sendingCount() });   // shop: miniMall payments at the node (0.18.225)
+  casinoOn: !!config.load().casinoEnabled, casino: await casinoOpen().catch(() => null), shop: shop.sendingCount() });   // shop: miniMall payments at the node (0.18.225)
+// This wallet's open P2P Chance offers and bets (0.18.249): every coin of it at the contract is unspent, so open; an offer is one it
+// made that nobody took yet (phase 0). Read only while the settle loop is switched on; a failed read is "could not be checked".
+async function casinoOpen() {
+  if (!config.load().casinoEnabled) return null;
+  const mine = await casino.myBets();
+  if (!Array.isArray(mine)) throw new Error("no list");
+  const offers = mine.filter(b => b && b.amHouse && Number(b.phase) === 0).length;
+  return { offers, bets: mine.length - offers };
+}
 const stopGuard = stopguard.stopGuard({ running: () => node.state === "running", gather: inFlightWork, log: (l) => node.log(l),
   ask: async (w) => {
     if (win && !win.isDestroyed()) { win.show(); win.focus(); }

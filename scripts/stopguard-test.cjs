@@ -98,3 +98,20 @@ test("a miniMall payment being sent is in flight: the guard asks, and says to wa
     assert.equal(shop.sendingCount(), 1); release({ status: true, response: { txpowid: "0xP" } }); await placing; assert.equal(shop.sendingCount(), 0);
   } finally { Module._load = real; fs.rmSync(DIR, { recursive: true, force: true }); }
 });
+
+// ---- 0.18.249: P2P Chance open bets are counted; "could not be checked" only when that read fails ----
+test("P2P Chance: open offers and bets are counted from this wallet's coins at the contract; none open asks nothing; a failed read is not checked", async () => {
+  const now = Date.now();
+  assert.equal(S.inFlight(Object.assign({}, IDLE, { casinoOn: true, casino: { offers: 0, bets: 0 } }), now).any, false, "none open: no question (it asked on every stop)");
+  const w = S.inFlight(Object.assign({}, IDLE, { casinoOn: true, casino: { offers: 1, bets: 2 } }), now);
+  assert.match(w.busy[0], /^P2P Chance: 2 bets and 1 offer still open\./); assert.equal(w.title, "Stop the node with work in flight?");
+  assert.match(S.inFlight(Object.assign({}, IDLE, { casinoOn: true, casino: null }), now).message, /Could not be checked: P2P Chance bets/);
+  assert.equal(S.inFlight(Object.assign({}, IDLE, { casinoOn: false, casino: null }), now).any, false, "the loop off: not asked about");
+  // main's count: every coin of this wallet at the contract is open; an offer is its own, untaken (phase 0)
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function casinoOpen() {"), main.indexOf("\n}\n", main.indexOf("async function casinoOpen() {")) + 3);
+  const make = (enabled, bets) => new Function("config", "casino", src + "\nreturn casinoOpen;")({ load: () => ({ casinoEnabled: enabled }) }, { myBets: async () => { if (bets instanceof Error) throw bets; return bets; } });
+  assert.deepEqual(await make(true, [{ amHouse: true, phase: 0 }, { amHouse: true, phase: 1 }, { amPlayer: true, phase: 2 }])(), { offers: 1, bets: 2 });
+  await assert.rejects(make(true, new Error("P2PChance engine not ready yet"))(), /not ready/);
+  assert.equal(await make(false, [])(), null, "not read while the loop is off");
+  assert.ok(/casino: await casinoOpen\(\)\.catch\(\(\) => null\)/.test(main), "a failed read is null: said as not checked");
+});
