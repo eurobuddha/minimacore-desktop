@@ -197,7 +197,7 @@ function requireRunning() {
 
 // The commands that show what controls the funds (main/seedgate.js, 0.19.176): `vault` and `seedrandom` run from a window
 // only once the phrase typed for that exact command, and the system's prompt where there is one, were checked here.
-const seedgate = require("./seedgate");
+const seedgate = require("./seedgate"), cmdverb = require("./cmdverb");
 // The system's own check of every secret gate (main/syscheck.js, 0.19.188): Touch ID; refused while a Touch ID that worked
 // before cannot be asked; a main-process message box naming what is shown where there never was one.
 const systemCheck = require("./syscheck").forElectron(require("electron"), () => win);
@@ -219,6 +219,11 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   // control characters refused (0.19.187, released 0.18.174): the node reads them in ways no check here follows
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
+  // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
+  for (const part of cmdverb.parts(command)) {
+    const twice = cmdverb.is(part, "send") ? cmdverb.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
+    if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
+  }
   requireRunning();
   // vault / seedrandom / keys genkey read as the node reads them: only with a pass; a chain is refused. The deciding check.
   const gated = seedgate.refusal(command, secretGate.take); if (gated) throw new Error(gated);

@@ -260,3 +260,20 @@ test("the RPC write timeout reads the verb as the node does", () => {
   for (const c of ['"send" amount:1', "\u0002vault", 'v"ault"', "status;send amount:1", "SEEDRANDOM modifier:x", '"txnpost" id:a']) assert.equal(_timeoutFor(c), 180000, JSON.stringify(c));
   for (const c of ["status", "balance", '"status"']) assert.equal(_timeoutFor(c), 30000, c);
 });
+
+// ---- 0.19.191: mcd:cmd refuses a send that names amount, tokenid, address or fromaddress twice (released 0.18.187) ----
+test("a send that repeats amount, tokenid, address or fromaddress is refused before anything is sent; a key inside a state's JSON is not a parameter", async () => {
+  const V = require("../main/cmdverb"), FOUR = ["amount", "tokenid", "address", "fromaddress"];
+  assert.deepEqual(V.repeated("send amount:1 address:0xA address : 0xB", FOUR), ["address"]);
+  assert.deepEqual(V.repeated('send amount:1 "amount":2 address:0xA', FOUR), ["amount"]);
+  assert.deepEqual(V.repeated("send amount:1 address:0xA tokenid:0x00 TOKENID:" + MXUSD, FOUR), ["tokenid"]);
+  assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x"}', FOUR), [], "a key inside a state's JSON is not a parameter");
+  assert.deepEqual(V.repeated("send amount:1 address:0xA fromaddress:0xB", FOUR), []);
+  // the handler, run: the refusal comes before the node is asked anything
+  const h = mainJs.slice(mainJs.indexOf('ipcMain.handle("mcd:cmd"'));
+  const body = h.slice(h.indexOf("{") + 1, h.indexOf("\n  requireRunning();"));
+  const run = new Function("cmdverb", "command", body);
+  for (const c of ["send amount:1 address:0xA amount:9", '"send" address:0xA amount:1 "address":0xB', "status;send amount:1 tokenid:0x00 address:0xA tokenid:" + MXUSD])
+    assert.throws(() => run(V, c), /^Error: This send names (amount|address|tokenid) more than once \(the node would use only the last\)\. Write each once\.$/, c);
+  for (const c of ["send amount:1 address:0xA", "sendpoll action:list action:remove", "txnoutput id:a amount:1 amount:2"]) assert.doesNotThrow(() => run(V, c), c);
+});
