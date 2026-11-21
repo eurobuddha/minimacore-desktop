@@ -189,3 +189,15 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
   const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
   assert.ok(h.indexOf("restore.replacesKeysElsewhere(command)") > 0 && h.indexOf("restore.replacesKeysElsewhere(command)") < h.indexOf("seedgate.refusal(command"), "refused before the gate asks anything");
 });
+
+// ---- 0.19.262: the P2P Chance bets the settle loop found hold a wallet replacement on every install ----
+test("P2P Chance: bets found by the settle loop of an install that only watches still refuse a wallet replacement, and are said on Quit and Shutdown", () => {
+  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
+  assert.ok(/const walletWork = [\s\S]{0,600}casino: casino\.open\(\), poolsState:/.test(main), "the restore gate reads the settle loop's own count");
+  assert.ok(/casino: casino\.open\(\), casinoOn: !!config\.load\(\)\.casinoEnabled/.test(main), "Quit and Shutdown too");
+  assert.ok(!/casinoEnabled \? casino\.open\(\) : null/.test(main));
+  const R = require("../main/restore.js");
+  assert.ok(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: { offers: 0, bets: 1 }, dexicon: { ready: true, takes: 0 }, futurecash: { ready: true, posted: 0 } }).some(l => /P2P Chance: 0 offers and 1 bet still open/.test(l)));
+  const cas = fs.readFileSync(path.join(ROOT, "main", "casino.js"), "utf8");
+  assert.ok(/function invalidate\(\) \{[\s\S]{0,500}if \(was\) startLoop\(\); else if \(wasWatching\) watch\(\);/.test(cas), "after a replacement the loop goes on, on the new wallet");
+});

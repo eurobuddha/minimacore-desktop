@@ -310,7 +310,9 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 });
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
 const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  casino: config.load().casinoEnabled ? casino.open() : null, poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
+  // P2P Chance (0.19.262): whatever the settle loop found, also on an install that only watches (the loop starts by itself
+  // when this wallet has bets on the chain). open() is null until a clean scan, so a wallet that never bet is never held up.
+  casino: casino.open(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
   futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
   dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
@@ -356,7 +358,7 @@ ipcMain.handle("mcd:nodeStop", async () => { await node.stop(); return node.snap
 // What a Shutdown (the node stops) or a Quit (the app goes) would interrupt: each engine's own activeWork(), read here
 // and said by main/inflight.js for BOTH, so the two warnings cannot disagree (0.18.142). null = could not be asked.
 const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  dexicon: await dexicon.activeWork().catch(() => null), casino: config.load().casinoEnabled ? casino.open() : null, casinoOn: !!config.load().casinoEnabled,
+  dexicon: await dexicon.activeWork().catch(() => null), casino: casino.open(), casinoOn: !!config.load().casinoEnabled,
   futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null) });
 // The Apps tab's Freeze (main/freeze.js): what each app's background work is, and the list kept in the config.
 const whenRunning = (fn) => () => { if (node.state === "running") return fn(); };   // the start's own promise goes back: main/freeze.js runs one start at a time and remembers a failed one
