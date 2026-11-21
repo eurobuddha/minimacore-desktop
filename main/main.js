@@ -272,6 +272,9 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
     if (cmdverb.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
     if ((cmdverb.is(part, "multisig") || cmdverb.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
   }
+  // keyuses: past a key's last one-time use for this wallet's key mode, digits only (0.19.325, main/restore.js keyusesProblem): typed, or
+  // built by the restore screens (setup restore, Backup & Recovery's rebuild), which all reach the node through here
+  const kuBad = restore.keyusesProblem(command, (() => { try { return config.load().keyMode; } catch (e) { return ""; } })()); if (kuBad) throw new Error(kuBad);
   // archive / mysql / reset with a phrase or a backup, vault action:resetkeys: the keys change with no engine held and no key-mode check (0.19.218)
   if (restore.replacesKeysElsewhere(command)) throw new Error("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.");
   requireRunning();

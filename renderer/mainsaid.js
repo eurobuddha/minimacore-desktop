@@ -71,6 +71,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["RESTORE_MIX_CLASSIC", I18N.N_("This install holds a classic key wallet, and that cannot be changed. This backup holds a block key wallet, so restoring it here would mix the two kinds of key for good. Nothing was changed.\n\nWhat you can do: restore it in a fresh install of the app, or send its funds to an address of this wallet from the app that made it.")],
     ["RESTORE_MIX_BLOCK", I18N.N_("This install holds a block key wallet, and that cannot be changed. This backup holds a classic key wallet, so restoring it here would mix the two kinds of key for good. Nothing was changed.\n\nWhat you can do: restore it in a fresh install of the app, or send its funds to an address of this wallet from the app that made it.")],
     ["RESTORE_HOST", I18N.N_("MegaMMR host must be host:port.")],
+    ["RESTORE_KEYUSES_MAX", I18N.N_("keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.")],
     ["RESTORE_FILE_EMPTY", I18N.N_("Enter the backup file's name or path.")],
     ["RESTORE_FILE_SPACES", I18N.N_("File path can't contain spaces or quotes.")],
     ["RESTORE_PASSWORD_SPACES", I18N.N_("Password can't contain spaces or quotes.")],

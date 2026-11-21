@@ -61,6 +61,7 @@ test("Restoring a backup and replacing the wallet: every refusal, every line of 
   for (const [p, rec, sup] of [["", "classic", true], ["classic", "", true], ["block", "classic", false], ["block", "classic", true], ["classic", "block", true]]) check(r.backupModeProblem(p, rec, sup));
   for (const o of [{ host: "x" }, { host: "h:1" }, { host: "h:1", file: "a b" }, { host: "h:1", file: "a", password: "p q" }, { host: "h:1", file: "a;b" }, { host: "h:1", file: "a", password: "p;q" }]) check(r.restoreFileCommand(o).error);
   check(r.backupCommandProblem("backup password:a\"b"));
+  check(r.keyusesProblem("megammrsync action:resync host:h:1 keyuses:300000", "classic")); check(r.keyusesProblem("sendfrom keyuses:268435455", "block"));   // 0.19.325
   check(await rejected(r.restoreBackup({ mode: "classic", host: "h:1", file: "f" }, { keyMode: "classic", supported: true, running: false })));
   const P = "MxG0" + "A".repeat(59), TX = "0x" + "AB".repeat(32), M = 3 * 60000;
   const worlds = [

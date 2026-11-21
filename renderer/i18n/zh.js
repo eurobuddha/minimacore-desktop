@@ -5340,7 +5340,8 @@
   "The chain's figure for this key is {chain} uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "链上对此密钥的数字是 {chain} 次使用，达到或超过一个密钥拥有的 262144 次一次性使用：如果该数字正确，发送将再次使用一次性密钥签名，因此本应用不会从该地址签名。未保存任何内容。",
   "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.": "此钱包保存的密钥使用次数为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用（0 到 262143）：现在发送会再次使用一次性密钥签名，因此本应用不会从该地址签名。该计数从不降低。未发送任何内容。",
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}，达到或超过一个密钥拥有的 262144 次一次性使用：发送将再次使用一次性密钥签名，因此本应用不会从该地址签名。未保存任何内容。",
-  "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}。请确认至少这么多。未保存任何内容。"
+  "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.": "此钱包保存的密钥使用次数在损坏前为 {count}。请确认至少这么多。未保存任何内容。",
+  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run.": "keyuses: 是一个密钥已经使用过的次数：对此钱包的密钥而言，是 0 到 {max} 之间的整数。更大的数字会使节点再次使用一次性密钥签名，或拒绝签名。未运行任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5463,5 +5464,6 @@
   "The chain's figure for this key is {chain} uses, at or past the 262144 one-time uses a key has: if it is right, a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
   "This wallet's saved key-use count is {count}, at or past the 262144 one-time uses a key has (0 to 262143): a send now would sign with a one-time key again, so this app will not sign from this address. The count is never lowered. Nothing was sent.",
   "This wallet's saved key-use count read {count} before it was damaged, at or past the 262144 one-time uses a key has: a send would sign with a one-time key again, so this app will not sign from this address. Nothing was saved.",
-  "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved."
+  "This wallet's saved key-use count read {count} before it was damaged. Confirm at least that many. Nothing was saved.",
+  "keyuses: is how many times a key has already been used: a whole number from 0 to {max} for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run."
 ] });

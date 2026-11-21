@@ -45,6 +45,22 @@ function restoreFileCommand(o) {
   return { cmd };
 }
 
+// keyuses: (0.19.325) is how many times a key has already been used, read from core/minima-core (e64600285be, and the block-capable
+// line 49d667d6eb4): sendfrom, signfrom, consolidatefrom and createtokenfrom hand it to txnsign publickey:custom (the key signs AT that
+// use); megammrsync, archive and mysql resyncs with a phrase and vault action:restorekeys set every wallet key's uses to it
+// (Wallet.updateAllKeyUses), keys action:createallkeys makes the keys with it, restoresync adds it to every key. The node keeps only its
+// low 32 bits (MiniNumber.getAsInt: 4294967296 is 0). A classic key (64 x 3 = 262144 uses) signs at the stored use and starts again at
+// use 0 once it reaches 262144 (TreeKey.sign "MAX TREEKEYS USED"): 262143 is the last. On a block key wallet (128 x 4 = 268435456) the
+// use is the block number, or one past the stored figure when that is higher (block.getCurrentBlockAsKeyUses), so the stored figure
+// is a floor and 268435454 is the last that still signs (the block-capable line refuses past capacity). Digits only, at most the bound of
+// the wallet's recorded key mode (a restore records the chosen mode before it runs; classic, the smaller, while none is recorded).
+const KEYUSES_MAX = { classic: 262143, block: 268435454 };
+/** Why a command's keyuses: may not be sent ("" = it may), for this wallet's key mode ("classic" | "block" | anything else: classic). */
+function keyusesProblem(command, mode) {
+  const max = KEYUSES_MAX[mode] || KEYUSES_MAX.classic;
+  const bad = V.parts(command).some(part => V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= max)));
+  return bad ? "keyuses: is how many times a key has already been used: a whole number from 0 to " + max + " for this wallet's keys. A larger figure makes the node sign with a one-time key again, or refuse to sign. Nothing was run." : "";
+}
 /** Is this node command (or any ;-separated part of it) a megammrsync resync, which ends by shutting the node down? */
 function isResync(command) {
   return V.parts(command).some(part => runsAs(part, "megammrsync") && hasParam(part, "action", "resync"));
@@ -251,5 +267,5 @@ async function restoreBackup(o, d) {
   return d.run(built.cmd);
 }
 
-module.exports = { stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+module.exports = { keyusesProblem, KEYUSES_MAX, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
   onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };

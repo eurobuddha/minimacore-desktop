@@ -667,3 +667,29 @@ test("multisig's file C:/dir/x.txn (a drive letter with forward slashes) runs; a
   for (const c of ["multisig action:view file:C:/dir/x.txn", "multisigread action:view file:d:/a/b.txn"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
   for (const c of ["multisig action:view file:C:/dir/x:y.txn", "multisig action:view file:dir/C:/x.txn"]) await assert.rejects(hs["mcd:cmd"](null, c), /builds further commands/, c);
 });
+
+// ---- 0.19.325: keyuses: is never past a key's last one-time use for the wallet's key mode, digits only (typed, or built by a restore screen) ----
+test("keyuses: past the key mode's last use (classic 262143, block 268435454) or not digits only is refused before the node; within it runs", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js");
+  assert.deepEqual(R.KEYUSES_MAX, { classic: 262143, block: 268435454 });
+  for (const v of ["262144", "300000", "4294967296", "4294967299", "262144abc", "1.5", "-1", "1e3", ""]) assert.match(R.keyusesProblem("megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:" + v, "classic"), /a whole number from 0 to 262143 for this wallet's keys/, v);
+  for (const m of ["classic", "", undefined, "mixed"]) assert.equal(R.keyusesProblem("sendfrom keyuses:262143", m), "", "262143 is the last classic use (" + m + ")");
+  assert.match(R.keyusesProblem("sendfrom keyuses:262144", ""), /0 to 262143/, "no mode recorded: the smaller bound");
+  assert.equal(R.keyusesProblem("megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:268435454", "block"), "");
+  assert.match(R.keyusesProblem("megammrsync action:resync host:h:1 phrase:\"a b\" keyuses:268435455", "block"), /0 to 268435454/);
+  assert.match(R.keyusesProblem("status;sendfrom KEYUSES:300000", "classic"), /0 to 262143/, "any piece, the name folded");
+  const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
+  for (const mode of ["classic", "block"]) {
+    const hs = {}, sent = [];
+    new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
+      { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (c) => { sent.push(c); return { status: true }; }, { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+      { rpcPort: () => 0 }, { rpcSecret: () => "", load: () => ({ keyMode: mode }) }, async (run, c) => c, async () => {}, (op) => op());
+    const big = mode === "classic" ? "300000" : "268435455";
+    for (const c of ["megammrsync action:resync host:h:1 phrase:\"a b\" anyphrase:true keyuses:" + big, "sendfrom fromaddress:0x01 address:0x02 amount:1 script:\"RETURN SIGNEDBY(0x03)\" privatekey:0x04 keyuses:" + big,
+      "consolidatefrom fromaddress:0x01 address:0x02 amount:1 script:\"RETURN SIGNEDBY(0x03)\" privatekey:0x04 keyuses:4294967296", "vault action:restorekeys phrase:\"a b\" keyuses:" + big, "keys action:createallkeys keyuses:" + big])
+      await assert.rejects(hs["mcd:cmd"](null, c), new RegExp("keyuses: is how many times a key has already been used: a whole number from 0 to " + R.KEYUSES_MAX[mode]), mode + ": " + c);
+    assert.deepEqual(sent, [], mode + ": nothing reached the node");
+    const ok = "megammrsync action:resync host:h:1 phrase:\"a b\" anyphrase:true keyuses:" + (mode === "classic" ? "262143" : "300000");
+    await hs["mcd:cmd"](null, ok); assert.deepEqual(sent, [ok], mode + ": within the bound it runs");
+  }
+});
