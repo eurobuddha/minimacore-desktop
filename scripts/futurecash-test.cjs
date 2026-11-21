@@ -747,3 +747,17 @@ test("L1: Revoke during a pass: nothing more is posted after the grant is gone",
   node.sent.length = 0; await e.pass(150);
   assert.equal(node.sent.filter(c => /^txnpost/.test(c)).length, 1, "the post under way ends; no other starts");
 });
+
+test("L2: with sends only observed, a Send or a Consolidate still keeps off the coins Future Cash Next holds (and only those)", async () => {
+  const { createRegistry } = require("../main/reserve"), { makeNode, coinId, ADDR: RA } = require("./reserve-model.cjs");
+  const node = makeNode([{ coinid: coinId(1), amount: "100", address: RA(1) }, { coinid: coinId(2), amount: "50", address: RA(2) }]);
+  const reg = createRegistry({ now: () => 1e12, log: () => {}, sends: "observe" }), as = (o) => (c) => reg.guard(o, c, node.run);
+  reg.setHolds("futurecash", [{ coinid: coinId(1), why: "" }]);
+  const big = await as("wallet")("send amount:120 address:" + RA(9));
+  assert.equal(big.status, false); assert.match(big.error, /held for Future Cash Next/);
+  const cons = await as("wallet")("consolidate tokenid:0x00");
+  assert.equal(cons.status, false); assert.match(cons.error, /Nothing consolidated/);
+  reg.setHolds("futurecash", []); reg.setHolds("dexicon", [{ coinid: coinId(1), why: "a live Dexicon order" }]);
+  const obs = await as("wallet")("consolidate tokenid:0x00");
+  assert.notEqual(obs.reserved, true, "a Dexicon hold is still only observed");
+});

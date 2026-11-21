@@ -36,6 +36,7 @@ const SWEEP_READS = 25;            // coins asked of the node per sweep, round r
 const SETTLES = new Set(["atomix", "casino"]);   // owners whose transactions settle against a deadline
 const TXN_WHY = { atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet", futurecash: "a Future Cash Next transaction" };
 const HOLD_WHY = { dexicon: "Dexicon" };
+const ENFORCED = new Set(["futurecash"]);   // owners whose holds sends and consolidate respect even while they are only observed (review L2)
 HOLD_WHY.futurecash = "Future Cash Next";   // the coins Future Cash Next is about to sweep (main/futurecash.js coinHolds)
 // Which command it is, and its parameters, are read the way the node reads them (main/cmdverb.js, 0.19.192): the node trims
 // every character up to U+0020, takes a "quoted" first word as the verb, reads ":" as a token and drops quotes. A
@@ -197,7 +198,7 @@ function createRegistry(o = {}) {
     const k = lc(coin), t = txns.get(k), h = holds.get(k);
     return (t && t.owner !== owner && t) || (h && h.owner !== owner && h) || null;
   }
-  const others = (owner) => { for (const r of txns.values()) if (r.owner !== owner) return true; for (const h of holds.values()) if (h.owner !== owner) return true; return false; };
+  const others = (owner, only) => { for (const r of txns.values()) if (r.owner !== owner && (!only || only.has(r.owner))) return true; for (const h of holds.values()) if (h.owner !== owner && (!only || only.has(h.owner))) return true; return false; };
 
   /** Is this one of the wallet's own plain coins (at a simple address of mine)? Throws when the node does not say. */
   async function isPlain(coin, read) {
@@ -302,8 +303,8 @@ function createRegistry(o = {}) {
    * What the reservation makes of a `send`: { command } to forward (pinned with fromaddress: when it has to be kept
    * off a held coin), or { refuse: why }. Reads only. `fromaddress:` is the only coin choice `send` has (main/sendpin.js).
    */
-  async function sendVerdict(owner, c, send) {
-    const held = (id) => foreign(owner, id);
+  async function sendVerdict(owner, c, send, only) {
+    const held = (id) => { const r = foreign(owner, id); return r && (!only || only(r)) ? r : null; };   // only: the records that count (observe mode: Future Cash Next's)
     const dup = args(c).dup;
     if (dup) return { refuse: "Not sent: the parameter " + dup + ": is given twice. Nothing was signed." };
     const from = param(c, "fromaddress");
@@ -330,6 +331,13 @@ function createRegistry(o = {}) {
   async function sendCmd(owner, c, send) {
     if (mode.sends === "off" || !others(owner)) return send(c);
     if (mode.sends !== "enforce") {
+      // ALWAYS ENFORCED (0.19.211, Future Cash Next review L2): a coin Future Cash Next holds is one it must move off an
+      // exposed key; no send takes it first, whatever the observe setting. Only those coins: every other hold is observed.
+      if (others(owner, ENFORCED)) {
+        const v = await sendVerdict(owner, c, send, (r) => ENFORCED.has(r.owner));
+        if (v.refuse) { log("refused: `send` of " + owner + " (Future Cash Next's coins are kept whatever the setting): " + v.refuse); return refusal("send", v.refuse); }
+        if (v.pinned) { log("pinned: `send` of " + owner + " with" + v.command.slice(c.length) + " to keep it off coins held for " + v.by); return send(v.command); }
+      }
       try {
         const v = await sendVerdict(owner, c, send);
         if (v.refuse) log("observe: `send` of " + owner + " WOULD HAVE BEEN REFUSED: " + v.refuse + " (sent unchanged: sends are observed, not enforced)");
@@ -350,12 +358,14 @@ function createRegistry(o = {}) {
     if (mode.sends === "off" || lc(param(c, "dryrun")) === "true") return send(c);
     const mine = [...txns.values(), ...holds.values()].filter(r => r.owner !== owner);
     if (!mine.length) return send(c);
-    const enforce = mode.sends === "enforce", dup = args(c).dup;
+    const dup = args(c).dup;
+    let enforce = mode.sends === "enforce";
     let why = dup ? "Nothing consolidated: the parameter " + dup + ": is given twice. Nothing was signed." : "";
     if (!why) {
       try { if (await lookUp(mine, send)) persist(); } catch (e) {}
       const tok = lc(param(c, "tokenid")), by = mine.filter(r => (txns.get(lc(r.coinid)) === r || holds.get(lc(r.coinid)) === r) && (r.tokenid == null || lc(r.tokenid) === tok));
       if (!by.length) return send(c);
+      if (by.some(r => ENFORCED.has(r.owner))) enforce = true;   // Future Cash Next's coins: kept whatever the setting (review L2)
       why = "Nothing consolidated: " + by.length + " coin" + (by.length === 1 ? " is" : "s are") + " held for " + whys(by) + ", and consolidating chooses its own coins and could take " + (by.length === 1 ? "it" : "one of them") + ". Try again when " + (by.length === 1 ? "it is" : "they are") + " free. Nothing was signed.";
     }
     if (!enforce) { log("observe: `consolidate` of " + owner + " WOULD HAVE BEEN REFUSED: " + why + " (sent unchanged: consolidate is observed, not enforced)"); return send(c); }
