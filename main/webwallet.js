@@ -143,29 +143,32 @@ async function isMegammr() {
 
 /** Does the running node's OWN wallet contain this public key? If so, the entered seed IS the node's own seed
  *  (keys genkey uses modifier 0 = the wallet's first key; the node derives 0,1,2,… from the same base seed). */
+// Whether a seed is the node's OWN wallet decides the whole send path (the node signs with its own counters, or this app
+// signs at its own counter). A read that fails must not answer "no" (0.18.204): the node's own seed then went down the
+// foreign path and signed at the wrong key use. Either read failing refuses, and nothing is sent.
+const CANNOT_TELL = "Could not tell whether this is the node's own wallet (the node did not answer, or its wallet is locked). Nothing was sent.";
 async function nodeHasPubkey(pubkey) {
   if (!pubkey) return false;
-  const r = resp(await runner("keys action:list").catch(() => null));
-  const keys = (r && r.keys) || [];
+  let r; try { r = await runner("keys action:list"); } catch (e) { r = null; }
+  const keys = r && r.status === true && r.response && Array.isArray(r.response.keys) ? r.response.keys : null;
+  if (!keys) throw new Error(CANNOT_TELL);
   const pk = String(pubkey).toLowerCase();
   return keys.some(k => k && k.publickey && String(k.publickey).toLowerCase() === pk);
 }
-
-/** The running node's OWN seed phrase (loopback only; used to recognise the node's wallet even if `keys action:list`
- *  transiently hiccups). Same command mail.js uses. Returns null if the wallet is password-locked / unavailable. */
+/** The node's seed phrase, for the one comparison above; throws when it cannot be read (a locked vault). */
 async function nodeSeedPhrase() {
-  const r = resp(await runner("vault action:seed").catch(() => null));
-  const p = r && (r.phrase || r.seedphrase || r.seed);
-  return (typeof p === "string" && p) ? p : null;
+  let r; try { r = await runner("vault action:seed"); } catch (e) { r = null; }
+  const v = r && r.status === true ? resp(r) : null;
+  const p = v && (v.phrase || v.seedphrase || v.seed);
+  if (typeof p !== "string" || !p) throw new Error(CANNOT_TELL);
+  return p;
 }
 
 /** Is the entered seed the running node's OWN wallet? True if the derived key-0 pubkey is in the node's key set,
- *  OR the phrase equals the node's own seed. The second check is a belt-and-suspenders fallback so a momentary
- *  `keys action:list` failure can never mis-classify the node's own wallet as a foreign seed (→ empty balance). */
+ *  else if it is the node's seed phrase. Throws when either cannot be read. */
 async function isNodeOwnSeed(pubkey, seed) {
   if (await nodeHasPubkey(pubkey)) return true;
-  const np = await nodeSeedPhrase();
-  return !!(np && String(np) === String(seed));
+  return String(await nodeSeedPhrase()) === String(seed);
 }
 
 /** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the

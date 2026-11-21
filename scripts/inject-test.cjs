@@ -118,3 +118,26 @@ test("Web Wallet counters: only a missing file is a fresh start; a damaged or un
   assert.equal(reads, 1, "one read of the counters per send");
   assert.equal(ww.keyusesInfo(A).keyuses, 8, "reserved before signing");
 });
+
+// ---- 0.18.204: "is this the node's own wallet?" never answers no on a failed read ----
+test("Web Wallet: a failed key list or a locked vault refuses the send instead of taking the foreign path", async () => {
+  const ww = require("../main/webwallet"), FROM = "0x" + "A2".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "B2".repeat(32);
+  ww.ackKeyuses(FROM, 0);
+  const rig2 = (keys, vault) => { const sent = []; ww._setRunner(async (c) => { sent.push(c.split(" ")[0] + " " + (c.split(" ")[1] || ""));
+    return c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? keys() : c.startsWith("vault") ? vault()
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: { txpowid: "0x01" } }; }); return sent; };
+  for (const [keys, vault, what] of [[() => { throw new Error("timeout"); }, () => ({ status: true, response: { phrase: "x" } }), "the key list did not answer"],
+    [() => ({ status: false, error: "busy" }), () => ({ status: true, response: { phrase: "x" } }), "the key list was refused"],
+    [() => ({ status: true, response: { keys: [] } }), () => ({ status: false, error: "Wallet is locked" }), "the vault is locked"],
+    [() => ({ status: true, response: { keys: [] } }), () => { throw new Error("timeout"); }, "the vault did not answer"]]) {
+    const sent = rig2(keys, vault);
+    await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /Could not tell whether this is the node's own wallet[\s\S]*Nothing was sent/, what);
+    assert.ok(!sent.some(c => c.startsWith("sendfrom") || c.startsWith("send ")), what + ": nothing sent");
+    await assert.rejects(ww.derive("alpha beta"), /Could not tell/, what + " (unlock)");
+  }
+  const sent = rig2(() => ({ status: true, response: { keys: [] } }), () => ({ status: true, response: { phrase: "the node's own" } }));
+  assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true, "both read: a foreign wallet sends on its own path");
+  assert.ok(sent.some(c => c.startsWith("sendfrom")));
+});

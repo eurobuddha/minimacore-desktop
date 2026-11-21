@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.204] — Web Wallet: a failed read never decides the send path
+
+- Whether an entered seed is the node's own wallet decides how a Web Wallet send is signed. A failed `keys action:list` answered "not the node's key" and a locked vault "no seed phrase", so the node's own seed could go down the foreign path and sign at the wrong key use. Either read failing now refuses: "Could not tell whether this is the node's own wallet … Nothing was sent." Test: `scripts/inject-test.cjs`.
+
 ## [0.18.203] — Web Wallet: key-use counters read strictly
 
 - The Web Wallet's key-use counters were taken as empty on ANY read or parse error, so a damaged file made a foreign wallet sign at key use 0 again (reusing a one-time key exposes it) and the next write wiped every other address's counter; `ackKeyuses("1e309")` stored Infinity, written as null and read back as 0. Now only a missing file is a fresh start; an unreadable or damaged file (or a counter that is not a whole number of at least 0) refuses with the reason, nothing is signed and the file is left as it is; the acknowledged figure must be a whole number of at least 0; a send reads the counters once for both the acknowledgement and the reservation (the write was already atomic). Test: `scripts/inject-test.cjs`.
