@@ -5326,7 +5326,8 @@
   "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.": "此命令会显示密码或私钥（rpc action:listusers、mds、sphincs action:generate）。请在终端中输入 SHOW KEY 来运行它。",
   "show passwords or a private key by running: {command}": "运行以下命令以显示密码或私钥：{command}",
   "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "这会显示密码或私钥。此终端命令将运行一次：\n\n{command}",
-  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "此命令写了 {name}: 却没有值，节点会把它读作空值。请写上它的值，或把它去掉。未运行任何命令。"
+  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "此命令写了 {name}: 却没有值，节点会把它读作空值。请写上它的值，或把它去掉。未运行任何命令。",
+  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.": "此命令会把本节点开放给他人，或把它的事件发送出去（RPC 登录或密码、主节点、Web 钩子、MiniDapp）。本应用从不需要这些，因此不会从终端运行。未运行任何命令。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5435,5 +5436,6 @@
   "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.",
   "show passwords or a private key by running: {command}",
   "This shows passwords or a private key. This Terminal command will run once:\n\n{command}",
-  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run."
+  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.",
+  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run."
 ] });

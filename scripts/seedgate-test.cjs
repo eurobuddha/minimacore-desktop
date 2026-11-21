@@ -436,3 +436,16 @@ test("masked shows the command name by name as the node reads it, never hiding t
   for (const c of ["vault phrase: action:restorekeys", "vault password: action:passwordlock", 'vault action:passwordunlock password:""'])
     await assert.rejects(g.open(c, "CHANGE KEYS"), /names (phrase|password): with no value/, c);
 });
+
+// ---- 0.19.298: what would hand the node to someone else or send its events out is not run from the Terminal ----
+test("rpc enable / password / adduser / removeuser, slavenode enable, webhooks add and mds actions are refused; rpc's status and the gated listings are not", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  for (const c of ["rpc enable:true", "rpc enable:true password:x", "rpc enable:false", "rpc action:adduser username:u password:p mode:write", "rpc action:removeuser username:u", "rpc ssl:true", "rpc action:listusers enable:true",
+    "slavenode enable:true host:10.0.0.1:9001", "slavenode enable:false", "webhooks action:add hook:http://x.example/h", "mds action:install file:x.mds.zip", "mds action:publicmds enable:true", "mds action:permission uid:0x01 trust:write", "status;rpc enable:true"])
+    await assert.rejects(hs["mcd:cmd"](null, c), /open this node to someone else/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["rpc", "rpc action:listusers", "mds", "slavenode", "webhooks", "webhooks action:list", "webhooks action:clear", "network action:list"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+});

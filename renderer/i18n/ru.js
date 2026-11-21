@@ -5339,7 +5339,8 @@
   "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.": "Эта команда показывает пароли или закрытый ключ (rpc action:listusers, mds, sphincs action:generate). Введите SHOW KEY в терминале, чтобы выполнить её.",
   "show passwords or a private key by running: {command}": "показать пароли или закрытый ключ, выполнив: {command}",
   "This shows passwords or a private key. This Terminal command will run once:\n\n{command}": "Будут показаны пароли или закрытый ключ. Эта команда терминала выполнится один раз:\n\n{command}",
-  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "В этой команде {name}: указан без значения, и узел прочитает его как пустое. Укажите значение или уберите параметр. Ничего не было запущено."
+  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "В этой команде {name}: указан без значения, и узел прочитает его как пустое. Укажите значение или уберите параметр. Ничего не было запущено.",
+  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.": "Эта команда открыла бы этот узел кому-то другому или отправляла бы его события наружу (логин или пароль RPC, главный узел, веб-хук, MiniDapps). Этому приложению это не нужно, поэтому из терминала она не запускается. Ничего не было запущено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5448,5 +5449,6 @@
   "This command shows passwords or a private key (rpc action:listusers, mds, sphincs action:generate). Type SHOW KEY in the Terminal to run it.",
   "show passwords or a private key by running: {command}",
   "This shows passwords or a private key. This Terminal command will run once:\n\n{command}",
-  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run."
+  "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.",
+  "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run."
 ] });

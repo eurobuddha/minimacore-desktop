@@ -66,7 +66,8 @@ test("Terminal: what CAN be added to a typed MINIMA send is the old beacon-dust 
   assert.match(termSendNote("send amount:1 address:0xCD"), /^note: a MINIMA send with no fromaddress: may be given one/);
   assert.match(termSendNote("SEND amount:1 address:0xCD tokenid:0x00"), /^note:/);
   assert.equal(termSendNote("send amount:1 address:0xCD fromaddress:0xEE"), ""); assert.equal(termSendNote("send amount:1 address:0xCD tokenid:0x7D39"), ""); assert.equal(termSendNote("status"), ""); assert.equal(termSendNote("sendpoll action:list"), "");
-  assert.ok(/ipcMain\.handle\("mcd:cmd"[\s\S]{0,4500}restore\.loadsBackupFile\(command\)[\s\S]{0,900}restore\.backupCommandProblem\(command\)/.test(mainJs), "restore, restoresync and megammrsync file: are still refused on the command channel (window widened on purpose in 0.19.187 and 0.19.291: mcd:cmd checks more before it)");
+  { const h = mainJs.slice(mainJs.indexOf('ipcMain.handle("mcd:cmd"'), mainJs.indexOf("// Clipboard writes")), a = h.indexOf("restore.loadsBackupFile(command)"), b = h.indexOf("restore.backupCommandProblem(command)");
+    assert.ok(a > 0 && b > a, "restore, restoresync and megammrsync file: are still refused on the command channel (read in order inside mcd:cmd since 0.19.298, not by a window)"); }
   assert.ok(/const run = \(c\) => rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), c\);/.test(mainJs), "a Terminal command goes through rpcCall (signing queue and coin guard) as the wallet");
 });
 test("Terminal (0.19.122): a chain is never pinned; the note agrees with the main process on what a MINIMA send is", async () => {
