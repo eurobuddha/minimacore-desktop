@@ -160,6 +160,9 @@ function save(patch) {
   if (arg) throw new Error(arg + " cannot be set in the extra arguments. The wallet's key mode sets it.");
   const owned = PARAMS.reservedArg(cfg.extraArgs);
   if (owned) throw new Error(owned + " cannot be set in the extra arguments. The app sets it itself.");
+  // -rescuenode: the node pastes it into "megammrsync action:resync host:" + it and runs that (Main.java): host:port only (0.19.301)
+  if (cfg.params && PARAMS.rescueProblem(cfg.params.rescuenode)) throw new Error("The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.");
+  if (/(^|\s)["']?-+rescuenode\b/i.test(String(cfg.extraArgs || ""))) throw new Error("-rescuenode is set in Startup Params, not in the extra arguments.");
   const mds = PARAMS.mdsArg(cfg.extraArgs);
   if (mds) throw new Error(mds + " cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.");   // 0.19.291
   if (cfg.params) { cfg.params = Object.assign({}, cfg.params); for (const f of PARAMS.KEY_MODE_FLAGS) delete cfg.params[f]; }
@@ -211,6 +214,8 @@ function effectiveParams() {
   const out = {};
   for (const [k, v] of Object.entries(p)) {
     if (MANAGED.has(k)) continue;
+    if (/^mds/i.test(k)) continue;   // never MDS (0.19.301): load() keeps only the manifest's flags, which has none; this is the second line
+    if (k === "rescuenode" && PARAMS.rescueProblem(v)) continue;   // pasted by the node into a command it runs (Main.java): host:port only
     if (SECRET_FLAGS.has(k)) {
       if (v === true) { const s = keychainGet("param-" + k); if (s) out[k] = s; }   // resolve secret
       else if (typeof v === "string" && v.trim()) out[k] = v.trim();

@@ -142,6 +142,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["KM_RECORD_UNSUPPORTED", I18N.N_("The node in this version of the app cannot run a block key wallet.")],
     ["KM_KIND_UNSUPPORTED", I18N.N_("This wallet uses block key uses, and that node cannot run it.")],
     ["KM_CFG_ARG", I18N.N_("{arg} cannot be set in the extra arguments. The wallet's key mode sets it.")],
+    ["KM_CFG_RESCUE", I18N.N_("The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.")],
+    ["KM_CFG_RESCUE_EXTRA", I18N.N_("-rescuenode is set in Startup Params, not in the extra arguments.")],
     ["KM_CFG_MDS", I18N.N_("{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.")],
     ["KM_CFG_OWNED", I18N.N_("{arg} cannot be set in the extra arguments. The app sets it itself.")],
     ["KM_CFG_UNKNOWN", I18N.N_("Unknown key mode.")],

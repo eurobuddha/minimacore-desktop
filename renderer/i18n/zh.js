@@ -5329,7 +5329,9 @@
   "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.": "此命令写了 {name}: 却没有值，节点会把它读作空值。请写上它的值，或把它去掉。未运行任何命令。",
   "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.": "此命令会把本节点开放给他人，或把它的事件发送出去（RPC 登录或密码、主节点、Web 钩子、MiniDapp）。本应用从不需要这些，因此不会从终端运行。未运行任何命令。",
   "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.": "此命令会用它的值构造更多命令，而其中一个值含有空白、冒号、引号或反斜杠转义，会改变那些命令。未运行任何命令。",
-  "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "每个多签公钥以及根密钥都必须是 0x 后跟 64 位十六进制数字。未运行任何命令。"
+  "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "每个多签公钥以及根密钥都必须是 0x 后跟 64 位十六进制数字。未运行任何命令。",
+  "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "救援节点必须是 host:port（名称或 IP 地址、冒号、端口号）。未保存任何内容。",
+  "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode 在启动参数中设置，而不是在额外参数中。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5441,5 +5443,7 @@
   "This command names {name}: with no value, and the node would read it as empty. Write its value, or leave it out. Nothing was run.",
   "This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.",
   "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.",
-  "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run."
+  "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.",
+  "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
+  "-rescuenode is set in Startup Params, not in the extra arguments."
 ] });

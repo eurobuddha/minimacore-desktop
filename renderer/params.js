@@ -145,7 +145,9 @@
     for (var i = 0; i < toks.length; i++) { var t = toks[i].replace(/["']/g, ""); if (t.charAt(0) === "-" && /^mds/i.test(t.replace(/^-+/, ""))) return "-" + t.replace(/^-+/, "").split("=")[0].toLowerCase(); }
     return "";
   }
-  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, mdsArg: mdsArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+  /** Why a -rescuenode value is refused ("" = it is fine, or unset): host:port only (0.19.301): the node pastes it into a command. */
+  function rescueProblem(v) { return v == null || v === "" || v === false ? "" : /^[A-Za-z0-9.\-]{1,253}:\d{1,5}$/.test(String(v)) ? "" : "host:port"; }
+  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, mdsArg: mdsArg, rescueProblem: rescueProblem, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;

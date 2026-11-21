@@ -1013,3 +1013,14 @@ test("0.19.224: no keys seen: the node stays starting through the health polls; 
     keys = keysReply([64, 3]); assert.equal(await m.verifyKeyMode(), true, "seen later: verified");
   } finally { calls.restore(); }
 });
+
+// ---- 0.19.301: MDS never reaches the node through saved settings; -rescuenode is host:port only ----
+test("saved settings: an mds* param never reaches the node, and -rescuenode takes host:port only (the node pastes it into a command)", () => {
+  freshInstall();
+  fs.writeFileSync(path.join(USERDATA, "config.json"), JSON.stringify({ params: { mdsenable: true, mdspassword: "x", rescuenode: "h.example:9001 phrase:a b c" } }));
+  const p = config.effectiveParams();
+  assert.equal(Object.keys(p).some(k => /^mds/i.test(k)), false); assert.equal(p.rescuenode, undefined, "an unsafe rescue node is never passed");
+  for (const bad of ["h.example:9001 phrase:a", "h.example", "h:9001;quit", '"h:1"']) assert.throws(() => config.save({ params: { rescuenode: bad } }), /must be host:port/, bad);
+  config.save({ params: { rescuenode: "megammr.example:9001" } }); assert.equal(config.effectiveParams().rescuenode, "megammr.example:9001");
+  assert.throws(() => config.save({ extraArgs: '-test "-rescuenode" h:1' }), /-rescuenode is set in Startup Params/);
+});
