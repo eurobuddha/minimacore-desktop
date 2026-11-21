@@ -146,6 +146,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["KM_CFG_FIXED_BLOCK", I18N.N_("This wallet's key mode is block and cannot be changed.")],
 
     // ---- Starting the node, switching its kind, replacing its wallet (main/node-manager.js) ----
+    ["NODE_KEYS_UNREAD", I18N.N_("The node's keys could not be read to check the wallet's key mode, so the app has not called the node running and the trading engines stay stopped. Restart the node; if this stays, look at the Logs.")],
     ["NODE_PORT_IN_USE", I18N.N_("Port {port} ({what}) is in use by {program} (pid {pid}). {product} did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params."), { nest: { what: { sub: "PORT_WHAT" }, program: { sub: ["ANOTHER_PROGRAM"], value: true } } }],
     ["PORT_P2P", I18N.N_("the node's P2P port"), { top: false, group: "PORT_WHAT" }],
     ["PORT_RPC", I18N.N_("the node's RPC"), { top: false, group: "PORT_WHAT" }],

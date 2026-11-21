@@ -215,11 +215,17 @@ const { EventEmitter } = require("events");
 /** A start that runs every step but java: a stand-in child, no stale-node search, no RPC polling. Returns the spawn calls. */
 function fakeJava(m) {
   const calls = [], real = { spawnFn: m.spawnFn, startHealth: m.startHealth, reclaimStaleNode: m.reclaimStaleNode, rpc: m.rpc };
-  m.rpc = async () => { throw new Error("test: no RPC"); };   // never a real node's port
+  // 0.19.224: a node is called running only once its key mode is SEEN. A stand-in whose `keys` answer shows no key shape
+  // answers with keys of the recorded mode, unless the test asks for the raw answer (calls.rawKeys = true).
+  let inner = async () => { throw new Error("test: no RPC"); };   // never a real node's port
+  const shape = () => (config.load().keyMode === "block" ? [128, 4] : [64, 3]);
+  // the getter hands out a wrapper of the stand-in set AT THAT TIME, so a test that wraps m.rpc never calls itself
+  const wrap = (f) => async (c) => { const r = await f(c); return c === "keys" && !calls.rawKeys && !keymode.keysMode(r) ? keysReply(shape(), shape()) : r; };
+  Object.defineProperty(m, "rpc", { configurable: true, enumerable: true, get: () => wrap(inner), set: (f) => { inner = f; } });
   m.spawnFn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); p.pid = 0; p.kill = (sig) => { calls.killed = sig; }; calls.proc = p; return p; };
   m.startHealth = () => {}; m.reclaimStaleNode = async () => "";
   calls.realHealth = () => { m.startHealth = real.startHealth; };
-  calls.restore = () => { m.stopHealth(); Object.assign(m, real); m.proc = null; m.state = "stopped"; m.keyModeAlert = ""; m.keyModeChecked = false; };
+  calls.restore = () => { m.stopHealth(); delete m.rpc; Object.assign(m, real); m.proc = null; m.state = "stopped"; m.keyModeAlert = ""; m.keyModeChecked = false; };
   return calls;
 }
 const KINDS = ["minima", "parlons"];
@@ -420,13 +426,14 @@ test("M5: a node found running in the other key mode is stopped at once, is neve
 test("M5: a node in the recorded mode runs; no keys yet or no answer is asked again, never guessed", async () => {
   for (const [mode, shape] of [["classic", [64, 3]], ["block", [128, 4]]]) {
     freshInstall(); config.recordKeyMode(mode); config.save({ nodeKind: "parlons", setupDone: true, walletDone: true });
-    const m = manager(true), calls = fakeJava(m), sent = [];
+    const m = manager(true), calls = fakeJava(m), sent = []; calls.rawKeys = true;
     let reply = () => { throw new Error("not up yet"); };
     m.rpc = async (c) => { sent.push(c); if (c === "keys") return reply(); return { status: true, response: {} }; };
     await m.start();
-    assert.equal(await m.verifyKeyMode(), true); assert.equal(m.keyModeChecked, false, "no answer: not verified, not stopped");
+    // CHANGED on purpose (0.19.224): not seen yet = false (the node stays "starting", no engine starts), not stopped either
+    assert.equal(await m.verifyKeyMode(), false); assert.equal(m.keyModeChecked, false, "no answer: not verified, not stopped");
     reply = () => keysReply();
-    assert.equal(await m.verifyKeyMode(), true); assert.equal(m.keyModeChecked, false, "no keys yet: asked again");
+    assert.equal(await m.verifyKeyMode(), false); assert.equal(m.keyModeChecked, false, "no keys yet: asked again");
     reply = () => keysReply(shape, shape);
     assert.equal(await m.verifyKeyMode(), true); assert.equal(m.keyModeChecked, true);
     const n = sent.length; await m.verifyKeyMode(); assert.equal(sent.length, n, "once verified it is not asked again in this run");
@@ -976,4 +983,20 @@ test("0.19.223: -Duser.language=en -Duser.country=US before -jar on both node ki
   assert.ok(V.is("sİgn data:0x01", "sign") && V.is("SEND amount:1", "send") && V.is("İmport", "import"));
   assert.equal(createNodeRunner(async () => ({})).signing("sİgn data:0x01"), true, "a Turkish-folded sign is queued");
   assert.equal(createNodeRunner(async () => ({})).signing("TXNSİGN id:a publickey:auto"), true);
+});
+
+// ---- 0.19.224: the node is not called running until its key mode is seen; after 30 tries the app says so, engines held ----
+test("0.19.224: no keys seen: the node stays starting through the health polls; after 30 tries a plain error, still not running", async () => {
+  freshInstall(); config.recordKeyMode("classic"); config.save({ nodeKind: "minima", setupDone: true, walletDone: true });
+  const m = manager(true), calls = fakeJava(m); calls.rawKeys = true; let keys = { status: true, response: { keys: [] } };
+  m.rpc = async (c) => (c === "keys" ? keys : { status: true, response: { chain: { block: 5 } } });
+  try {
+    await m.start();
+    for (let i = 0; i < 29; i++) assert.equal(await m.verifyKeyMode(), false);
+    assert.equal(m.state, "starting"); assert.ok(!/keys could not be read/.test(m.lastError || ""), "not said before the 30th try");
+    assert.equal(await m.verifyKeyMode(), false);
+    assert.match(m.lastError, /^The node's keys could not be read to check the wallet's key mode, so the app has not called the node running and the trading engines stay stopped\./);
+    assert.equal(m.state, "starting", "never called running");
+    keys = keysReply([64, 3]); assert.equal(await m.verifyKeyMode(), true, "seen later: verified");
+  } finally { calls.restore(); }
 });

@@ -99,6 +99,7 @@ function commandOf(pid) {
  * VALUE dropped, whether it arrives as `-flag value` or as a single `-Dkey=value`. The rpcSecret is also
  * substring-replaced because the Parlons kind folds the whole Minima flag string into one -D argument.
  */
+const KEYMODE_TRIES = 30;   // health ticks (10 s each) of asking for the node's keys before the app says it cannot read them
 const JVM_LOCALE = ["-Duser.language=en", "-Duser.country=US"];
 function redactArgs(args, rpcSecret) {
   const PARAMS = require("../renderer/params.js");
@@ -453,7 +454,7 @@ class NodeManager extends EventEmitter {
     this.lastError = null;
     this.fatalHint = "";
     this.parlons = { ready: false, error: "", version: "", cape: false };
-    this.keyModeChecked = false; this.polled = false; this.carry = { out: "", err: "" }; this.cont = { out: null, err: null };
+    this.keyModeChecked = false; this.keyModeTries = 0; this.polled = false; this.carry = { out: "", err: "" }; this.cont = { out: null, err: null };
     if (this.keyModeAlert) { this.lastError = this.keyModeAlert; this.log("[app] node NOT started: " + this.keyModeAlert); this.setState("error"); return; }
     // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
     // jar that cannot run it is REFUSED, never started classic (that would add classic keys to it for good).
@@ -560,8 +561,17 @@ class NodeManager extends EventEmitter {
     if (this.keyModeChecked || this.keyModeAlert) return !this.keyModeAlert;
     const mode = config.load().keyMode;
     let seen = "";
-    try { seen = keymode.keysMode(await this.rpc("keys")); } catch (e) { return true; }
-    if (!seen) return true;
+    try { seen = keymode.keysMode(await this.rpc("keys")); } catch (e) { seen = ""; }
+    // Not seen yet (no answer, no keys yet): the node stays "starting", so no engine starts on it (0.19.224; it was called
+    // running). After KEYMODE_TRIES health ticks the app gives up asking by itself, says so, and keeps the engines stopped.
+    if (!seen) {
+      this.keyModeTries = (this.keyModeTries || 0) + 1;
+      if (this.keyModeTries === KEYMODE_TRIES) {
+        this.lastError = "The node's keys could not be read to check the wallet's key mode, so the app has not called the node running and the trading engines stay stopped. Restart the node; if this stays, look at the Logs.";
+        this.log("[app] " + this.lastError); this.emit("status", this.snapshot());
+      }
+      return false;
+    }
     if (seen === mode) { this.keyModeChecked = true; this.log("[app] key mode verified on the running node: " + mode); return true; }
     await this.keyModeMismatch(seen === "mixed" ? "The wallet in this node holds keys of both kinds, classic and block" : "The node is running with " + seen + " keys", mode, false);
     return false;
