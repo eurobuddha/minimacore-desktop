@@ -664,7 +664,7 @@
       const p = parseFloat(price);
       if (!(p > 0)) { info().textContent = "Fetching MINIMA/USDT market price…"; return; }
       let cap = minimaAvail * p; if (t.avail < cap) cap = t.avail;
-      let str = "Price: " + TOK.tidyAmount(price) + " USDT/MINIMA (" + source + ")\n";
+      let str = "Price: " + TOK.tidyAmount(price) + " MxUSD/MINIMA (" + source + ")\n";   // the pool's token is MxUSD (0.18.252); MEXC's own line keeps USDT
       str += "You have: " + TOK.tidyAmount(String(minimaAvail)) + " MINIMA · " + TOK.tidyAmount(String(t.avail)) + " " + t.name + "\n";
       const uRaw = (el("ppcU") && el("ppcU").value || "").trim();
       if (!numOk(uRaw)) { str += "Enter the " + t.name + " amount to provide (max ≈ " + TOK.tidyAmount(String(cap)) + ")."; }
@@ -695,7 +695,7 @@
       if (minima > minimaAvail || u > t.avail) { if (info()) info().textContent = "Not enough balance for that amount."; return; }
       busy = true;
       const okc = await showConfirm("Create this pool?",
-        "MINIMA / " + t.name + " pool\n\n" + TOK.tidyAmount(String(minima)) + " MINIMA  +  " + uStr + " " + t.name + "\nOpens at " + TOK.tidyAmount(price) + " USDT/MINIMA  (matches " + source + " ✓)\n\nThe 0.5% swap fee goes to liquidity providers.", "Create");
+        "MINIMA / " + t.name + " pool\n\n" + TOK.tidyAmount(String(minima)) + " MINIMA  +  " + uStr + " " + t.name + "\nOpens at " + TOK.tidyAmount(price) + " MxUSD/MINIMA  (matches " + source + " ✓)\n\nThe 0.5% swap fee goes to liquidity providers.", "Create");
       if (!okc) { busy = false; return; }
       close();
       const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");

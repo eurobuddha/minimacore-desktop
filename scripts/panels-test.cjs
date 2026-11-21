@@ -586,3 +586,11 @@ test("0.17.22 review fixes stay fixed — theme flip repaints the chart, and the
   assert.ok(!/position:\s*relative/.test(ruleBody(css, ".axapp") || ""), "the wrapper is not positioned");
   assert.ok(!/padding-bottom/.test(ruleBody(css, ".axapp") || ""), "no dead gap under the sticky tab bar");
 });
+
+// ---- 0.18.252: a pool's opening price is in MxUSD (the pool's token); MEXC's own market line keeps USDT ----
+test("PandaPools create: the opening price says MxUSD/MINIMA; the MEXC market line still says USDT/MINIMA (MEXC)", () => {
+  const src = fs.readFileSync(path.join(R, "pools.js"), "utf8");
+  assert.ok(src.includes('"Price: " + TOK.tidyAmount(price) + " MxUSD/MINIMA (" + source + ")\\n"') && src.includes('"\\nOpens at " + TOK.tidyAmount(price) + " MxUSD/MINIMA  (matches " + source'), "the create form and its confirmation");
+  assert.equal((src.match(/USDT\/MINIMA/g) || []).length, 1, "only the MEXC market line");
+  assert.ok(src.includes('" USDT/MINIMA (MEXC)"'));
+});
