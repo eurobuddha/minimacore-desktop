@@ -585,7 +585,7 @@ test("what the engine says to the screens is listed (mainsaid FC_*), each templa
 // chain on purpose: each step of a collect or a sweep is its own command, built from its own checked values.
 test("one command each: main.js wraps the engine's runner in rpc.oneCommand; a stake whose state carries ';' never puts one on the wire", async () => {
   const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
-  assert.ok(main.includes('run: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), { owner: "futurecash" })'), "every command through oneCommand");
+  assert.ok(main.includes('run: (c, opts) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), Object.assign({}, opts, { owner: "futurecash" }))'), "every command through oneCommand, its options kept");
   const { oneCommand } = require("../main/rpc");
   assert.throws(() => oneCommand("txnbasics id:a;txnpost id:a"), /second command\. Nothing was sent/);
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "futurecash.js"), "utf8");
@@ -772,4 +772,13 @@ test("L3: Retire names the apps that handed the address out; Stop, Take back and
   assert.ok(r.includes('api.fc("handedOut", a)') && r.includes('if (await fcnRetiredOk()) fcnAct(() => api.fc("guardian", false)') && r.includes('+ fcnRetiredNote(), t("Take back")'));
   assert.ok(app.includes('id === "futurecash" && !FROZEN.includes(id) && !(await fcnRetiredOk('), "Freeze warns");
   assert.ok(/handedOut: \(addr\) => require\("\.\/futurecash"\)\.handedOut\(addr, \[\{ app: "minimaMail"/.test(main) && main.includes("atomix.status().minimaPk") && main.includes('getMeta("vendorAddress")'));
+});
+
+test("L4: the runner keeps the caller's options: Lock's send pin reads coins unfiltered, so it sees and avoids addresses with coins another part of the app holds", async () => {
+  const opts = []; const { e, node } = await engine({ tip: 1000 });
+  const run0 = node.run; const e2 = FC.create({ run: (c, o) => { opts.push([c, o]); return run0(c, o); }, dir: () => tmp(), get: async () => null, log() {} });
+  await e2.start(); await e2.lock("2", 72, PAY0);
+  assert.ok(opts.some(([c, o]) => /^coins relevant:true sendable:true checkmempool:true tokenid:0x00/.test(c) && o && o.unfiltered === true), "the pin's read carries unfiltered");
+  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(main.includes('run: (c, opts) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), rpc.oneCommand(c), Object.assign({}, opts, { owner: "futurecash" }))'), "main passes them on to rpcCall");
 });
