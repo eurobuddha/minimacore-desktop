@@ -154,8 +154,14 @@ function requireRunning() {
 // Every node stop or restart goes through mayStop (main/stopguard.js, 0.18.223): with the node running and anything in flight or
 // not checkable, main asks first (this desktop shows no warning in the window), and a no refuses the stop with nothing changed.
 const stopguard = require("./stopguard");
-const inFlightWork = async () => ({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  casinoOn: !!config.load().casinoEnabled, casino: await casinoOpen().catch(() => null), shop: shop.sendingCount() });   // shop: miniMall payments at the node (0.18.225)
+// The three reads run side by side, each with its own time limit (0.18.259: one after another under the guard's single 5-second race,
+// a slow casino read lost the AtomiX and pool answers too, and P2P Chance was not said); a read that fails or is late is null.
+const READ_MS = 4000;
+const readWithin = (fn) => { let t; return Promise.race([Promise.resolve().then(fn), new Promise(r => { t = setTimeout(() => r(null), READ_MS); })]).catch(() => null).finally(() => clearTimeout(t)); };
+const inFlightWork = async () => {
+  const [ax, pools, cas] = await Promise.all([readWithin(() => atomix.activeWork()), readWithin(() => pandapools.activeWork()), readWithin(() => casinoOpen())]);
+  return { atomix: ax, pools, casinoOn: !!config.load().casinoEnabled, casino: cas, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.18.225)
+};
 // This wallet's open P2P Chance offers and bets (0.18.249): every coin of it at the contract is unspent, so open; an offer is one it
 // made that nobody took yet (phase 0). Read only while the settle loop is switched on; a failed read is "could not be checked".
 async function casinoOpen() {
