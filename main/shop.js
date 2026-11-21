@@ -286,23 +286,32 @@ async function scanOrders(depth) {
 }
 async function scanPayments(depth) {
   if (!vendorAddress) return false;
-  const coins = await coinsAt(vendorAddress, depth, " relevant:true"); if (!coins) return false;
+  const listed = await coinsAt(vendorAddress, depth, " relevant:true"); if (!listed) return false;
   capSeen();
+  // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it
+  // completes. Within one block the larger coin first, so the remainder comes last.
+  const coins = listed.map((c, i) => ({ c, i })).sort((a, b) => (Number(a.c && a.c.created) || 0) - (Number(b.c && b.c.created) || 0)
+    || (b.c && a.c && b.c.amount != null && a.c.amount != null ? (Number(coinAmount(b.c)) - Number(coinAmount(a.c))) : 0) || (b.i - a.i)).map(x => x.c);
   let changed = false;
-  for (const c of coins) {
-    const id = c.coinid; if (!id || seenPayCoins.has(id)) continue;
+  const judge = (c) => {
+    const id = c && c.coinid; if (!id || seenPayCoins.has(id)) return "";
     try {   // one coin at a time (0.19.168)
-      const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); continue; }
-      const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); continue; }
+      const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); return ""; }
+      const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
       // Not marked seen while its order is not here yet (0.19.174, as released 0.18.163): a payment mined before its
       // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
-      const o = store.order(ref); if (!o) continue;
+      const o = store.order(ref); if (!o) return "";
       seenPayCoins.add(id);
-      if (o.role !== "sell" || o.paid) continue;
+      if (o.role !== "sell" || o.paid) return "";
       const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
-      if (outcome && outcome !== "ALREADY") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
-    } catch (e) { store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); }
-  }
+      if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.19.200)
+      if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
+      return outcome || "";
+    } catch (e) { store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); return ""; }
+  };
+  // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
+  const dust = coins.filter(c => judge(c) === "DUST");
+  if (changed && dust.length) for (const c of dust) judge(c);
   return changed;
 }
 async function scanOnce() {

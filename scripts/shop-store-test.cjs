@@ -33,8 +33,9 @@ test("decCmp: exact decimal compare; an unreadable figure is null, never 0", () 
 test("recordPayment: whatever the buyer wrote as total (abc, 1e3, -5, 0, 0.000000001), the listing decides what is due", () => {
   for (const total of ["abc", "1e3", "-5", "0", "", "0x10", "0.000000001"]) {
     const ref = sellOrder(total);
-    assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "UNDERPAID", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2");
-    assert.equal(store.recordPayment(ref, "0xC0002", "3.199999999", "0x00"), "PAID", "3.2 received = 3.2 due");
+    assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "DUST", JSON.stringify(total) + ": 1 nano does not pay 2 x 1.5 + 0.2 (CHANGED on purpose, 0.19.200: it is dust, not counted)");
+    assert.equal(store.recordPayment(ref, "0xC0002", "3.199999999", "0x00"), "UNDERPAID");
+    assert.equal(store.recordPayment(ref, "0xC0001", "0.000000001", "0x00"), "PAID", "3.2 received = 3.2 due (the same coin, judged again: the remainder is never dust)");
     assert.equal(store.order(ref).due, "3.2");
   }
   const free = sellOrder("0", "0x00", { items: [{ product: "Free sample", quantity: 1, unitPrice: "0" }], shipping: "Digital" });
@@ -59,8 +60,9 @@ test("recordPayment: the same coin id (any letter case) counts once; coins of th
 test("recordPayment: a stranger's tiny coin of another token never blocks the honest payment", () => {
   const ref = sellOrder("3.2");
   assert.equal(store.recordPayment(ref, "0xA1", "0.000000001", MXUSD), "WRONG_TOKEN");
-  assert.equal(store.recordPayment(ref, "0xA2", "0.000000001", "0x00"), "UNDERPAID"); assert.equal(store.order(ref).status, "UNDERPAID", "a right-token coin moves WRONG_TOKEN on");
-  assert.equal(store.recordPayment(ref, "0xA3", "3.2", "0x00"), "PAID"); assert.equal(store.order(ref).paid, true); assert.equal(store.order(ref).status, "PAID");
+  assert.equal(store.recordPayment(ref, "0xA2", "0.000000001", "0x00"), "DUST", "CHANGED on purpose (0.19.200): a right-token coin this small is dust");
+  assert.equal(store.recordPayment(ref, "0xA4", "0.1", "0x00"), "UNDERPAID"); assert.equal(store.order(ref).status, "UNDERPAID", "a right-token coin moves WRONG_TOKEN on");
+  assert.equal(store.recordPayment(ref, "0xA3", "3.1", "0x00"), "PAID"); assert.equal(store.order(ref).paid, true); assert.equal(store.order(ref).status, "PAID");
 });
 
 test("recordPayment: exact, cumulative, and only in the order's token", () => {
@@ -146,7 +148,7 @@ async function scan(orders, pays) {
   shop._setRunner(async (c) => {
     if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
     if (c.startsWith("coins address:" + shop.MINIMERCH)) return { status: true, response: orders.map((w, i) => ({ coinid: "0xM" + (++n) + "_" + i, state: { "99": hex(typeof w === "string" ? w : JSON.stringify(Object.assign({ from: BUYER, date: 1 }, w))) } })) };
-    if (c.startsWith("coins address:" + VENDOR)) return { status: true, response: pays.map(p => ({ coinid: p.coinid, tokenid: p.tokenid, amount: p.amount, tokenamount: p.amount, state: { "1": hex(p.ref) } })) };
+    if (c.startsWith("coins address:" + VENDOR)) return { status: true, response: pays.map(p => ({ coinid: p.coinid, tokenid: p.tokenid, amount: p.amount, tokenamount: p.amount, created: p.created, state: { "1": hex(p.ref) } })) };
     return { status: true, response: [] };
   });
   await shop.init(); await shop.scanOnce();
@@ -170,8 +172,8 @@ test("vendor: a phone-placed order to my shop is checked against my listing and 
   await scan([order], [{ coinid: "0xD201", ref: "ORD-PHONE1", amount: "0.000000001", tokenid: "0x00" }]);
   let o = store.order("ORD-PHONE1");
   assert.equal(o.items.length, 1, "the JSON string is read as items"); assert.equal(o.due, "3.2"); assert.deepEqual(o.problems, []);
-  assert.equal(o.paid, false, "the buyer's 0.000000001 total paid with 1 nano is not paid"); assert.equal(o.status, "UNDERPAID");
-  await scan([], [{ coinid: "0xD202", ref: "ORD-PHONE1", amount: "3.199999999", tokenid: "0x00" }]);
+  assert.equal(o.paid, false, "the buyer's 0.000000001 total paid with 1 nano is not paid"); assert.equal(o.status, "PENDING", "CHANGED on purpose (0.19.200): 1 nano is dust, not counted");
+  await scan([], [{ coinid: "0xD201", ref: "ORD-PHONE1", amount: "0.000000001", tokenid: "0x00" }, { coinid: "0xD202", ref: "ORD-PHONE1", amount: "3.199999999", tokenid: "0x00" }]);
   o = store.order("ORD-PHONE1"); assert.equal(o.paid, true); assert.equal(o.status, "PAID");
   const listed = shop.ordersList().find(x => x.ref === "ORD-PHONE1"); assert.equal(listed.due, "3.2"); assert.equal(listed.unchecked, false);
 });
@@ -223,20 +225,25 @@ test("a coin whose message cannot be read is said in the log and the rest of the
 });
 
 // ---- 0.19.170: the counted coins of an order are bounded; past the bound the order waits for a check by hand ----
+// CHANGED on purpose (0.19.200): only coins that are not dust count toward the bound. A listing-checked order is paid by 100
+// coins of 1% long before 500, so the bound is reached by an order that does not match the listing (only the 0.000001 floor).
 test("recordPayment: at most MAX_PAY_COINS counted coins per order; more makes it UNCHECKED, never PAID, and the vendor may check it by hand", () => {
-  const ref = sellOrder("3.2"), N = store.MAX_PAY_COINS;
+  const ref = sellOrder("3.2", "0x00", { shopId: "no-such-shop" }), N = store.MAX_PAY_COINS;
   assert.equal(N, 500);
-  for (let i = 0; i < N; i++) assert.equal(store.recordPayment(ref, "0xD" + i, "0.000000001", "0x00"), "UNDERPAID");
+  for (let i = 0; i < 1000; i++) assert.equal(store.recordPayment(ref, "0xDD" + i, "0.0000009", "0x00"), "DUST", "below 0.000001: never counted, never toward the bound");
+  assert.deepEqual(store.order(ref).coins, []);
+  for (let i = 0; i < N; i++) assert.equal(store.recordPayment(ref, "0xD" + i, "0.000001", "0x00"), "UNCHECKED");
   for (let i = 0; i < 50; i++) store.recordPayment(ref, "0xE" + i, "1", MXUSD);   // wrong coins: never kept
   assert.equal(store.order(ref).coins.length, N);
   assert.equal(store.recordPayment(ref, "0xF1", "3.2", "0x00"), "UNCHECKED", "the coin past the bound is not counted");
   const o = store.order(ref);
-  assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.equal(o.coins.length, N); assert.equal(o.paidAmount, "0.000000500");
+  assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.equal(o.coins.length, N); assert.equal(o.paidAmount, "0.000500");
   assert.match(o.problems.join(), /more than 500 payment coins came for this order; check the payment by hand/);
-  assert.equal(store.recordPayment(ref, "0xF2", "3.2", "0x00"), "UNCHECKED"); assert.equal(o.problems.length, 1, "said once");
+  const tooMany = () => o.problems.filter(p => /more than 500 payment coins/.test(p));
+  assert.equal(store.recordPayment(ref, "0xF2", "3.2", "0x00"), "UNCHECKED"); assert.equal(tooMany().length, 1, "said once");
   assert.equal(store.handCheck(ref), true, "the vendor may check it by hand");
   const I18N = require("../renderer/i18n.js"), MS = require("../renderer/mainsaid.js");
-  try { for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); I18N.set(c); const s = MS.say(o.problems[0]); assert.ok(s.includes("500") && !/payment coins/.test(s), c + ": " + s); } } finally { I18N.set("en"); }
+  try { for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); I18N.set(c); const s = MS.say(tooMany()[0]); assert.ok(s.includes("500") && !/payment coins/.test(s), c + ": " + s); } } finally { I18N.set("en"); }
 });
 
 // ---- 0.19.171: the vendor may set only the order's one legitimate next step ----
@@ -284,4 +291,35 @@ test("'__proto__' as a shop id, an order ref or a chat id finds nothing and writ
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"), line = app.match(/function shopItems\(o\) \{[^\n]*\}/)[0];
   const shopItems = new Function("esc", "th", line + "; return shopItems;")((s) => String(s), (s) => s);
   assert.ok(shopItems({ items: [null, { product: "Tea", quantity: 2, lineTotal: "3" }, undefined] }).includes("Tea"), "a stored null line is not drawn, and does not stop the rest");
+});
+
+// ---- 0.19.200 (released 0.18.181 / 0.18.185): dust is not counted, not kept, not saved, and judged again; payments read oldest first ----
+test("dust (below 0.000001, or below the smaller of 1% of what is due and what is still due) is not counted and never blocks a real payment", () => {
+  const ref = sellOrder("3.2"); let k = 0; const id = () => "0xD057" + (++k).toString(16);
+  for (let i = 0; i < 1100; i++) assert.equal(store.recordPayment(ref, id(), i % 2 ? "0.0000001" : "0.0001", "0x00"), "DUST");
+  assert.deepEqual(store.order(ref).coins, [], "no dust in the order's list"); assert.equal(store.order(ref).paidAmount || "0", "0", "and none counted");
+  assert.equal(store.recordPayment(ref, id(), "0.032", "0x00"), "UNDERPAID", "1% of 3.2 is not dust");
+  assert.equal(store.recordPayment(ref, id(), "3.15", "0x00"), "UNDERPAID");
+  assert.equal(store.recordPayment(ref, id(), "0.018", "0x00"), "PAID", "a top-up of what is still due is never dust, however small");
+  assert.equal(store.order(ref).coins.length, 3);
+  const u = sellOrder("1", "0x00", { shopId: "no-such-shop" });
+  assert.equal(store.recordPayment(u, id(), "0.0000009", "0x00"), "DUST", "an order with nothing due by the listing: the 0.000001 floor");
+  assert.equal(store.recordPayment(u, id(), "0.000001", "0x00"), "UNCHECKED");
+  // a dust coin costs no disk write
+  const real = fs.writeFileSync; let writes = 0; fs.writeFileSync = function () { writes++; return real.apply(this, arguments); };
+  try { const r2 = sellOrder("3.2"); writes = 0; for (let i = 0; i < 2000; i++) store.recordPayment(r2, id(), "0.0000001", "0x00"); assert.equal(writes, 0, "no save for a dust coin"); }
+  finally { fs.writeFileSync = real; }
+});
+test("a 9.95 payment and a 0.05 top-up pay a 10 order, in either order and in one scan or two", async () => {
+  store.saveShop({ shopId: "topup", shopName: "T", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
+  const ord = (ref) => ({ type: "ORDER", ref, shopId: "topup", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" });
+  for (const [ref, cs, what] of [["ORD-TU1", [["0x11", "0.05", 101], ["0x12", "9.95", 100]], "newest first, different blocks"],
+    ["ORD-TU2", [["0x22", "9.95", 100], ["0x21", "0.05", 101]], "oldest first"], ["ORD-TU3", [["0x31", "0.05", 100], ["0x32", "9.95", 100]], "the same block, the top-up listed first"]]) {
+    await scan([ord(ref)], cs.map(([coinid, amount, created]) => ({ coinid, ref, amount, tokenid: "0x00", created })));
+    assert.equal(store.order(ref).paid, true, what); assert.equal(store.order(ref).paidAmount, "10.00", what);
+  }
+  await scan([ord("ORD-TU4")], [{ coinid: "0x41", ref: "ORD-TU4", amount: "0.05", tokenid: "0x00", created: 105 }]);   // the top-up first, alone: dust then
+  assert.equal(store.order("ORD-TU4").paid, false);
+  await scan([], [{ coinid: "0x41", ref: "ORD-TU4", amount: "0.05", tokenid: "0x00", created: 105 }, { coinid: "0x42", ref: "ORD-TU4", amount: "9.95", tokenid: "0x00", created: 106 }]);
+  assert.equal(store.order("ORD-TU4").paid, true, "two scans: the top-up is judged again once the 9.95 is in");
 });

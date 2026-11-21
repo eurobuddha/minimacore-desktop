@@ -83,6 +83,24 @@ function decCmp(a, b) {
 }
 /** a >= b, both readable figures. */
 function decGte(a, b) { const c = decCmp(a, b); return c === 0 || c === 1; }
+/**
+ * Is a coin dust for this order (0.19.200, the released rule of 0.18.181 and 0.18.185)? Below the larger of 1% of what is
+ * due and 0.000001 of the token (no real price is smaller: miniMall prices are written to six decimals), unless it is at
+ * least what is still due: a top-up of the remainder is never dust, however small. A real payment is one coin, or a few;
+ * 100 coins of 1% still pay an order. With nothing due by the listing (an unchecked order), only the 0.000001 floor.
+ */
+const MIN_COIN = "0.000001";
+function isDust(o, amount) {
+  const a = decParse(amount); if (!a) return true;
+  const d = decParse(o.due);
+  if (!d || d[0] <= 0n) return decCmp(amount, MIN_COIN) === -1;   // nothing due by the listing: only the absolute floor
+  const p = decParse(o.paidAmount || "0") || [0n, 0], m = decParse(MIN_COIN);
+  const dp = Math.max(a[1], d[1] + 2, p[1], m[1]), at = (x) => x[0] * 10n ** BigInt(dp - x[1]);
+  let floor = d[0] * 10n ** BigInt(dp - d[1] - 2);                  // 1% of what is due
+  if (floor < at(m)) floor = at(m);                                 // never below 0.000001
+  const remaining = at(d) - at(p); if (remaining < floor) floor = remaining;   // what is still due is never dust
+  return floor > 0n && at(a) < floor;
+}
 /** An order total that can ever be paid: a readable figure above zero. */
 function payableTotal(v) { return decCmp(v, "0") === 1; }
 function decAdd(a, b) {
@@ -150,6 +168,10 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
+  // Dust (0.19.200, as released 0.18.181 / 0.18.185) is not counted, not kept and not saved: it never fills the order's
+  // MAX_PAY_COINS list, so a flood of tiny coins cannot push a later real payment past the cap, and it costs no disk write.
+  // It is NOT remembered either: what is dust depends on what is still due, so the same coin is judged again later.
+  if (isDust(o, paidAmount)) return "DUST";
   if (o.coins.length >= MAX_PAY_COINS) {
     if (!o.problems.includes(TOO_MANY_COINS)) { o.problems.push(TOO_MANY_COINS); o.due = ""; }
     if ((STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED) o.status = "UNCHECKED";   // from any state before PAID; never back from a vendor's
@@ -188,5 +210,5 @@ module.exports = {
   saveShop, shops, shop, deleteShop,
   upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, mayAdvance, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, setLog, log,
-  _money: { decCmp, decGte, decAdd, payableTotal }, MAX_PAY_COINS
+  _money: { decCmp, decGte, decAdd, payableTotal, isDust }, MAX_PAY_COINS
 };
