@@ -1247,7 +1247,8 @@ function renderWwWallet(body) {
       const n = AppsAct.ww.confirmUses(typed, wwKuSuggest != null ? wwKuSuggest : await readOnchain());
       if (wwAddr !== a) return;                                   // logged out while the chain was being read
       if (n == null) {
-        toast(t("Not confirmed: this key's on-chain uses could not be read, and a figure that is too low can lose funds. Check your connection and try again."), "err");
+        // said plainly (0.19.254, as released 0.18.199); there is no way round it: a figure that is too low reuses a one-time key
+        toast(t("The key-use service (eurobuddha.com) cannot be reached, so this key's on-chain uses could not be read. Nothing can be sent from this wallet until it can: a figure that is too low could lose funds. Check your connection and press Confirm again."), "err");
         if (btn.isConnected) { btn.disabled = false; btn.textContent = t("Confirm"); }
         return;
       }
@@ -1258,7 +1259,7 @@ function renderWwWallet(body) {
       const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = t("Checking…");
       const onchain = await readOnchain();
       if (wwAddr !== a || !btn.isConnected) return;
-      if (onchain == null) toast(t("The on-chain uses could not be read. Nothing was changed."), "err");
+      if (onchain == null) toast(t("The key-use service (eurobuddha.com) cannot be reached, so the on-chain uses could not be read. Nothing was changed, and nothing can be sent from this wallet until it can."), "err");
       else { el("wwKuIn").value = String(AppsAct.ww.confirmUses(el("wwKuIn").value, onchain)); toast(t("On-chain uses: {onchain} (set as minimum)", { onchain: onchain }), "ok"); }
       btn.disabled = false; btn.textContent = t("Check on-chain");
     });
