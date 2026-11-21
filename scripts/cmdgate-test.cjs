@@ -569,3 +569,12 @@ test("decryptbackup output: on another computer is refused; a local output runs"
   assert.deepEqual(sent, []);
   const ok = "decryptbackup file:b.bak password:x output:/Users/me/x"; await h(null, ok); assert.deepEqual(sent, [ok]);
 });
+
+// ---- 0.18.256: a Windows NT path to a share (\??\UNC\host\share, /??/UNC/host/share) is a file on another computer too ----
+test("a \\??\\UNC\\ path in a file parameter is refused, with either slash; a local path still runs", async () => {
+  const B = String.fromCharCode(92), sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
+  for (const c of ["backup file:" + B + "??" + B + "UNC" + B + "host" + B + "share" + B + "b.bak", "backup file:/??/UNC/host/share/b.bak", "decryptbackup file:b.bak password:x output:" + B + "??" + B + "UNC" + B + "h" + B + "s" + B + "x"])
+    await assert.rejects(h(null, c), /A file on another computer/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["backup file:/Users/me/b.bak", "backup file:C:" + B + "b.bak", "backup file:??/b.bak"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }
+});

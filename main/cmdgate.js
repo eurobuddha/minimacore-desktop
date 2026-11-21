@@ -234,7 +234,8 @@ async function checkCommand(command, io) {
     // sphincs, multisig, the send…view family and peers action:publish read files too: every MiniFile.createBaseFile / new File of a
     // parameter is file, folder or archivefile, and any …file name is taken with them; 0.18.255: and output, where decryptbackup writes
     // the DECRYPTED backup, the wallet in plain text, decryptbackup.java getParam("output"))
-    if (V.read(part).params.some(([n, v]) => /^(?:folder|output|\w*file)$/i.test(n) && /^[\\/]{2}/.test(v)))
+    // ... and a Windows NT path to a share (0.18.256): \??\UNC\host\share or /??/UNC/host/share, which Windows treats as UNC
+    if (V.read(part).params.some(([n, v]) => /^(?:folder|output|\w*file)$/i.test(n) && /^[\\/](?:[\\/]|\?\?[\\/])/.test(v)))
       throw new Error("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.");
     if (V.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
     if ((V.is(part, "multisig") || V.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
