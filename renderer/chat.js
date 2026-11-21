@@ -460,7 +460,7 @@
     inp.focus();
   }
 
-  function errText(e) { return ("" + ((e && e.message) || e || "")).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+  function errText(e) { const m = ("" + ((e && e.message) || e || "")).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); return typeof MainSaid !== "undefined" ? MainSaid.say(m) : m; }   // main's listed sentences in the app's language (0.19.196)
   /** ChatFailureDialog: the whole error, selectable, with Copy details; it stays open after copying. */
   function showFailure(message) {
     return dialog({ title: I18N.t("Error"), body: `<div class="chat-dialog__msg chat-dialog__msg--sel" id="chatFailText">${h(message)}</div>`,

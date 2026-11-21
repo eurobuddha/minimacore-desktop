@@ -624,9 +624,10 @@ function loadChat() {
   fakeMod(require.resolve(path.join(main, "node-manager.js")), { rpcPort: () => 0, log() {} });
   return require("../main/chat");
 }
+// (0.19.196: the fetch's file path is quoted, as the data folder holds a space; the stand-in takes the quotes off)
 test("0.19.6: the page's policy lets a voice note play: what Chat hands the player is a data: URL, and media-src allows exactly that", async () => {
   const chat = loadChat();
-  chat._setRunner(async (cmd) => { const f = cmd.split(" file:")[1]; fs.writeFileSync(f, Buffer.from("OggS-not-really")); return { status: true, response: {} }; });
+  chat._setRunner(async (cmd) => { const f = cmd.split(" file:")[1].replace(/^"|"$/g, ""); fs.writeFileSync(f, Buffer.from("OggS-not-really")); return { status: true, response: {} }; });
   const url = await chat.fetchMedia("keets://" + "ab".repeat(32) + "/chat/vn-1.ogg?hash=" + "cd".repeat(32));
   assert.match(url, /^data:audio\/ogg;base64,/);
   const html = fs.readFileSync(path.join(__dirname, "..", "renderer", "index.html"), "utf8");

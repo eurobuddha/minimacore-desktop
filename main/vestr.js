@@ -139,6 +139,7 @@ async function create(opts) {
   if (!beneficiary) throw new Error("Enter a beneficiary address");
   if (!V.isTokenid(tokenid)) throw new Error("Invalid token id");
   if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
+  if (password != null && password !== "" && String(password).includes(";")) throw new Error("The wallet password can't contain ; (the node would read what follows as a second command). Nothing was sent.");   // 0.19.196, as released 0.18.188
   if (password != null && password !== "" && !V.isQuotableText(String(password))) throw new Error("The wallet password can't contain quotes, backslashes or line breaks");
   if (!(Number(endMs) > Number(startMs))) throw new Error("End must be after start");
   const chk = await runner("checkaddress address:" + beneficiary).catch(() => null);

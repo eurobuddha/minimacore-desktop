@@ -76,3 +76,23 @@ test("the Web Wallet login, every restore and resync screen and the backup passw
   const r = require("../main/restore.js").restoreFileCommand({ host: "h:9001", file: "a;b", password: "" }); assert.match(r.error, /semicolon/);
   assert.match(require("../main/restore.js").restoreFileCommand({ host: "h:9001", file: "a", password: "p;q" }).error, /semicolon/);
 });
+// ---- 0.19.196 (released 0.18.188): a plain reason before anything is sent; file paths quoted ----
+test("a chat file path or a Vestr password with ';' is refused with a plain reason; keets file paths are quoted", async () => {
+  const chat = require("../main/chat"), vestr = require("../main/vestr"), sent = [];
+  chat._setRunner(async (c) => { sent.push(c); return { status: true, response: { url: "keets://" + "ab".repeat(32) + "/chat/img-1.png" } }; });
+  const TO = "0x" + "AB".repeat(32);
+  await assert.rejects(chat.sendImageFile(TO, "/Users/me/Pictures/cat;vault action:wipekeys.png"), /holds a ; or a " , which a node command cannot carry\. Rename the file or move it/);
+  await assert.rejects(chat.sendImageFile(TO, '/Users/me/a"b.png'), /cannot carry/);
+  assert.deepEqual(sent, []);
+  await chat.sendImageFile(TO, "/Users/me/My Pictures/cat.PNG").catch(() => {});
+  assert.match(sent[0], /^keets action:publish path:\/chat\/img-\d+\.png file:"\/Users\/me\/My Pictures\/cat\.PNG"$/, "the path quoted, spaces and all; the extension checked");
+  await assert.rejects(vestr.create({ tokenid: "0x00", amount: "1", beneficiary: "Mx" + "A".repeat(50), startMs: 1, endMs: 2, password: "pa;ss" }), /can't contain ; \(the node would read what follows as a second command\)/);
+  const src = rd("main/chat.js");
+  assert.ok(src.includes("' file:" + String.fromCharCode(34) + "' + f + '" + String.fromCharCode(34) + "'"), "fetch quotes its file path too");
+});
+test("0.19.196: a peer's media is fetched into a quoted file path (the data folder holds a space)", async () => {
+  const chat = require("../main/chat"), sent = [];
+  chat._setRunner(async (c) => { sent.push(c); const f = /file:"([^"]+)"$/.exec(c)[1]; fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, Buffer.from("x")); return { status: true, response: {} }; });
+  await chat.fetchMedia("keets://" + "ab".repeat(32) + "/chat/img-2.png").catch(() => {});
+  assert.match(sent[0], /^keets action:fetch url:keets:\/\/[0-9a-f]{64}\/chat\/img-2\.png file:"[^";]+\.png"$/);
+});

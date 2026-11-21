@@ -348,7 +348,10 @@ async function fetchMedia(ref) {
              : "image/jpeg";
   const f = path.join(mediaDir(), key + ext);
   if (!fs.existsSync(f)) {
-    await nodeCmd("keets action:fetch url:" + ref + " file:" + f);
+    // the file path is quoted (0.19.196, as released 0.18.188): the data folder of the app holds a space on a Mac,
+    // and the node's parser takes a "quoted" value whole and drops the quotes
+    if (/["\u0000-\u001f;]/.test(f)) throw new Error("The app's data folder name holds a character a node command cannot carry.");
+    await nodeCmd("keets action:fetch url:" + ref + ' file:"' + f + '"');
   }
   // 16MB mesh files exist; a >8MB base64 data: URL stalls main + the DOM.
   if (!fs.existsSync(f)) throw new Error("fetch failed");
@@ -358,8 +361,11 @@ async function fetchMedia(ref) {
 }
 /** Publish a local image file to our media drive and send it as a photo message. */
 async function sendImageFile(to, filePath) {
-  const name = "/chat/img-" + Date.now() + path.extname(filePath).toLowerCase();
-  const pub = await nodeCmd("keets action:publish path:" + name + " file:" + filePath);
+  // 0.19.196 (released 0.18.188): said plainly, before anything is sent: a node command cannot carry ; or " (or a control character) in a path
+  if (typeof filePath !== "string" || !filePath || /["\u0000-\u001f;]/.test(filePath)) throw new Error("This file's name or folder holds a ; or a \" , which a node command cannot carry. Rename the file or move it to another folder, then try again.");
+  if (!/^0x[0-9a-fA-F]{64}$/.test(String(to))) throw new Error("recipient must be a keets pubkey: 0x + 64 hex");
+  const ext = path.extname(filePath).toLowerCase(), name = "/chat/img-" + Date.now() + (/^\.[a-z0-9]{1,5}$/.test(ext) ? ext : ".jpg");
+  const pub = await nodeCmd("keets action:publish path:" + name + ' file:"' + filePath + '"');   // quoted: a path may hold spaces
   const payload = schema.chatEncodeTyped(store.metaGet("myname") || "", "", { state: "image", ref: pub.url });
   return sendTyped(to, payload, { state: "image", ref: pub.url, body: "" });
 }
