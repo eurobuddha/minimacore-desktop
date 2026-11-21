@@ -101,9 +101,14 @@ function inFlight(work, how, nowMs, t) {
  * written to the log. Either way the caller then stops the node through node.stop(), which lets every engine finish
  * what it has at the node within a bound (0.18.117).
  */
+/** gather() within ms, or null; a throw is null; the timer is cleared once it answers (0.19.334: it was left to run out). */
+async function bounded(gather, ms) {
+  let t = null;
+  try { return await Promise.race([Promise.resolve().then(gather), new Promise(r => { t = setTimeout(() => r(null), ms); })]); } catch (e) { return null; } finally { clearTimeout(t); }
+}
 async function decideQuit(d) {
   let work = null;
-  try { work = await Promise.race([d.gather(), new Promise(r => setTimeout(() => r(null), d.waitMs || 5000))]); } catch (e) { work = null; }
+  work = await bounded(d.gather, d.waitMs || 5000);
   const at = d.now ? d.now() : Date.now(), w = inFlight(work || {}, "quit", at, d.t), en = d.t ? inFlight(work || {}, "quit", at) : w;   // w: what is asked, in the user's language; en: the same facts in English, for the log
   const said = en.busy.concat(en.unread.length ? ["could not be checked: " + en.unread.join("; ")] : []);
   if (d.stopped) { d.log("[app] quit with the node already stopped: no question was shown. " + (said.length ? "Not finished: " + said.join(" | ") : "Nothing was in flight.")); return true; }
@@ -151,7 +156,7 @@ function stopGuard(d) {
       if (!d.running()) return true;
       if (got && got.until >= now() && got.action && got.action === String(action || "")) return true;   // the user saw main's warning for this action and chose to go on
       let work = null;
-      try { work = await Promise.race([d.gather(), new Promise(r => setTimeout(() => r(null), d.waitMs || 5000))]); } catch (e) { work = null; }
+      work = await bounded(d.gather, d.waitMs || 5000);
       const at = now(), w = inFlight(work || {}, "shutdown", at, d.t ? d.t() : undefined);
       if (!w.any) return true;
       const en = inFlight(work || {}, "shutdown", at), go = !!(await d.ask(w));

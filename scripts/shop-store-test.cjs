@@ -618,3 +618,22 @@ test("vendor: a failed backfill step is not 'recent orders could not be read'; a
   tip = 500001; await shop.scanOnce(); assert.equal(shop.scanState().stepFailed, false);
   store.setLog((m) => { throw new Error("no log expected: " + m); });
 });
+
+// ---- 0.19.334: a backfill step skips what an earlier pass read (the floor filter): a coin created above the floor is not opened again ----
+test("vendor: a backfill step after a restart does not open again an order coin created above its floor (read by an earlier pass)", async () => {
+  delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop");   // a fresh launch: nothing remembered in memory
+  const sc = require.cache[require.resolve("../main/shopcrypto.js")].exports, open0 = sc.open, opened = [];
+  sc.open = async (id, blob) => { opened.push(blob); return open0(id, blob); };
+  const tip = 600000; store.setLog(() => {});
+  const coin = (ref, created) => ({ coinid: "0xFL" + ref, created, state: { "99": hex(JSON.stringify({ type: "INQUIRY", ref, from: BUYER, date: 1, shopId: "tea", message: "x" })) } });
+  const coins = [coin("ABOVE", tip - 500), coin("BELOW", tip - 3000)];
+  shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } }; if (c === "status") return { status: true, response: { chain: { length: 1000000 } } };
+    if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
+    const m = / depth:(\d+)$/.exec(c); return { status: true, response: m && c.startsWith("coins address:" + shop.MINIMERCH) ? coins.filter(x => x.created > tip - Number(m[1])) : [] }; });
+  store.setMeta("scanned_tip_block", tip); store.setMeta("backfill_target_block", tip - 4000); store.setMeta("backfill_floor_block", tip - 1000); store.setMeta("unread_below_block", 0);
+  try {
+    await shop.init(); await shop.scanOnce();
+    const which = opened.map(b => JSON.parse(Buffer.from(String(b).slice(2), "hex")).ref);
+    assert.ok(which.includes("BELOW"), "below the floor: read by the step"); assert.ok(!which.includes("ABOVE"), "above the floor: an earlier pass read it, the step skips it: " + which);
+  } finally { sc.open = open0; store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});

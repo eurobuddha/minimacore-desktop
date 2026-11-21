@@ -287,3 +287,17 @@ test("Web Wallet on a block key wallet: derive, read, send, the key-use confirma
   ww.setKeyMode(() => "");
   assert.ok(rd("main/main.js").includes("webwallet.setKeyMode(() => config.load().keyMode);"), "main gives it the recorded key mode");
 });
+
+// ---- 0.19.334: a damaged old count too large for a number (1e400) is over every limit, never 0 ----
+test("Web Wallet: a damaged old count of 1e400 or a digit run too long for a number gives the over-count explanation", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AA".repeat(32), PK = "0x" + "BA".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CA".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta"); ww.setOnchain(async () => 3);
+  for (const raw of ['{"keyuses":1e400,"ack":true}', '{"keyuses":"' + "9".repeat(400) + '","ack":true}']) {
+    fs.writeFileSync(file, '{"' + FROM + '":' + raw + "}");
+    assert.equal(ww.keyusesInfo(FROM).keyuses, Infinity, raw.slice(0, 30));
+    await assert.rejects(ww.ackKeyuses(FROM, 5), /saved key-use count read Infinity before it was damaged, at or past the 262144 one-time uses a key has/, raw.slice(0, 30));
+  }
+  ww.setOnchain(async () => null); ww.setKeyMode(() => "");
+});

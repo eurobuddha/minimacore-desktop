@@ -350,7 +350,7 @@ ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack, "stop"); 
 const inFlightWork = async () => {
   // the reads run side by side, each under its own bound (0.19.321): in sequence under the guard's one 5 s bound, one slow read
   // lost the others' answers and everything read as "could not be checked"; one that does not answer in 4 s is that one alone
-  const one = (f) => new Promise(r => { const t = setTimeout(() => r(null), 4000); if (t.unref) t.unref(); Promise.resolve().then(f).then(r, () => r(null)); });
+  const one = (f) => new Promise(r => { const t = setTimeout(() => r(null), 4000); if (t.unref) t.unref(); const done = (v) => { clearTimeout(t); r(v); }; Promise.resolve().then(f).then(done, () => done(null)); });   // no timer left once it answers (0.19.334)
   const [ax, pools, dex, fc] = await Promise.all([one(() => atomix.activeWork()), one(() => pandapools.activeWork()), one(() => dexicon.activeWork()), one(() => futurecash.activeWork())]);
   return { atomix: ax, pools, dexicon: dex, casino: casino.open(), casinoOn: !!config.load().casinoEnabled || casino.looping(),   // the loop running with no clean scan: not read yet (0.19.269)
     futurecash: fc, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.19.288)

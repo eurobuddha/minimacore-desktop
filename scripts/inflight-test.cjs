@@ -307,3 +307,21 @@ test("stopGuard + main's held(): a failure that comes after another request's ye
   assert.equal(await g.pass(), true, "the retry is asked again, not refused"); assert.equal(asked.length, 4);
   await assert.rejects(held(async () => { throw new Error("threw"); }), /threw/); assert.equal(await g.pass(), true, "a throw ends its own hold too");
 });
+
+// ---- 0.19.334: no timer is left behind by the in-flight reads or the guard's bound once they answer ----
+test("the gather's per-read timers and the guard's 5 s bound are cleared once the reads answer; a read that rejects is null", async () => {
+  const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
+  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === "inFlightWork")) decl = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  const live = new Set(); let id = 0;
+  const env = { setTimeout: (f, ms) => { const t = { id: ++id, unref() {} }; live.add(t.id); return t; }, clearTimeout: (t) => { if (t) live.delete(t.id); },
+    config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+    atomix: { activeWork: async () => IDLE.atomix }, pandapools: { activeWork: async () => { throw new Error("pools down"); } }, dexicon: { activeWork: async () => IDLE.dexicon },
+    futurecash: { activeWork: () => { throw new Error("fc down"); } }, shop: { sendingCount: () => 0 } };
+  const w = await new Function("env", "with (env) { " + decl + "; return inFlightWork; }")(env)();
+  assert.equal(live.size, 0, "every per-read timer cleared"); assert.equal(w.pools, null, "a read that rejects is null"); assert.equal(w.futurecash, null, "one that throws too"); assert.deepEqual(w.atomix, IDLE.atomix);
+  const { stopGuard, decideQuit } = require("../main/inflight.js"), count = () => process.getActiveResourcesInfo().filter(x => x === "Timeout").length, before = count();
+  const g = stopGuard({ running: () => true, gather: async () => IDLE, ask: async () => true, log() {} });
+  await g.pass(); await decideQuit({ gather: async () => IDLE, log() {}, ask: async () => true });
+  assert.equal(count(), before, "the guard's and the quit's 5 s bound are cleared");
+});

@@ -115,6 +115,7 @@ const DAMAGED_BELOW = (n) => "This wallet's saved key-use count read " + n + " b
 function oldCount(v) {
   const k = v && typeof v === "object" ? v.keyuses : undefined;
   const x = typeof k === "number" ? k : typeof k === "string" && /^\s*\d+(?:\.\d+)?\s*$/.test(k) ? Number(k) : NaN;
+  if (x === Infinity) return Infinity;   // 1e400 in the file, or a digit run too long for a double: over every limit (0.19.334), never 0
   return Number.isFinite(x) && x >= 0 ? Math.ceil(x) : 0;
 }
 const entryOk = (v) => !!v && typeof v === "object" && Number.isSafeInteger(v.keyuses) && v.keyuses >= 0;
