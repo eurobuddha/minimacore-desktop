@@ -494,3 +494,15 @@ test("the node log hides privatekey: whether written 0x… or Mx…", () => {
     assert.ok(!line.includes(pk) && line.includes("privatekey:•••") && line.includes("keyuses:3"), line);
   }
 });
+
+// ---- 0.19.303: a UNC path in a file parameter is refused (a Windows node would connect to that share) ----
+test("a file parameter on another computer (\\\\host\\share or //host/share) is refused; a local or drive path is not", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), B = String.fromCharCode(92), main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async () => ({}), { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  for (const c of ["reset action:chainsync archivefile:" + B + B + "evil" + B + "share" + B + "a.gz", "archive action:import file://evil/share/a.gz", "backup file:" + B + B + "host" + B + "s" + B + "b.bak", "mysql action:reset file:" + B + B + "h" + B + "x"])
+    await assert.rejects(hs["mcd:cmd"](null, c), /A file on another computer/, c);
+  assert.deepEqual(sent, []);
+  for (const c of ["backup file:/Users/me/b.bak", "backup file:C:" + B + "b.bak", "archive action:export file:/x/a.gz"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+});

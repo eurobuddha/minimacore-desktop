@@ -5344,7 +5344,8 @@
   "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.": "Эта команда строит из своих значений другие команды, а одно из значений содержит пробел, двоеточие, кавычку или escape-последовательность с обратной косой чертой, которые изменили бы эти команды. Ничего не было запущено.",
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "Каждый открытый ключ мультиподписи и корневой ключ должны быть 0x и 64 шестнадцатеричные цифры. Ничего не было запущено.",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "Узел восстановления должен быть в виде host:port (имя или IP-адрес, двоеточие, номер порта). Ничего не сохранено.",
-  "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode задаётся в параметрах запуска, а не в дополнительных аргументах."
+  "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode задаётся в параметрах запуска, а не в дополнительных аргументах.",
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "Файл на другом компьютере (путь, начинающийся с \\\\ или //) не используется: узел подключился бы к нему. Сначала скопируйте файл на этот компьютер. Ничего не было запущено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5458,5 +5459,6 @@
   "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.",
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
-  "-rescuenode is set in Startup Params, not in the extra arguments."
+  "-rescuenode is set in Startup Params, not in the extra arguments.",
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run."
 ] });

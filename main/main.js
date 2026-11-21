@@ -262,6 +262,10 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
       || (cmdverb.is(part, "slavenode") && names.includes("enable")) || (cmdverb.is(part, "webhooks") && action === "add")
       || (cmdverb.is(part, "mds") && action !== "" && action !== "list" && action !== "accept"))
       throw new Error("This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.");
+    // a file on another computer (a UNC path, \\host\share or //host/share): a Windows node would connect to that share (0.19.303)
+    if (["reset", "archive", "restore", "restoresync", "backup", "mysql", "mysqlcoins", "megammr", "megammrsync", "decryptbackup"].some(v => cmdverb.is(part, v))
+      && cmdverb.read(part).params.some(([n, v]) => /^(file|archivefile|folder)$/i.test(n) && /^(\\\\|\/\/)/.test(v)))
+      throw new Error("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.");
     if (cmdverb.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
     if ((cmdverb.is(part, "multisig") || cmdverb.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
   }

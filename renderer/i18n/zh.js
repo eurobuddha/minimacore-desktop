@@ -5331,7 +5331,8 @@
   "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.": "此命令会用它的值构造更多命令，而其中一个值含有空白、冒号、引号或反斜杠转义，会改变那些命令。未运行任何命令。",
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.": "每个多签公钥以及根密钥都必须是 0x 后跟 64 位十六进制数字。未运行任何命令。",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.": "救援节点必须是 host:port（名称或 IP 地址、冒号、端口号）。未保存任何内容。",
-  "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode 在启动参数中设置，而不是在额外参数中。"
+  "-rescuenode is set in Startup Params, not in the extra arguments.": "-rescuenode 在启动参数中设置，而不是在额外参数中。",
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.": "不会使用另一台计算机上的文件（以 \\\\ 或 // 开头的路径）：节点会去连接它。请先把文件复制到这台计算机。未运行任何命令。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5445,5 +5446,6 @@
   "This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.",
   "Each multisig public key, and the root key, must be 0x followed by 64 hexadecimal digits. Nothing was run.",
   "The rescue node must be host:port (a name or IP address, a colon, a port number). Nothing was saved.",
-  "-rescuenode is set in Startup Params, not in the extra arguments."
+  "-rescuenode is set in Startup Params, not in the extra arguments.",
+  "A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run."
 ] });

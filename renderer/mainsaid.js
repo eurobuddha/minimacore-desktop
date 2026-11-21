@@ -407,6 +407,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["RPC_UNCLEAR", I18N.N_("The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.")],
     ["MAIN_CMD_REPEATED", I18N.N_("This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.")],
     ["MAIN_OPENS_NODE", I18N.N_("This command would open this node to someone else or send its events out (the RPC login or password, a master node, a web hook, MiniDapps). This app never needs that, so it is not run from the Terminal. Nothing was run.")],
+    ["MAIN_UNC_FILE", I18N.N_("A file on another computer (a path that starts with \\\\ or //) is not used: the node would connect to it. Copy the file to this computer first. Nothing was run.")],
     ["MAIN_MDS_ACCEPT", I18N.N_("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.")],
     ["MAIN_MULTISIG_SPEND", I18N.N_("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.")],
     ["MAIN_SEND_REPEATED", I18N.N_("This send names {names} more than once (the node would use only the last). Write each once.")],
