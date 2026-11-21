@@ -133,8 +133,12 @@ function unclear(command) { return parts(command).some(p => read(p).odd && verbs
 // ";" can never be a value (both sides split on it first), so "\u003b" is the only way to carry one: refused for every verb, and so
 // is an escape that decodes to a control character.
 const SMUGGLED = "This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.";
-/** Why this text is refused for an escaped ";" or control character ("" = it is not). */
-function smuggled(command) { return (String(command).match(/\\u[0-9a-fA-F]{4}/g) || []).some(x => { const c = parseInt(x.slice(2), 16); return c === 0x3b || c < 0x20; }) ? SMUGGLED : ""; }
+/** Why this text is refused for a \u escape that decodes to ";" or a control character ("" = it is not). Only a real escape counts
+ *  (0.19.300): a "\" before it that is itself escaped ("\\u003b", an even run of backslashes) leaves plain text to the node. */
+function smuggled(command) {
+  for (const m of String(command).matchAll(/(?<!\\)(?:\\\\)*\\u([0-9a-fA-F]{4})/g)) { const c = parseInt(m[1], 16); if (c === 0x3b || c < 0x20) return SMUGGLED; }
+  return "";
+}
 
 // The commands that build further commands from their values and run them (0.19.299, read from core/minima-core: send/wallet
 // sendfrom, rawfrom, rawtxnfrom, createtokenfrom, consolidatefrom, constructfrom, createfrom, signfrom, postfrom; send/multisig,
