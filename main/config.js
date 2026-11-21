@@ -235,6 +235,13 @@ function setFcGrant(walletKey, at, safe) {
   fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
   return g;
 }
+/** The old AtomiX store owed a move aside after a wallet replacement (0.19.267, main/atomix.js): never from a patch (save()
+ *  drops a key DEFAULTS does not name), only here, so the window cannot clear it. */
+function setAtomixStoreMoveOwed(v) {
+  const cur = load(); if (v) cur.atomixStoreMoveOwed = true; else delete cur.atomixStoreMoveOwed;
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
+}
 /** The grant for this wallet, { at, safe }, or null. */
 const fcGranted = (walletKey) => { const g = load().fcGrant, r = g && typeof g === "object" ? g[walletKey] : null; return r && typeof r === "object" && Number(r.at) > 0 && typeof r.safe === "string" && r.safe ? { at: Number(r.at), safe: r.safe } : null; };
 
@@ -295,4 +302,4 @@ function setSecret(value, account) {
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }
 
-module.exports = { load, save, recordKeyMode, setFcGrant, fcGranted, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+module.exports = { load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

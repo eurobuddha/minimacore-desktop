@@ -212,3 +212,26 @@ test("PandaPools glue: createPool only for MxUSD with the node's decimals, swap 
 });
 
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });
+
+// 0.19.267: the owed move aside is on disk (config.json), so a restart does not open the old wallet's store under the new one
+test("AtomiX glue: a store owed a move aside is still owed after a restart (a fresh load of the glue), and is moved once it can be", async () => {
+  const cfgPath = require.resolve("../main/config.js"), axPath = require.resolve("../main/atomix.js"), before = require.cache[cfgPath], disk = {};   // disk: config.json
+  require.cache[cfgPath] = { id: cfgPath, filename: cfgPath, loaded: true, children: [], paths: [], exports: { rpcSecret: () => "", load: () => JSON.parse(JSON.stringify(disk)),
+    setAtomixStoreMoveOwed: (v) => { if (v) disk.atomixStoreMoveOwed = true; else delete disk.atomixStoreMoveOwed; } } };
+  const dir = tmp("ax-owed-restart-"), db = path.join(dir, "atomix.sqlite"), mock = async () => ({ status: false, error: "mock" });
+  let atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);
+  fs.writeFileSync(db, "the old wallet's claim secrets"); fs.chmodSync(dir, 0o500);
+  try {
+    assert.throws(() => atomix.invalidate(), /could not be moved aside/);
+    assert.equal(disk.atomixStoreMoveOwed, true, "the debt is in config.json");
+    atomix.stopLoop(); atomix.flush();
+    delete require.cache[axPath]; atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);   // the app restarted: nothing in memory
+    await assert.rejects(atomix.init(), /could not be moved aside yet/, "the new wallet's engine does not open the old store");
+    assert.equal(fs.readFileSync(db, "utf8"), "the old wallet's claim secrets", "never opened, never changed");
+    fs.chmodSync(dir, 0o700);
+    await atomix.init().catch(() => {});
+    const kept = fs.readdirSync(dir).find(f => /^atomix\.sqlite-legacy-keys-\d{8}$/.test(f)); assert.ok(kept, fs.readdirSync(dir).join(", "));
+    assert.equal(fs.readFileSync(path.join(dir, kept), "utf8"), "the old wallet's claim secrets");
+    assert.equal(disk.atomixStoreMoveOwed, undefined, "cleared once moved");
+  } finally { try { fs.chmodSync(dir, 0o700); } catch (e) {} atomix.stopLoop(); atomix.flush(); if (before) require.cache[cfgPath] = before; else delete require.cache[cfgPath]; }
+});

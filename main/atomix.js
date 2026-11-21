@@ -225,7 +225,7 @@ async function init() {
   if (held) throw new Error(heldText());
   if (ready) return;
   if (initPromise) return initPromise;
-  if (storeMoveOwed) { try { moveStoreAside(); } catch (e) { throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + e.message + ")."); } }
+  if (storeMoveOwed || owedOnDisk()) { try { moveStoreAside(); } catch (e) { throw new Error("AtomiX does not start: the replaced wallet's swap database could not be moved aside yet (" + e.message + ")."); } }
   const gen = generation;     // capture; invalidate() bumps this to disown an in-flight init from the old seed
   if (!firstTry) firstTry = Date.now();
   initPromise = (async () => {
@@ -391,8 +391,14 @@ function invalidate() {
   if (moveFailed) throw new Error("the old swap database could not be moved aside (" + moveFailed.message + "); AtomiX does not start until it is");
 }
 let storeMoveOwed = false;
+// The debt survives a quit or a crash (0.19.267): it is written to config.json (main/config.js) BEFORE the rename is tried and
+// cleared only once the store is moved; init() reads it there too. It was in memory only, so after a restart the new
+// wallet's engine opened the old wallet's swap database.
+function owedOnDisk() { try { return require("./config").load().atomixStoreMoveOwed === true; } catch (e) { return false; } }
+function markOwed(v) { try { require("./config").setAtomixStoreMoveOwed(v); } catch (e) { log("wallet replaced: the debt of moving the old swap database aside could not be recorded (" + e.message + ")"); } }
 function moveStoreAside() {
-  try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; }
+  markOwed(true);
+  try { const kept = require("./restore").moveAside(path.join(dir(), "atomix.sqlite")); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; markOwed(false); }
   catch (e) { storeMoveOwed = true; log("wallet replaced: the old swap database could not be moved aside (" + e.message + "); AtomiX does not start until it is"); throw e; }
 }
 
