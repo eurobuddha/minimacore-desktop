@@ -323,3 +323,29 @@ test("a 9.95 payment and a 0.05 top-up pay a 10 order, in either order and in on
   await scan([], [{ coinid: "0x41", ref: "ORD-TU4", amount: "0.05", tokenid: "0x00", created: 105 }, { coinid: "0x42", ref: "ORD-TU4", amount: "9.95", tokenid: "0x00", created: 106 }]);
   assert.equal(store.order("ORD-TU4").paid, true, "two scans: the top-up is judged again once the 9.95 is in");
 });
+
+// ---- 0.19.232: the stored vendor address is kept; every shop's own payout address is read; a scan cursor survives a quit ----
+test("vendor: the stored address is kept (getaddress only the first time), a shop's own payout address is scanned, and the gap since the last scan is read", async () => {
+  const OTHER = "MxG0OTHERPAYOUT0000000000000000000000000000000000000000000000001", NEWADDR = "MxG0NEWGETADDRESS00000000000000000000000000000000000000000000002";
+  store.saveShop({ shopId: "two", shopName: "Two", currency: "Minima", tokenid: "0x00", vendorAddress: OTHER, products: [{ id: "p1", name: "Cup", price: "4", maxUnits: "5" }], shipping: [] });
+  delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop");   // a fresh launch of the module, the same store
+  let tip = 5000; const asked = [], notified = [];
+  shop._setRunner(async (c) => {
+    asked.push(c);
+    if (c === "getaddress") return { status: true, response: { miniaddress: NEWADDR } };
+    if (c === "block") return { status: true, response: { block: String(tip) } };
+    if (c.startsWith("coinnotify")) { notified.push(c); return { status: true }; }
+    if (c.startsWith("coins address:" + shop.MINIMERCH)) return { status: true, response: [{ coinid: "0xM2W1", state: { "99": hex(JSON.stringify({ type: "ORDER", ref: "ORD-TWO1", from: BUYER, date: 1, shopId: "two", items: [{ product: "Cup", quantity: 1, unitPrice: "4" }], amount: "4", currency: "Minima", shipping: "" })) } }] };
+    if (c.startsWith("coins address:" + OTHER)) return { status: true, response: [{ coinid: "0xP2W1", tokenid: "0x00", amount: "4", created: 4990, state: { "1": hex("ORD-TWO1") } }] };
+    return { status: true, response: [] };
+  });
+  await shop.init();
+  assert.equal(shop.myIdentity().vendorAddress, VENDOR, "the stored address, not a new getaddress");
+  assert.ok(!asked.includes("getaddress"), "getaddress is not asked when one is stored");
+  assert.ok(notified.some(c => c.endsWith(OTHER)), "the shop's own payout address is watched");
+  await shop.scanOnce();
+  assert.equal(store.order("ORD-TWO1").paid, true, "paid at the shop's own payout address");
+  assert.equal(store.getMeta("scanned_tip_block"), 5000, "the cursor is saved");
+  tip = 6500; asked.length = 0; await shop.scanOnce();
+  assert.ok(asked.some(c => / depth:1516$/.test(c)), "the gap since the last scan (1500 blocks) and a margin is read: " + asked.filter(c => c.startsWith("coins")).join(" | "));
+});

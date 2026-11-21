@@ -73,10 +73,12 @@ async function init() {
     identity = await sc.deriveIdentity(seed);
     config.setSecret(sc.serializeIdentity(identity), SHOP_KEY_ACCOUNT);
   }
-  try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; vendorAddress = gr.miniaddress || gr.address || ""; if (vendorAddress) store.setMeta("vendorAddress", vendorAddress); } catch (e) {}
-  if (!vendorAddress) vendorAddress = store.getMeta("vendorAddress") || "";
+  // The stored vendor address is kept (0.19.232): getaddress only the first time. A shop already handed out names that
+  // address, and a later getaddress could return another one, whose payments were then never read.
+  vendorAddress = store.getMeta("vendorAddress") || "";
+  if (!vendorAddress) { try { const g = await nodeCmd("getaddress"); const gr = (g && g.response) || {}; vendorAddress = gr.miniaddress || gr.address || ""; if (vendorAddress) store.setMeta("vendorAddress", vendorAddress); } catch (e) {} }
   if (!store.getMeta("cn:merch")) { try { await nodeCmd("coinnotify action:add address:" + MINIMERCH); store.setMeta("cn:merch", true); } catch (e) {} }
-  if (vendorAddress && !store.getMeta("cn:pay:" + vendorAddress)) { try { await nodeCmd("coinnotify action:add address:" + vendorAddress); store.setMeta("cn:pay:" + vendorAddress, true); } catch (e) {} }
+  for (const a of payAddresses()) if (!store.getMeta("cn:pay:" + a)) { try { await nodeCmd("coinnotify action:add address:" + a); store.setMeta("cn:pay:" + a, true); } catch (e) {} }
   return identity;
 }
 /** On seed change (wallet restore) → drop the cached shop identity + local orders (different identity). */
@@ -270,7 +272,7 @@ async function coinsAt(address, depth, extra) {
 }
 function capSeen() { if (seenMsgCoins.size > 40000) seenMsgCoins.clear(); if (seenPayCoins.size > 40000) seenPayCoins.clear(); }
 async function scanOrders(depth) {
-  const coins = await coinsAt(MINIMERCH, depth); if (!coins) return false;
+  const coins = await coinsAt(MINIMERCH, depth); if (!coins) return null;   // null: not read (the cursor stays)
   capSeen();
   let changed = false;
   for (const c of coins) {
@@ -284,9 +286,17 @@ async function scanOrders(depth) {
   }
   return changed;
 }
+/** Every address payments to my shops land on (0.19.232): the vendor address and each stored shop's own payout address. */
+function payAddresses() {
+  const out = new Set(); if (vendorAddress) out.add(vendorAddress);
+  for (const s of store.shops()) if (s && looksLikeMinimaAddress(s.vendorAddress)) out.add(String(s.vendorAddress));
+  return [...out];
+}
 async function scanPayments(depth) {
-  if (!vendorAddress) return false;
-  const listed = await coinsAt(vendorAddress, depth, " relevant:true"); if (!listed) return false;
+  const addrs = payAddresses(); if (!addrs.length) return false;
+  let listed = [], any = false;
+  for (const a of addrs) { const got = await coinsAt(a, depth, " relevant:true"); if (got) { any = true; listed = listed.concat(got); } }
+  if (!any) return null;
   capSeen();
   // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it
   // completes. Within one block the larger coin first, so the remainder comes last.
@@ -314,14 +324,22 @@ async function scanPayments(depth) {
   if (changed && dust.length) for (const c of dust) judge(c);
   return changed;
 }
+/** How many blocks a pass asks for (0.19.232, mail.js's depthForGap): the gap since the last scanned tip (saved, so it
+ *  survives a quit) plus a margin, never below the steady window, never past one pass's ceiling. */
+const WINDOW_DEPTH = 4096, GAP_MARGIN = 16;
+function depthForGap(tip, prevTip) { if (!prevTip) return BACKFILL_MAX_DEPTH; const gap = Math.max(0, tip - prevTip); return Math.min(WINDOW_DEPTH, Math.max(POLL_DEPTH, gap + GAP_MARGIN)); }
+async function currentBlock() { try { const b = await nodeCmd("block"); return parseInt((b && b.response && (b.response.block != null ? b.response.block : b.response)), 10) || 0; } catch (e) { return 0; } }
 async function scanOnce() {
   if (scanning || !identity) return;
   scanning = true;
   try {
-    const depth = backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH;
-    const a = await scanOrders(depth).catch(() => false);
-    const b = await scanPayments(depth).catch(() => false);
+    const tip = await currentBlock(), prev = Number(store.getMeta("scanned_tip_block") || 0);
+    const depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
+    if (tip && prev && tip - prev + GAP_MARGIN > WINDOW_DEPTH) store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass reads the last " + WINDOW_DEPTH + " (orders and payments before block " + (tip - WINDOW_DEPTH) + " were not read)");
+    const a = await scanOrders(depth).catch(() => null);
+    const b = await scanPayments(depth).catch(() => null);
     backfilled = true;
+    if (tip && a !== null && b !== null) store.setMeta("scanned_tip_block", tip);   // only a pass that read both moves the cursor
     if (a || b) emitter.emit("update");
   } finally { scanning = false; }
 }

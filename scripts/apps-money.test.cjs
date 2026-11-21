@@ -353,7 +353,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.194 (every command through rpc.oneCommand)
   // main/shop-store.js again in 0.19.199 (a peer-written id reads own entries only)
   // both again in 0.19.200 (dust is not counted, kept or saved and is judged again; payment coins read oldest first)
-  for (const [f, want, ver] of [["main/shop.js", "29e85a169418c3c26bc5bbddd17836709258d739165ac7c74a65131cbdaf2d66", "0.19.200"], ["main/shop-store.js", "c8578023daab3b733788069f350846ad08bdb229ef79da98db03aebd9875254d", "0.19.200"],
+  // main/shop.js again in 0.19.232 (the stored vendor address kept; every shop's payout address read; a saved scan cursor)
+  for (const [f, want, ver] of [["main/shop.js", "b1043b4cc0fb6cc76c8d48ec76d874c02ca208241bff63d88ca2e54a7d154a43", "0.19.232"], ["main/shop-store.js", "c8578023daab3b733788069f350846ad08bdb229ef79da98db03aebd9875254d", "0.19.200"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

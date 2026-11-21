@@ -10,7 +10,7 @@ standIn("main/config.js", { getSecret: () => "cached", setSecret() {}, deleteSec
 standIn("main/node-manager.js", { rpcPort: () => 0 });
 standIn("main/rpc.js", { rpcCall: async () => { throw new Error("TEST LEAK: the real rpcCall"); } });
 standIn("main/shopcrypto.js", { ready: async () => {}, loadIdentity: () => ({ publicId: "0x" + "11".repeat(32) }), isValidPublicId: (v) => /^0x[0-9A-F]{64}$/i.test(String(v)), seal: async () => "ab" });
-standIn("main/shop-store.js", { upsertOrder: (o) => { db.orders[o.ref] = o; return true; }, order: (r) => db.orders[r] || null, shop: () => null, getMeta: (k) => db.meta[k], setMeta: (k, v) => { db.meta[k] = v; }, setMetaSync: (k, v) => { db.meta[k] = v; } });
+standIn("main/shop-store.js", { upsertOrder: (o) => { db.orders[o.ref] = o; return true; }, order: (r) => db.orders[r] || null, shop: () => null, shops: () => [], getMeta: (k) => db.meta[k], setMeta: (k, v) => { db.meta[k] = v; }, setMetaSync: (k, v) => { db.meta[k] = v; } });
 const shop = require("../main/shop");
 const sent = [];
 shop._setRunner(async (cmd) => { sent.push(cmd); if (cmd === "getaddress") return { status: true, response: { miniaddress: "MxG0ME" } }; if (cmd.startsWith("coins ")) return { status: true, response: [] }; return { status: true, response: { txpowid: "0xT" } }; });
