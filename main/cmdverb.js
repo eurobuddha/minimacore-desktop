@@ -33,8 +33,10 @@ function verbs(part) {
 function is(part, verb) { return verbs(part).includes(verb); }
 /** Does this ONE command begin with `prefix`, however it is quoted or trimmed (for gates: over-blocks on purpose)? */
 function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(prefix)) || fold(jtrim(String(part).replace(/"/g, ""))).startsWith(prefix); }
-/** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value). */
-function paramsText(part) { return jtrim(String(part).replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
+/** The text the parameter regexes read: quotes dropped, " : " closed up (the fast path's key : value).
+ *  NOT in the released file (0.19.192 here): a "quoted" first word is ended by its closing quote, so `"txninput"id:a` reads
+ *  as `txninput id:a`, as the node's fast path reads it (released: `txninputid:a`, and its id: was not seen). */
+function paramsText(part) { return jtrim(jtrim(String(part)).replace(/^"([^"]*)"/, "$1 ").replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
 
 /** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb, read
  *  from paramsText (quotes dropped, " : " closed up). The node keeps the LAST of a repeated name. */

@@ -726,6 +726,30 @@ test("L1: the verb in any case, a repeated parameter and a quoted value are all 
   assert.equal((await as("atomix")("txnpost id:a id:b")).reserved, true);
 });
 
+// 0.19.192: the coin guard reads a command as the node does (main/cmdverb.js): each of these is run by the node as the
+// command named, and slipped past /^\s*(\w+)/ or a parameter read that kept quotes and " : ".
+test("the coin guard reads txninput, send and consolidate the way the node does: quoted, control-character and ':'-spaced forms are guarded", async () => {
+  const { node, as, reg } = rig(wallet3());
+  hold(reg, coinId(1));
+  await as("atomix")("txncreate id:a");
+  for (const c of ['"txninput" id:a coinid:' + coinId(1), "\u0001txninput id:a coinid:" + coinId(1), 'tx"ninp"ut id:a coinid:' + coinId(1), '"txninput"id:a coinid:' + coinId(1),
+    "txninput id:a coinid : " + coinId(1), "txninput id : a coinid:" + coinId(1), 'txninput id:a "coinid":' + coinId(1), 'txninput "id":"a" "coinid":"' + coinId(1) + '"',
+    "status;\u0002txninput id:a coinid:" + coinId(1), 'status; "txninput" id:a coinid : ' + coinId(1)])
+    assert.equal((await as("atomix")(c)).reserved, true, JSON.stringify(c));
+  assert.equal(node.seen.filter(c => /txninput/i.test(c)).length, 0, "none reached the node");
+  assert.equal((await as("atomix")('"txninput" id:a coinid:' + coinId(1) + " coinid : " + coinId(2))).reserved, true, "a repeated coinid, however spaced, is refused");
+  for (const c of ['"consolidate" tokenid:0x00', "\u0001consolidate tokenid:0x00", "consolidate tokenid : 0x00", 'con"solid"ate tokenid:0x00'])
+    assert.equal((await as("wallet")(c)).reserved, true, JSON.stringify(c));
+  assert.equal((await as("wallet")('"consolidate" tokenid:0x00 dryrun : true')).reserved, undefined, "a dry run is still let through");
+  for (const c of ['"send" amount:40 address:' + ADDR(7), "\u0001send amount:40 address:" + ADDR(7), "send amount : 40 address:" + ADDR(7)]) {
+    node.dropMempool();
+    const before = node.seen.length, r = await as("wallet")(c);
+    const sent = node.seen.slice(before).filter(x => !/^(coins|checkaddress)/.test(x));
+    assert.ok(r.reserved === true || (sent.length === 1 && sent[0].endsWith(" fromaddress:" + ADDR(2))), JSON.stringify(c) + " is pinned away from the held coin or refused: " + JSON.stringify(sent));
+  }
+  assert.equal((await as("wallet")('send amount:1 address:' + ADDR(7) + ' "amount":60')).reserved, true, "a repeated amount, one of them quoted, is refused");
+});
+
 test("L2: a retried txnpost the node rejects does not release the coins the first post put in the mempool", async () => {
   const { node, as, reg } = rig(wallet3());
   await build(as("atomix"), "a", [coinId(1)], { noPost: true });
@@ -780,4 +804,15 @@ test("L5: a `;` ends a command for the node wherever it stands, so the guard spl
   assert.equal(r.reserved, true); assert.match(r.error, /is held for a live Dexicon order/);
   assert.equal(node.seen.length, 1, "only the look at the coin (is it a plain coin?) reached the node");
   assert.match(node.seen[0], /^coins coinid:/);
+});
+
+// 0.19.192: a "quoted" first word ends at its closing quote for the parameter readers too (main/cmdverb.js paramsText; the
+// released file read `"vault"action:seed` as one word, so its action: was not seen)
+test("cmdverb: the parameters after a quoted verb with no space are read, as the node's fast path reads them", async () => {
+  const V = require("../main/cmdverb");
+  assert.equal(V.paramsText('"txninput"id:a coinid : 0x01'), "txninput id:a coinid:0x01");
+  assert.deepEqual(V.paramNames('"vault"action:seed action:wipekeys'), ["action", "action"]);
+  assert.deepEqual(V.repeated('"send"amount:1 amount:9 address:0xA', ["amount", "tokenid", "address", "fromaddress"]), ["amount"]);
+  const G = require("../main/seedgate.js"), g = G.create({ check: async () => ({ biometric: false }) });
+  await assert.rejects(g.open('"keys"action:list action:genkey', "SHOW KEY"), /names action more than once/);
 });

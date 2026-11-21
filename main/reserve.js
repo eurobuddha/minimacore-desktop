@@ -37,14 +37,21 @@ const SETTLES = new Set(["atomix", "casino"]);   // owners whose transactions se
 const TXN_WHY = { atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet", futurecash: "a Future Cash Next transaction" };
 const HOLD_WHY = { dexicon: "Dexicon" };
 HOLD_WHY.futurecash = "Future Cash Next";   // the coins Future Cash Next is about to sweep (main/futurecash.js coinHolds)
-const WATCH = /(?:^|;)\s*(?:txncreate|txninput|txnpost|txndelete|send|consolidate|coins)\b/i;
+// Which command it is, and its parameters, are read the way the node reads them (main/cmdverb.js, 0.19.192): the node trims
+// every character up to U+0020, takes a "quoted" first word as the verb, reads ":" as a token and drops quotes. A
+// /^\s*(\w+)/ reading let `"txninput" id:a coinid:0x…`, a control character before it, or `coinid : 0x…` past the guard.
+const V = require("./cmdverb");
+const WATCHED = ["txninput", "send", "consolidate", "txnpost", "txndelete", "txncreate", "coins"];   // in this order when two readings differ
+const WATCH = { test: (c) => V.parts(c).some(p => V.verbs(p).some(v => WATCHED.includes(v))) };
 const MXUSD = "0x7d39745fbd29049be29850b55a18bf550e4d442f930f86266e34193d89042a90";
 const tokenName = (t) => (lc(t) === "0x00" ? "MINIMA" : lc(t) === MXUSD ? "MxUSD" : "of token " + t);
 /** An engine's own choice of inputs: its wallet coins of one token. Not a look at one coin or one address. */
 const CHOICE_READ = (c) => verbOf(c) === "coins" && lc(param(c, "relevant")) === "true" && args(c).first.has("tokenid") && !args(c).first.has("coinid") && !args(c).first.has("address");
 
 const lc = (s) => String(s == null ? "" : s).toLowerCase();
-const verbOf = (c) => lc((/^\s*(\w+)/.exec(c) || [])[1]);   // the node lower-cases the verb (CommandRunner.getCommand): SEND is send
+/** The verb the node runs for ONE command, lower-cased (CommandRunner.getCommand: SEND is send); where its two readings
+ *  differ, a watched one wins (over-guarding, never under). */
+const verbOf = (c) => { const vs = V.verbs(c); return WATCHED.find(w => vs.includes(w)) || vs[0] || ""; };
 /**
  * One command's top-level parameters, split as the node splits them (CommandRunner.splitStringJSON): on white space,
  * with a {…}, […] or "…" value kept whole, so a name:value inside a state JSON is not a parameter. Names are compared
@@ -64,7 +71,7 @@ function parse(c) {
   return { first, dup };
 }
 let parsedOf = "", parsed = null;   // the last command parsed: every look at one command reads the same parse
-const args = (c) => { if (c !== parsedOf || !parsed) { parsed = parse(c); parsedOf = c; } return parsed; };
+const args = (c) => { if (c !== parsedOf || !parsed) { parsed = parse(V.paramsText(c)); parsedOf = c; } return parsed; };   // quotes dropped and " : " closed up first, as the node reads a name and its value
 const param = (c, k) => args(c).first.get(k) || "";
 const SEND_MODES = ["off", "observe", "enforce"];
 const isCoin = (s) => /^0x[0-9a-f]{2,64}$/.test(s);
