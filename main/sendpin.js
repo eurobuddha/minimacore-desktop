@@ -25,8 +25,7 @@ async function pinMinimaSend(runner, command, opts) {
   if (!V.is(c, "send")) return c;
   // A parameter is read as the node reads it (0.18.187, 0.18.189): a top-level `name:` only (not inside a state's JSON,
   // not glued inside a quoted value), and the LAST one when a name repeats (mcd:cmd refuses a send that repeats one).
-  const nt = V.namesText(c);
-  const last = (name) => { const all = [...nt.matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))]; return all.length ? all[all.length - 1][1] : null; };
+  const last = (name) => V.paramValue(c, name);   // the node's own reading (main/cmdverb.js read, 0.18.219)
   if (last("fromaddress") != null) return c;
   // minCoinage: only consider coins at least N blocks deep. AtomiX's order-book publish needs this — a
   // publish's own CHANGE output is a brand-new coin that immediately becomes the smallest one, and pinning

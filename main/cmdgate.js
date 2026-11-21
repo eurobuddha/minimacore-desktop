@@ -49,6 +49,7 @@ function create(sys, now) {
     const c = String(command == null ? "" : command), { kind, chain } = classify(c);
     if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error("Run this command on its own, not in a chain with ;.");
+    const unclear = V.unclear(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.18.219): refused before any question
     const twice = V.repeated(c);   // before the phrase: what the phrase is depends on the action, and the node keeps the last one
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");
     if (String(typed == null ? "" : typed).trim() !== PHRASE[kind]) throw new Error("Type " + PHRASE[kind] + " exactly to continue.");
@@ -76,8 +77,10 @@ function create(sys, now) {
  *  values of phrase, password, confirm and seed hidden (quoted or not). */
 function masked(c) {
   return String(c).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, " ")
-    // an unquoted value ends at a space OR a quote (0.18.214): `seed:0xAB"action":"wipekeys"` hid the action glued after it
-    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)("[^"]*"|[^\s"]+)/gi, "$1•••")
+    // hidden through the end of the node's token (0.18.219, as Pandamonium Desktop 0.19.266): a quote inside a value opens a quoted
+    // span the node keeps in the same value (`password:my"secret` showed `"secret`; `seed:0xAB"action":"wipekeys"` is ONE seed value
+    // to the node, no action: 0.18.214 showed an action the node never reads)
+    .replace(/((?:^|\s|")(?:phrase|password|confirm|seed)"?\s*:\s*)((?:"[^"]*"?|[^\s"])+)/gi, "$1•••")
     .replace(/\s+/g, " ").trim();
 }
 /** Why mcd:cmd refuses this command ("" = it may run). take: the gate's take. */
@@ -92,13 +95,15 @@ function refusal(command, take) {
 /**
  * checkCommand(command, io) (0.18.201): everything mcd:cmd decides before a text reaches the node, in order:
  *   1. a non-empty string;  2. no control character (tab and line end allowed; the node trims and reads the others in
- *   ways no check here can follow);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   ways no check here can follow);  2b. a command that moves funds or keys whose text the node reads otherwise than it looks
+ *   (main/cmdverb.js unclear, 0.18.219);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
  *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
  *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
  */
 async function checkCommand(command, io) {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
+  const unclear = V.unclear(command); if (unclear) throw new Error(unclear);   // refused, not guessed (0.18.219, main/cmdverb.js read)
   for (const part of V.parts(command)) {
     if (!V.is(part, "send")) continue;
     const twice = V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]);

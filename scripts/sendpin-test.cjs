@@ -64,12 +64,17 @@ test("0.18.189: the pin sees a tokenid glued after a quoted value", async () => 
 // ---- 0.18.197: quote state, a quoted first word, unreadable amounts and multi sends ----
 test("an unbalanced bracket inside a quoted value hides nothing; a quoted first word ends at its quote; an unreadable amount or a multi send is not pinned", async () => {
   const V = require("../main/cmdverb"), MX = "0x" + "CD".repeat(32);
-  assert.deepEqual(V.paramNames('send password:"ab{c" amount:50 address:0xAA tokenid:' + MX), ["password", "amount", "address", "tokenid"]);
-  assert.deepEqual(V.repeated('send password:"ab[c" amount:1 amount:2 address:0xAA', ["amount"]), ["amount"], "a [ in a quoted value does not hide the repeat");
-  assert.deepEqual(V.paramNames('send amount:50 address:0xAA state:{"0":"["} fromaddress:0xBB'), ["amount", "address", "state", "fromaddress"]);
-  assert.equal(V.paramsText('"txninput"id:a coinid:0x01'), "txninput id:a coinid:0x01");
+  // CHANGED on purpose (0.18.219): the node's slow splitter counts a { or [ even inside quotes, so it reads ONE password value up to
+  // the end (no amount, no tokenid): these are the node's readings, and mcd:cmd refuses such a send as unclear (main/cmdverb.js)
+  assert.deepEqual(V.paramNames('send password:"ab{c" amount:50 address:0xAA tokenid:' + MX), ["password"]);
+  assert.deepEqual(V.repeated('send password:"ab[c" amount:1 amount:2 address:0xAA', ["amount"]), []);
+  assert.match(V.unclear('send password:"ab[c" amount:1 amount:2 address:0xAA'), /differently from how it is written/);
+  // the [ inside the state's quoted value is never closed for the node, so state runs to the end and fromaddress is part of it
+  assert.deepEqual(V.paramNames('send amount:50 address:0xAA state:{"0":"["} fromaddress:0xBB'), ["amount", "address", "state"]);
+  assert.match(V.unclear('send amount:50 address:0xAA state:{"0":"["} fromaddress:0xBB'), /differently from how it is written/, "refused by mcd:cmd before any pin");
+  assert.deepEqual(V.read('"txninput"id:a coinid : 0x01').params, [["id", "a"], ["coinid", "0x01"]]);
   let r = rig(); let c = 'send password:"ab{c" amount:50 address:0xAA tokenid:' + MX; assert.equal(await pinMinimaSend(r.run, c), c, "a token send stays a token send");
-  r = rig(); c = 'send amount:50 address:0xAA state:{"0":"["} fromaddress:0xBB'; assert.equal(await pinMinimaSend(r.run, c), c, "its own fromaddress is seen");
+  r = rig(); c = 'send amount:50 address:0xAA state:{"0":"[x]"} fromaddress:0xBB'; assert.equal(await pinMinimaSend(r.run, c), c, "its own fromaddress is seen");
   r = rig(); c = 'send multi:["0xAA:10","0xBB:10"] split:2'; assert.equal(await pinMinimaSend(r.run, c), c); assert.deepEqual(r.asked, []);
   r = rig(); c = "send amount:all address:0xAA"; assert.equal(await pinMinimaSend(r.run, c), c, "an amount that is not a number"); assert.deepEqual(r.asked, []);
   r = rig(); c = "send address:0xAA"; assert.equal(await pinMinimaSend(r.run, c), c, "no amount");

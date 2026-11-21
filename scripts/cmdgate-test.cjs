@@ -195,7 +195,9 @@ test("a parameter name glued after a quoted value counts as a repeat; a key insi
   assert.deepEqual(V.repeated('send amount:1 address:0xA tokenid:"0xFF"tokenid:0x00', ["tokenid"]), ["tokenid"]);
   assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x","1":"tokenid:0x00"}', ["amount", "tokenid", "address", "fromaddress"]), [], "keys inside a state's JSON are not parameters");
   const g = G.create(SYS({}));
-  await assert.rejects(g.arm('keys action:"list"action:genkey', "SHOW KEY"), /names action more than once/);
+  await assert.rejects(g.arm('keys action:list action:genkey', "SHOW KEY"), /names action more than once/);
+  // CHANGED on purpose (0.18.219): a quote glued to the next name is a text the node reads otherwise than it looks: refused as unclear
+  await assert.rejects(g.arm('keys action:"list"action:genkey', "SHOW KEY"), /differently from how it is written/);
 });
 
 // ---- 0.18.194: the Terminal asks the kind first and echoes an ordinary command at once ----
@@ -267,9 +269,60 @@ test("checkCommand: empty, control characters, a repeated send parameter and the
 });
 
 // ---- 0.18.214: a name glued after an unquoted secret value is shown ----
-test("masked: an unquoted secret ends at a quote, so what is glued after it is shown", () => {
+test("masked: a secret holding a quote is hidden through the end of the node's token (CHANGED on purpose, 0.18.219)", () => {
   const G = require("../main/cmdgate");
-  assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), 'vault seed:•••"action":"wipekeys"');
-  assert.equal(G.masked('vault password:hunter2"action":"passwordunlock"'), 'vault password:•••"action":"passwordunlock"');
+  // the node reads `seed:0xAB"action":"wipekeys"` as ONE seed value and no action (0.18.214 showed an action the node never reads)
+  assert.equal(G.masked('vault seed:0xAB"action":"wipekeys"'), "vault seed:•••");
+  assert.equal(G.masked('vault password:hunter2"action":"passwordunlock"'), "vault password:•••");
+  assert.equal(G.masked('vault action:passwordunlock password:my"secret'), "vault action:passwordunlock password:•••", "no part of a secret holding a quote is shown");
   assert.equal(G.masked('vault action:restorekeys "phrase" : "a b c" keyuses:5'), 'vault action:restorekeys "phrase" : ••• keyuses:5', "a quoted value is still hidden whole");
+});
+
+// ---- 0.18.219 (as Pandamonium Desktop 0.19.266 / 0.19.250 / 0.19.290): one reader of command text, the node's own ----
+test("cmdverb.read gives the node's reading of 400 deterministic texts (a table made by an independent port of CommandRunner)", () => {
+  const V = require("../main/cmdverb"), { rows } = require("./fixtures/node-command-reading.json");
+  assert.equal(rows.length, 400);
+  for (const r of rows) {
+    const got = V.read(r.c);
+    assert.equal(got.verb, r.verb, JSON.stringify(r.c)); assert.equal(!!got.error, r.error, JSON.stringify(r.c));
+    if (!r.error) assert.deepEqual(got.params, r.params, JSON.stringify(r.c));
+  }
+});
+test("every check reads what the node reads, and a text read otherwise than it looks is refused for a command that moves funds or keys", async () => {
+  const V = require("../main/cmdverb"), { pinMinimaSend } = require("../main/sendpin");
+  const MX = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  // a quoted value of only white space hides nothing: the node keeps the last action, and the checks see it
+  assert.equal(V.paramValue('vault action:wipekeys password:" " action:seed', "action"), "seed");
+  assert.deepEqual(V.repeated('vault action:wipekeys password:" " action:seed'), ["action"]);
+  assert.deepEqual(V.repeated('vault action:wipekeys password:"\t" action:seed'), ["action"]);
+  await assert.rejects(G.create(SYS({})).arm('vault action:wipekeys password:" " action:seed', "CHANGE KEYS"), /names action more than once/, "the seed is never shown under CHANGE KEYS");
+  const mx = 'send amount:1 address:0xCD tokenid:0x00 debug:" " tokenid:' + MX;
+  assert.equal(V.paramValue(mx, "tokenid"), MX); assert.deepEqual(V.repeated(mx, ["amount", "tokenid", "address", "fromaddress"]), ["tokenid"]);
+  const asked = []; assert.equal(await pinMinimaSend(async (c) => { asked.push(c); return { status: true, response: [] }; }, mx), mx, "an MxUSD send is not pinned"); assert.deepEqual(asked, []);
+  // the slow path: a { opens JSON even inside quotes, and a name:"…" inside a quoted token is no parameter: the node runs the DEFAULT action (the seed)
+  for (const c of ['vault password:"{" action:wipekeys', 'vault confirm:x"phrase: "x"action:wipekeys', 'vault seed:0xAB"action":"wipekeys"']) {
+    assert.equal(V.paramValue(c, "action"), null, c); assert.equal(G.classify(c).kind, "seed", c);
+    assert.match(V.unclear(c), /differently from how it is written/, c);
+    await assert.rejects(G.create(SYS({ confirm: async () => { throw new Error("no question"); } })).arm(c, "SHOW SEED"), /differently from how it is written/, c);
+  }
+  // plain texts, quoted values and a state's JSON are not refused
+  for (const c of ['vault action:passwordunlock password:"my secret"', 'send amount:1 address:0xCD state:{"0":"a b","1":"[x]"}', '"vault" action:seed', "keys action:list", 'backup password:"abc1"', "status"]) assert.equal(V.unclear(c), "", c);
+  // mcd:cmd's policy: refused before anything reaches the running check or the pin
+  const seen = [], io = { take: () => true, running: () => { seen.push("running"); return true; }, pin: async (c) => { seen.push(c); return c; } };
+  for (const c of ['vault seed:0xAB"action":"wipekeys"', 'send amount:1 address:0xCD tokenid:"0x00"tokenid:' + MX, 'txnpost id:a"b'])
+    await assert.rejects(G.checkCommand(c, io), /differently from how it is written/, c);
+  assert.deepEqual(seen, []);
+  assert.equal(await G.checkCommand("balance", io), "balance", "a plain command still runs");
+});
+test("an empty quoted value (password:\"\") does not hide the parameter after it: the kind, a repeated name and the value are read", () => {
+  const V = require("../main/cmdverb");
+  for (const c of ['vault password:"" action:wipekeys', 'vault password : "" action:wipekeys', 'vault phrase:"" action:restorekeys']) assert.equal(G.classify(c).kind, "change", c);
+  assert.deepEqual(V.paramNames('vault action:seed password:"" action:wipekeys'), ["action", "password", "action"]);
+  assert.deepEqual(V.repeated('vault action:seed password:"" action:wipekeys'), ["action"], "the repeat is seen, so the command is refused");
+  assert.equal(V.paramValue('send amount:1 address:"" tokenid:0xAB', "tokenid"), "0xAB");
+});
+test("unclear lets txnstate's quoted [..] value through, as the node reads it; a bracket in quotes elsewhere is still refused", () => {
+  const V = require("../main/cmdverb"), c = 'txnstate id:x port:1 value:"[hello world]"';
+  assert.equal(V.unclear(c), ""); assert.deepEqual(V.read(c).params, [["id", "x"], ["port", "1"], ["value", "[hello world]"]]);
+  for (const bad of ['send amount:1 address:0xA state:"[a b]"', 'vault password:"{" action:wipekeys', 'txnstate id:x port:1 value:"[a" b]']) assert.match(V.unclear(bad), /differently from how it is written/, bad);
 });
