@@ -3902,7 +3902,7 @@ async function renderShopMyOrders() {
   const list = (await api.shopOrders().catch(() => [])).filter(o => o.role === "buy");
   shopFrame(t("My orders"), () => shopGo("shop"), [],
     list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${esc(o.shopName || o.ref)}</span>${shopPill(o.status)}</div>
-      <div class="mm-row__s">${esc(o.amount)} ${esc(SHOP.cur(o.currency))}  ·  ${shopAgo(o.date)}${o.ambiguous ? ("  " + th("·  payment not confirmed")) : o.unpaid && !o.paid ? ("  " + th("·  not paid")) : ""}</div></div>`).join("") || `<div class="mm-empty">${th("No orders yet.")}</div>`);
+      <div class="mm-row__s">${esc(o.amount)} ${esc(SHOP.cur(o.currency))}  ·  ${shopAgo(o.date)}${o.sending ? ("  " + th("·  payment being sent")) : o.ambiguous ? ("  " + th("·  payment not confirmed")) : o.unpaid && !o.paid ? ("  " + th("·  not paid")) : ""}</div></div>`).join("") || `<div class="mm-empty">${th("No orders yet.")}</div>`);
   el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("shop", { screen: "order", ref: r.dataset.oref }); });
 }
 async function renderShopBuyOrder(ref) {
@@ -3913,6 +3913,7 @@ async function renderShopBuyOrder(ref) {
     `<div class="mm-line">${shopPill(o.status)}</div>
      <div class="mm-sec">${th("Order")}</div><div class="mm-card">${shopItems(o)}</div>
      ${shopKv(t("Total"), o.amount + " " + cur)}${shopKv(t("Reference"), o.ref, true)}${shopKv(t("Delivery"), o.shipping ? SHOP.shipName(o.shipping) : t("Not given"))}${o.delivery ? shopKv(t("To"), o.delivery) : ""}
+     ${d.sending ? `<div class="mm-hint">${th("The payment is being sent to the node now. Wait for its answer before you do anything else with this order.")}</div>` : ""}
      ${d.ambiguous && !o.paid ? `<div class="mm-warn">${th("⚠ This payment may already have gone through (the node did not answer, or the app closed while it was being sent). Check your Wallet and History before you pay again, so that you do not pay twice.")}
        <button class="mm-btn" id="shopNotSent" style="margin-top:8px">${th("I checked my History: it was not sent")}</button></div>` : ""}
      ${d.unpaid && !d.ambiguous && !o.paid ? `<button class="mm-btn mm-btn--on mm-btn--cta" id="shopRetry">${th("Retry payment")}</button>` : ""}

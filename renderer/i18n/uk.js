@@ -5309,7 +5309,10 @@
   "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "За адресою контракту в цього вузла понад 5 000 ставок, тому нові ставки не виявляються. Знайдені раніше й далі відстежуються та переказуються.",
   "This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.": "Цю адресу видавали як свою: {apps}. Платіж на неї після виведення з обігу потрапить на ключ, яким звичайні надсилання користуватися не можуть; захисник, що працює, перекаже його на вашу безпечну адресу.",
   "Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.": "Чат дає кожному контакту ту адресу, яку вузол пропонує в цю мить, тож цю могли передати й там.",
-  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.": "Виведених з обігу адрес: {n}. Коли захисника зупинено, платіж на будь-яку з них більше не переказується на вашу безпечну адресу сам; він чекає, поки ви повернете його вручну."
+  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.": "Виведених з обігу адрес: {n}. Коли захисника зупинено, платіж на будь-яку з них більше не переказується на вашу безпечну адресу сам; він чекає, поки ви повернете його вручну.",
+  "·  payment being sent": "·  оплата надсилається",
+  "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.": "Оплата зараз надсилається на вузол. Дочекайтеся його відповіді, перш ніж робити щось інше з цим замовленням.",
+  "This payment is being sent to the node now. Wait for its answer.": "Ця оплата зараз надсилається на вузол. Дочекайтеся його відповіді."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5388,5 +5391,8 @@
   "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.",
   "This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.",
   "Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.",
-  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand."
+  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.",
+  "·  payment being sent",
+  "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.",
+  "This payment is being sent to the node now. Wait for its answer."
 ] });

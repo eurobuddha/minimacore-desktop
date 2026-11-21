@@ -82,10 +82,47 @@ test("buyer: a retry pays only after a refused payment, never while one may be i
   assert.throws(() => shop.paymentNotSent(r1.ref), /no payment that may have gone through/);
   shop.paymentNotSent(r3.ref); assert.equal(db.meta["ambiguous:" + r3.ref], false); assert.equal(db.meta["inflight:" + r3.ref], false); assert.equal(db.meta["unpaid:" + r3.ref], true);
   mode = "ok"; await shop.retryPayment(r3.ref); assert.equal(paid.length, before + 1);
-  const src = require("fs").readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8");
-  assert.ok(src.includes('store.setMetaSync("inflight:" + ref, true);\n  try { const pr = await sendPayment(') && src.includes('store.setMetaSync("inflight:" + ref, true);\n  try { r = await sendPayment('), "the mark is on disk before each payment is sent");
+  // the mark is on disk before each payment reaches the node (0.19.265: checked as the node sees the send, not by the source's text)
+  const marks = []; shop._setRunner(async (c) => { if (c.startsWith("coins ")) return { status: true, response: [] }; if (c.startsWith("send ") && c.includes("address:" + VENDOR)) { const ref = Object.keys(db.orders).find(k => c.includes("0x" + Buffer.from(k, "utf8").toString("hex"))); marks.push(db.meta["inflight:" + ref]); return { status: false, error: "Insufficient funds" }; } return { status: true, response: { txpowid: "0xT" } }; });
+  const r5 = await shop.placeOrder(cfg({}), [], "1.5", "", "home", ""); await assert.rejects(shop.retryPayment(r5.ref), /Insufficient/);
+  assert.deepEqual(marks, [true, true], "in flight on disk when the node got the order's payment and the retry");
   const main = require("fs").readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8"), pre = require("fs").readFileSync(path.join(__dirname, "..", "main", "preload.js"), "utf8");
   assert.ok(main.includes('ipcMain.handle("mcd:shopNotSent", (_e, ref) => shop.paymentNotSent(ref));') && pre.includes('shopNotSent: (ref) => ipcRenderer.invoke("mcd:shopNotSent", ref),'));
   const app = require("fs").readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(/const r = await SHOP\.retryPay\(api, ui, o\);/.test(app) && /const r = await SHOP\.notSent\(api, ui, o\);/.test(app) && !/api\.shopNotSent/.test(app), "the screen asks through AppsAct.shop");
+});
+
+// ---- 0.19.265: no "not sent" and no Retry while the payment is still at the node; none once the vendor acknowledged it ----
+test("buyer: while a payment is at the node, 'not sent' and Retry are refused and the screen is told it is being sent", async () => {
+  const st = require("../main/shop-store.js"); st.markOrderRead = () => false; st.chat = () => []; st.orders = () => Object.values(db.orders);
+  let release = null; const paid = [];
+  shop._setRunner(async (c) => {
+    if (c.startsWith("coins ")) return { status: true, response: [] };
+    if (c.startsWith("send ") && c.includes("address:" + VENDOR)) { paid.push(c); return new Promise(r => { release = r; }); }
+    return { status: true, response: { txpowid: "0xT" } };
+  });
+  db.orders = {}; db.meta = {};
+  const placing = shop.placeOrder(cfg({}), [], "1.5", "", "home", "");
+  while (!release) await new Promise(r => setImmediate(r));
+  const ref = Object.keys(db.orders)[0];
+  const d = shop.orderDetail(ref); assert.equal(d.sending, true); assert.equal(d.ambiguous, false, "no 'may have gone through' warning and no 'not sent' button while it is sent");
+  assert.equal(shop.ordersList()[0].sending, true);
+  assert.throws(() => shop.paymentNotSent(ref), /being sent to the node now/); assert.equal(db.meta["inflight:" + ref], true, "the in-flight mark stays");
+  db.meta["unpaid:" + ref] = true; await assert.rejects(shop.retryPayment(ref), /being sent to the node now/); assert.equal(paid.length, 1, "no second payment");
+  release({ status: true, response: { txpowid: "0xP" } }); const r = await placing;
+  assert.equal(r.payError, null); assert.equal(db.meta["unpaid:" + ref], false, "a payment that went clears unpaid"); assert.equal(shop.orderDetail(ref).sending, false);
+  await assert.rejects(shop.retryPayment(ref), /no refused payment to retry/);
+});
+test("buyer: once the vendor moved the order to PAID or on, the warning, 'not sent' and Retry are gone", async () => {
+  const st = require("../main/shop-store.js"); st.markOrderRead = () => false; st.chat = () => []; st.orders = () => Object.values(db.orders);
+  const paid = []; shop._setRunner(async (c) => { if (c.startsWith("send ")) paid.push(c); return { status: true, response: [] }; });
+  for (const status of ["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"]) {
+    db.orders = { "ORD-A": { ref: "ORD-A", role: "buy", status, currency: "USDT", tokenid: MXUSD, amount: "5", vendorAddress: VENDOR } }; db.meta = { "ambiguous:ORD-A": true, "inflight:ORD-A": true };
+    const d = shop.orderDetail("ORD-A"); assert.equal(d.ambiguous, false, status); assert.equal(d.unpaid, false); assert.equal(shop.ordersList()[0].ambiguous, false);
+    assert.throws(() => shop.paymentNotSent("ORD-A"), /already paid/, status); assert.equal(db.meta["unpaid:ORD-A"], undefined);
+    db.meta = { "unpaid:ORD-A": true }; await assert.rejects(shop.retryPayment("ORD-A"), /already paid/, status);
+  }
+  assert.deepEqual(paid, []);
+  db.orders = { "ORD-B": { ref: "ORD-B", role: "buy", status: "PENDING", currency: "USDT", tokenid: MXUSD, amount: "5", vendorAddress: VENDOR } }; db.meta = { "ambiguous:ORD-B": true };
+  assert.equal(shop.orderDetail("ORD-B").ambiguous, true, "a pending order still says it may have gone through");
 });

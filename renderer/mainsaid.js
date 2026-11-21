@@ -275,6 +275,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SHOP_NOT_FOUND", I18N.N_("Order not found.")],
     ["SHOP_MAY_SENT", I18N.N_("That payment may already have been sent — check your Balance/History before retrying, to avoid paying twice.")],
     ["SHOP_PAID", I18N.N_("This order is already paid.")],
+    ["SHOP_SENDING", I18N.N_("This payment is being sent to the node now. Wait for its answer.")],
     ["SHOP_NO_VENDOR", I18N.N_("Missing vendor address for retry.")],
     ["SHOP_NOT_DUE", I18N.N_("This order is not paid by what your shop says is due. Check it by hand first.")],
     ["SHOP_HAND_ONLY", I18N.N_("Only an order that does not match your shop is checked by hand.")],
