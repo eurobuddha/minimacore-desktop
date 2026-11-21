@@ -104,7 +104,7 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
     : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
-  await ww.ackKeyuses(FROM, 0);
+  ww.setOnchain(async () => 0); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, 0); ww.setOnchain(async () => null);   // a first confirmation is checked against the chain (0.19.270)
   const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
   assert.equal(r.ok, true);
   const line = ww.status().log.slice(-1)[0];
@@ -130,7 +130,7 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
   }
   fs.rmSync(file);
   for (const c of ["abc", -1, 1.5, "", null]) await assert.rejects(ww.ackKeyuses(FROM, c), /whole number of 0 or more/, String(c));
-  await ww.ackKeyuses(FROM, "7");
+  ww.setOnchain(async () => 7); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, "7"); ww.setOnchain(async () => null);   // checked against the chain's figure (0.19.270)
   sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true);
   assert.match(sends()[0], / keyuses:7 mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
   keysOk = false; sent.length = 0;
@@ -190,5 +190,26 @@ test("Web Wallet: a damaged key-use entry refuses only its address; it is confir
   asked.length = 0; await ww.ackKeyuses(FROM, 2); assert.equal(ww.keyusesInfo(FROM).keyuses, 12, "a sound entry never goes down"); assert.deepEqual(asked, [], "and needs no chain read");
   const main = rd("main/main.js");
   assert.ok(main.includes("webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));"), "main reads the chain with the same pinned fetch");
+  ww.setOnchain(async () => null);
+});
+
+// ---- 0.19.270: the chain's floor is applied in main to every key-use entry not yet acknowledged, not only a damaged one ----
+test("Web Wallet: a first confirmation, or one after the key-use file went missing, is taken only at or above the chain's figure, read in main, and refused while unread", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const FROM = "0x" + "A4".repeat(32), PK = "0x" + "B4".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C4".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  try { fs.rmSync(file); } catch (e) {}
+  await ww.derive("alpha beta");
+  let chain = null, asked = []; ww.setOnchain(async (pk) => { asked.push(pk); return chain; });
+  await assert.rejects(ww.ackKeyuses(FROM, 0), /chain's figure for this key could not be read .*cannot be checked against it/, "a first confirmation while the chain is unread: refused");
+  assert.deepEqual(asked, [PK]); assert.ok(!fs.existsSync(file) || !JSON.parse(fs.readFileSync(file, "utf8"))[FROM], "nothing saved");
+  chain = 9; await assert.rejects(ww.ackKeyuses(FROM, 3), /The chain shows 9 uses of this key/, "below the chain's figure: refused, whatever the window sent");
+  assert.deepEqual(await ww.ackKeyuses(FROM, 9), { address: FROM, keyuses: 9, ack: true });
+  fs.rmSync(file); chain = 11;   // the file vanished: the entry is unknown again
+  await assert.rejects(ww.ackKeyuses(FROM, 9), /The chain shows 11 uses/);
+  assert.deepEqual(await ww.ackKeyuses(FROM, 11), { address: FROM, keyuses: 11, ack: true });
+  asked.length = 0; await ww.ackKeyuses(FROM, 4); assert.equal(ww.keyusesInfo(FROM).keyuses, 11, "an acknowledged entry never goes down"); assert.deepEqual(asked, [], "and needs no chain read");
   ww.setOnchain(async () => null);
 });

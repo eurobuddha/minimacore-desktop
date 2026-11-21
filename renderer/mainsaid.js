@@ -345,6 +345,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["WW_ACK", I18N.N_("Confirm this wallet's key-uses count before sending")],
     ["WW_DAMAGED_SEND", I18N.N_("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent.")],
     ["WW_DAMAGED_UNREAD", I18N.N_("This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.")],
+    ["WW_FIRST_UNREAD", I18N.N_("The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.")],
     ["WW_BELOW_CHAIN", I18N.N_("The chain shows {chain} uses of this key. Confirm at least that many. Nothing was saved.")],
     ["WW_UNKNOWN", I18N.N_("Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying.")],
     ["WW_UNKNOWN_TWICE", I18N.N_("Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying (a blind retry could pay twice).")],

@@ -5317,7 +5317,8 @@
   "Stop the node anyway": "Всё равно остановить узел",
   "Keep it running": "Оставить работать",
   "The node keeps running: nothing was stopped.": "Узел продолжает работать: ничего не остановлено.",
-  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "P2P Chance не удалось проверить: у этого кошелька есть ставки в сети, и ещё не прочитано, открыта ли какая-либо из них. Подождите немного и попробуйте снова."
+  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.": "P2P Chance не удалось проверить: у этого кошелька есть ставки в сети, и ещё не прочитано, открыта ли какая-либо из них. Подождите немного и попробуйте снова.",
+  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.": "Не удалось прочитать данные сети для этого ключа (сервис использований ключей может быть недоступен), поэтому подтверждаемое число нельзя с ними сверить. Ничего не сохранено; подтвердите снова, когда их можно будет прочитать."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5404,5 +5405,6 @@
   "Stop the node anyway",
   "Keep it running",
   "The node keeps running: nothing was stopped.",
-  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again."
+  "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.",
+  "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read."
 ] });
