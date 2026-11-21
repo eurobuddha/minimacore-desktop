@@ -408,7 +408,7 @@ function markOwed(v) { try { require("./config").setAtomixStoreMoveOwed(v); } ca
 function moveStoreAside() {
   const file = path.join(dir(), "atomix.sqlite"), id = fileId(file);
   if (id) markOwed(id);
-  try { const kept = require("./restore").moveAside(file); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; if (id) markOwed(false); }
+  try { const kept = require("./restore").moveAside(file); if (kept) log("wallet replaced: the old swap database is kept as " + kept); storeMoveOwed = false; markOwed(false); }   // whatever the debt's form, also with no file left to move (0.19.295)
   catch (e) { storeMoveOwed = true; log("wallet replaced: the old swap database could not be moved aside (" + e.message + "); AtomiX does not start until it is"); throw e; }
 }
 

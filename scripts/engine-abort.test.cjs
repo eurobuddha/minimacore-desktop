@@ -272,6 +272,23 @@ test("AtomiX glue: an owed move whose clearing failed after the rename never mov
   } finally { atomix.stopLoop(); atomix.flush(); if (before) require.cache[cfgPath] = before; else delete require.cache[cfgPath]; }
 });
 
+// 0.19.295: a debt written by 0.19.267 (true, no file named) met with no store left is cleared, so the new wallet's store is never moved later
+test("AtomiX glue: a legacy owed-move debt with no store to move is cleared at the next start; the store made after it is left in place", async () => {
+  const cfgPath = require.resolve("../main/config.js"), axPath = require.resolve("../main/atomix.js"), before = require.cache[cfgPath], disk = { atomixStoreMoveOwed: true };
+  require.cache[cfgPath] = { id: cfgPath, filename: cfgPath, loaded: true, children: [], paths: [], exports: { rpcSecret: () => "", load: () => JSON.parse(JSON.stringify(disk)),
+    setAtomixStoreMoveOwed: (v) => { if (v) disk.atomixStoreMoveOwed = v; else delete disk.atomixStoreMoveOwed; } } };
+  const dir = tmp("ax-owed-legacy-"), db = path.join(dir, "atomix.sqlite"), mock = async () => ({ status: false, error: "mock" });
+  delete require.cache[axPath]; let atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);
+  try {
+    await atomix.init().catch(() => {}); atomix.stopLoop(); atomix.flush();
+    assert.equal(disk.atomixStoreMoveOwed, undefined, "nothing to move: the debt is cleared");
+    fs.writeFileSync(db, "the NEW wallet's swaps");
+    delete require.cache[axPath]; atomix = require("../main/atomix.js"); atomix._setDataDir(dir); atomix._setRunner(mock);
+    await atomix.init().catch(() => {});
+    assert.deepEqual(fs.readdirSync(dir).filter(f => /legacy-keys/.test(f)), [], "the new store is never moved aside");
+  } finally { atomix.stopLoop(); atomix.flush(); if (before) require.cache[cfgPath] = before; else delete require.cache[cfgPath]; }
+});
+
 test("no test reached a real node or the real network", () => { assert.deepEqual(M.leaks, []); });
 
 // 0.19.267: the owed move aside is on disk (config.json), so a restart does not open the old wallet's store under the new one
