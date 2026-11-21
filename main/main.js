@@ -256,6 +256,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (bad) throw new Error(bad);
   // megammrsync ends by shutting the node down: run it with that expected, then start the node again (guarded).
   if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command)); }   // secret parameters never echoed back (0.19.282)   // it ends by stopping the node: main's own question when anything is in flight (0.19.268)
+  // quit, an archive / mysql / reset resync or import, megammr import: the node stops at the end (0.19.283): the same guard as every other stop
+  if (restore.stopsNode(command)) await mayStop();
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   // Shared-node fund-safety: a MINIMA `send` (wallet Send/Split) must not auto-select anyone-can-spend beacon dust
   // (PandaPools etc.) as its input → KeyRow.getPrivateKey() null. Pin it to a signable coin. Non-send cmds pass through.

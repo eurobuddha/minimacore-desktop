@@ -49,6 +49,16 @@ function restoreFileCommand(o) {
 function isResync(command) {
   return V.parts(command).some(part => runsAs(part, "megammrsync") && hasParam(part, "action", "resync"));
 }
+// The commands that end by stopping the node (0.19.283, read from core/minima-core commands: every shutdownFinalProcs /
+// NotifyMainListenerOfShutDown / Main.shutdown): quit; archive resync, and import / importold / importraw (they run a resync);
+// reset chainsync / seedsync / restore (they run an archive import); mysql resync, and reset (it runs a resync); megammr import;
+// megammrsync resync; restore and restoresync (unless shutdown:false); vault resetkeys. The action is compared folded (over-guards).
+const STOPS = { quit: () => true, archive: (a) => /^(resync|import|importold|importraw)$/.test(a), reset: (a) => /^(chainsync|seedsync|restore)$/.test(a),
+  mysql: (a) => /^(resync|reset)$/.test(a), megammr: (a) => a === "import", megammrsync: (a) => a === "resync", restore: () => true, restoresync: () => true, vault: (a) => a === "resetkeys" };
+/** Does this node command (or any ;-separated part of it) stop the node? */
+function stopsNode(command) {
+  return V.parts(command).some(part => { const a = V.fold(V.paramValue(part, "action") || ""); return Object.keys(STOPS).some(v => runsAs(part, v) && STOPS[v](a)); });
+}
 /** Why a `backup` command may not be sent ("" = it may): the password must be letters and numbers only, the rule the screen applies. A quote closed password:"…" early, so the node encrypted under a different password than the one typed. */
 function backupCommandProblem(command) {
   // a ; straight after the value would cut the password short: the node would encrypt under the part before it
@@ -234,5 +244,5 @@ async function restoreBackup(o, d) {
   return d.run(built.cmd);
 }
 
-module.exports = { replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+module.exports = { stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
   onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };

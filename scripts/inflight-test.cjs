@@ -174,3 +174,23 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
   assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return seedgate.scrubReply(await runResync(command)); }"), "a Terminal resync asks the guard first");
   assert.ok(/ack: w\.any && how !== "quit" \? stopGuard\.issue\(\) : ""/.test(calls["mcd:inFlight"]), "the ack is issued only with a warning that was shown");
 });
+
+// ---- 0.19.283: the Terminal's commands that stop the node at their end go through the same main-side stop guard ----
+test("main: quit, an archive / mysql / reset resync or import and a megammr import ask the stop guard before the node gets them", async () => {
+  const R = require("../main/restore.js"), V = require("../main/cmdverb.js"), G = require("../main/seedgate.js");
+  const stopping = ["quit", "quit compact:true", '"quit"', "status;quit", "archive action:resync host:h:9001", "archive action:import file:/x/a.gz", "archive action:importold file:/x/a", "archive action:importraw file:/x/a",
+    "reset action:chainsync archivefile:/x/a.gz", "mysql action:resync host:h:3306 database:d user:u", "mysql action:reset file:/x/a", "megammr action:import file:/x/m", "megammrsync action:resync host:h:9001"];
+  for (const c of stopping) assert.equal(R.stopsNode(c), true, c);
+  for (const c of ["status", "archive action:export file:/x", "archive action:inspect file:/x", "mysql action:info", "megammr action:export file:/x", "megammrsync action:mydetails", "send amount:1 address:0xA"]) assert.equal(R.stopsNode(c), false, c);
+  const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let h = "";
+  const walk = (n) => { if (ts.isCallExpression(n) && n.expression.getText(sf) === "ipcMain.handle" && ts.isStringLiteral(n.arguments[0]) && n.arguments[0].text === "mcd:cmd") h = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  for (const allow of [false, true]) for (const c of stopping.filter(x => !/megammrsync/.test(x))) {
+    const sent = [], hs = {};
+    new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+      { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (x) => { sent.push(x); return {}; }, { rpcCall: async (p, s, x) => { sent.push(x); return { status: true }; } },
+      { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, x) => x, async () => { if (!allow) throw new Error("The node keeps running: nothing was stopped."); });
+    if (allow) { await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c + " runs once allowed"); }
+    else { await assert.rejects(hs["mcd:cmd"](null, c), /nothing was stopped/, c); assert.deepEqual(sent, [], c + ": nothing reached the node"); }
+  }
+});
