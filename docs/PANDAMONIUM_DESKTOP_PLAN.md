@@ -360,6 +360,29 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.19.215 | 5c review L6 | Click reads bounded: 500 coins per address read, 64 Harden addresses, the retire gate's chain-wide read over 5,000 rows refuses | L6 |
 | 0.19.216 | 5c review L7 | The native's canSweep(payout) before an at-risk collect | L7 |
 | 0.19.217 | 5c review L8 | Stored token ids and payouts shape-checked before a command | L8 |
+| 0.19.218 | review A1 | `restore.replacesKeysElsewhere`: archive / mysql with phrase:, reset seedsync / restore, vault resetkeys refused on `mcd:cmd` before the gate ("Use Backup & Recovery"); cmdverb `namesText` / `paramValue` (released 0.18.189 / 0.18.196) | `restore-test.cjs` |
+| 0.19.219 | review A2 | No settle or release while a wallet-replacing megammrsync is at the node, or unanswered until the node restarts (`w.unsure`); megammrsync action:resync 60-minute RPC bound | `keymode-test.cjs` |
+| 0.19.220 | review A3 | `mcd:firstRunSeed` from this launch's facts (`node.freshAtFirstStart`), not config | `seedgate-test.cjs` |
+| 0.19.221 | review A4 | Log lines and start arguments whole; Save to file from the log files on disk (`nodelog.fileText`) | `apps-screens.test.cjs`, `keymode-test.cjs` |
+| 0.19.222 | review A5 | Touch ID marker: IOPlatformUUID, ignored and never written off macOS (released 0.18.191 / 0.18.192) | `seedgate-test.cjs` |
+| 0.19.223 | review A6 | `-Duser.language=en -Duser.country=US` before `-jar` for both kinds; cmdverb folds İ | `keymode-test.cjs` |
+| 0.19.224 | review A7 | Node stays "starting" until its key mode is seen; plain error after 30 ticks, engines held | `keymode-test.cjs` |
+| 0.19.225 | review A8 | Lost signer: 60 s minimum hold as well as `block` | `rpc-test.cjs` |
+| 0.19.226 | review A9 | Copy RPC password via clipsecret; guard forwards text as written; scrubber spacing and "seedrandom"; log line names all seven | `node-log-test.cjs`, `reserve-test.cjs`, `core-screens-test.cjs` |
+| 0.19.227 | released 0.18.196 / 0.18.202 | Third gate kind CHANGE KEYS (vault wipekeys, restorekeys, passwordlock, passwordunlock, testphrase); secret values masked; no 80 cap, Touch ID refuses what it cannot show | `seedgate-test.cjs` |
+| 0.19.228 | review B2 | Dexicon frame transactions under the page-only id prefix `pgx`; registered only on `status: true` | `dexicon-host.test.cjs` |
+| 0.19.229 | review B3 | The frame's clipboard copy refused | `dexicon-ui.test.cjs` |
+| 0.19.230 | review B4 | Web Wallet key-use store fails closed; one read per send; integer counts; key list failure never "foreign" | `inject-test.cjs` |
+| 0.19.231 | review B1 | Dexicon page: LIMIT / EDIT need native intents; other signing packets and steering kv writes a main-process question; cancels pass | `dexicon-host.test.cjs`, `dexicon-ui.test.cjs` |
+| 0.19.232 | review B5 | miniMall: stored vendor address kept; every shop payout address watched; saved scan cursor | `shop-store-test.cjs` |
+| 0.19.233 | review B6 | Chat: "delivered" only for our message to that peer; null-prototype maps; long ref dropped | `chatfiles-test.cjs` |
+| 0.19.234 | review C1 | OTC Accept confirms the drawn terms; main refuses changed terms | `dexicon-ax.test.cjs` |
+| 0.19.235 | review C3 | Clear local history asks, offers the JSON export | `history-screen-test.cjs` |
+| 0.19.236 | review C2 | Wallet names tokens by id (`TOK.label`) | `wallet-money-test.cjs` |
+| 0.19.237 | review C4 (Terminal), released 0.18.194 | `mcd:cmdKind` first; echo / history / title with secret values hidden; no blind period | `seedgate-test.cjs` |
+| 0.19.238 | review B7 | Chat payments as Mail's; a txid verifies only its first claiming message (payclaims.json) | `chatfiles-test.cjs`, `payverify-test.cjs` |
+| 0.19.239 | review B9 | Vestr: chain state checked before commands, status true each step, unanswered post / lock "may have gone", exact units, whole-hour grace | `inject-test.cjs` |
+| 0.19.240 | review B12 (part) | AtomiX glue: no shortAddr; no-symbol token named by its whole address | `apps-money.test.cjs`, `ethwallet-unit.js` |
 
 Version line (19 Nov 2026): the released main line owns 0.18.65 to 0.18.69 (its Mail work). This branch reused those numbers, up to 0.18.148, for unpushed commits; they are not renumbered. `v0.18.69` was merged at 0.19.0 and every later change on this branch is 0.19.x.
 
@@ -535,6 +558,19 @@ Source: the released desktop's `security/backport-2026-11-20` (`84d946b48e57889e
 - **Differences from the released fixes:** `cmdverb.paramsText` ends a quoted first word at its quote (`"vault"action:seed`, `"txninput"id:a`); the released file reads it as one word and misses the first parameter (a repeated `action:` behind a quoted verb passes its check there; the node keeps the last, which the check shows). `oneCommand` lives in `cmdverb.js` (re-exported by `rpc.js`) so test stand-ins of `rpc.js` keep it. The Touch ID reason and the message box are said in the app's language (English where a translation would pass the system's 120 characters). Released 0.18.179's privatekey rule was already here (0.19.172 / 0.19.175); only `"phrase"`'s letter case was added. The released postBootNewSeed note has no counterpart: the first-run seed here is shown without a check by design (0.19.176), and since 0.19.201 never after a wallet-replacing restore in the same launch.
 - **Not changed on purpose:** command text the vendored engines build and only their glue reads: `main/atomix.js` `AX_PUBLISH_SEND` (its own publish send), `main/casino.js` `refused()` (settle-only engine's covenant guard), `main/dexicon.js` `buildMds` post count, `main/pandapools.js` failure verb (a log). The Terminal's send note (`termSendNote`) still reads `/^send\s/`: it is a note, decides nothing, and is shown after main's answer.
 - **The gate under load:** with the machine's load above 40, `dexicon-host.test.cjs` "Dexicon's lanes" (a 400 ms network limit) and the timing tests of `reserve-test.cjs` failed once each and passed on the next run; they pass alone.
+
+### Review fixes of 21 Nov 2026 (0.19.218 to 0.19.240): not done, owed
+
+From the three whole-branch reviews at 779ab08. Done: A1 to A9, B1 to B7, B9, C1 to C3, the Terminal half of C4, part of B12, and the released follow-ups 0.18.189, 0.18.191, 0.18.192, 0.18.194, 0.18.196, 0.18.197 (partly, earlier) and 0.18.202's repeated-parameter order. Owed:
+- **B8** miniMall: the same ref from two senders kept as two Unchecked orders; `retryPayment` behind `unpaid:` with a persisted in-flight flag and the full "Pay …?" review.
+- **B10** Dexicon tick sequence number; AtomiX failed store move = owed flag; `quiet()` result before releasing reservations; PandaPools `swap` / `createPool` through `queuedAction`, market-fed token, decimals from the node; AtomiX https-only RPC without redirects; `sqlshim.js` empty-file and fsync.
+- **B11** committed digest manifests for `main/atomix/` and `main/casino/`, stray check for PandaPools.
+- **B12** rest: mail pay-address backfill order, ETH Wallet balance error shown, casino settle loop and the engines' hold, `rpc.js` parse error without the reply body, temp+rename for `ethtokens.json` / `ethrpc.json`, "Need ≈" truncation, "mxUSDT" in comments.
+- **C4** rest: Future Cash Collect unit, AtomiX `fmtPx` / `cut` / rung truncation, in-flight warning on every node restart path, overlay modality (`#tokDetail`, `showActionSheet`, `showPrompt`, `showPayResult`, `#histDetail`, `scanQR`), the "Copy the listed rows" formula guard.
+- **C5** nits (Web Wallet send guard, `.mm-cs` / `.send-tok` ellipses, the listed untranslated fragments, the chat dialog's Escape listener).
+- Released follow-ups not ported: 0.18.190 (dust coins summed once they cover what is still due), 0.18.195 (legacy `shop.json` order migration: this branch's store layout differs from the released one and needs its own migration), 0.18.198 (lid sentence), 0.18.199 to 0.18.201.
+
+Notes: B1's intents cover the on-chain trade, the on-chain edit and the relay list; the market maker's own dialogs are hosted from the page, so its `mm_config` (enabled) and its wake-up are allowed only after a main-process question. B2's page-only prefix is applied by the bridge (the vendored page is not edited): the page keeps its ids, the node sees `pgx` + id. A3: a first run that tried a restore and then switches to New Wallet in the same launch must restart the app to see the new seed.
 
 Phase 6, languages (20 Nov 2026, 0.19.140 to 0.19.144): English, 简体中文, Русский and Українська, chosen from "Language" (tray, overflow menu, first-run launcher), saved by the main process, applied without a restart, the system's language when nothing was picked and it is one of the four. The release half of Phase 6 is NOT done: nothing was built, tagged or published (see "Before a release" below).
 
