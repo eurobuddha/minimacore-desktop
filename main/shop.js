@@ -25,7 +25,12 @@ const USDT_TOKEN = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89
 const SHOP_KEY_ACCOUNT = "shop-identity";
 const SCAN_EVERY_MS = 10000;
 const POLL_DEPTH = 64;      // steady-state window (MINIMERCH is shared/busy — go deeper than mail's private channel)
-const BACKFILL_MAX_DEPTH = 256;
+const BACKFILL_MAX_DEPTH = 256;   // the very first pass on a new store
+// What was read is remembered across restarts (0.18.206, after mail.js): the tip the last pass covered ("scanTip"); the next
+// pass reaches back to it (up to WINDOW_DEPTH), and an older gap is walked down by a paced backfill, BACKFILL_CHUNK more
+// blocks per pass, until it is covered or the node will not serve deeper. The first pass read 256 and then 64 for ever,
+// with the "done" mark in memory only: orders and payments made while the app was closed longer were never read.
+const WINDOW_DEPTH = 1024, GAP_MARGIN = 8, BACKFILL_CHUNK = 512;
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
 
@@ -34,7 +39,7 @@ const seenMsgCoins = new Set();
 const seenPayCoins = new Set();
 let identity = null;         // {boxPk,boxSk,signPk,signSk,publicId}
 let vendorAddress = "";      // my default receiving address (payments land here)
-let scanTimer = null, lastTip = 0, scanning = false, backfilled = false;
+let scanTimer = null, lastTip = 0, scanning = false, passServed = 0;
 
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
 function _setRunner(fn) { runner = fn; }
@@ -85,7 +90,7 @@ async function init() {
 /** On seed change (wallet restore) → drop the cached shop identity + local orders (different identity). */
 function invalidateIdentity() {
   config.deleteSecret(SHOP_KEY_ACCOUNT);
-  identity = null; vendorAddress = ""; backfilled = false; seenMsgCoins.clear(); seenPayCoins.clear();
+  identity = null; vendorAddress = ""; seenMsgCoins.clear(); seenPayCoins.clear();
   try { store.clear(); } catch (e) {}
 }
 /** Every address a buyer may pay: this app's vendor address and the payout address of each shop I made. */
@@ -280,7 +285,7 @@ async function coinsAt(address, depth, extra) {
   let d = depth;
   while (d >= 4) {
     const r = await nodeCmd(`coins address:${address} simplestate:true${extra || ""} order:desc depth:${d}`);
-    if (r && Array.isArray(r.response)) return r.response;
+    if (r && Array.isArray(r.response)) { passServed = Math.min(passServed, d); return r.response; }   // the depth the node really served
     d = Math.floor(d / 2);
   }
   return null;   // never got a usable reply → caller keeps its bookmark and retries next tick
@@ -335,11 +340,32 @@ async function scanOnce() {
   if (scanning || !identity) return;
   scanning = true;
   try {
-    const depth = backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH;
+    let tip = 0;
+    try { const r = await nodeCmd("block"); tip = parseInt((r && r.response && (r.response.block != null ? r.response.block : r.response)), 10) || 0; } catch (e) { tip = 0; }
+    const prev = Number(store.getMeta("scanTip")) || 0;
+    const want = prev && tip > prev ? tip - prev + GAP_MARGIN : prev && tip ? POLL_DEPTH : BACKFILL_MAX_DEPTH;
+    const depth = Math.max(POLL_DEPTH, Math.min(WINDOW_DEPTH, want));
+    passServed = depth;
     const a = await scanOrders(depth).catch(() => false);
     const b = await scanPayments(depth).catch(() => false);
-    backfilled = true;
-    if (a || b) emitter.emit("update");
+    let changed = a || b;
+    if (tip) {
+      const covered = tip - passServed;   // the oldest block this pass read
+      if (prev && prev < covered && !Number(store.getMeta("bfTarget"))) { store.setMeta("bfTarget", prev); store.setMeta("bfFloor", covered); }
+      store.setMeta("scanTip", tip);
+      const target = Number(store.getMeta("bfTarget")) || 0, floor = Number(store.getMeta("bfFloor")) || 0;
+      if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
+        const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK);
+        passServed = deep;
+        const c = await scanOrders(deep).catch(() => false), d = await scanPayments(deep).catch(() => false);
+        changed = changed || c || d;
+        const reached = tip - passServed;
+        if (reached <= target) { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); }
+        else if (reached < floor) store.setMeta("bfFloor", reached);
+        else { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); console.error("[miniMall] orders and payments older than block " + reached + " could not be read: the node serves no deeper history."); }
+      }
+    }
+    if (changed) emitter.emit("update");
   } finally { scanning = false; }
 }
 async function startLoop() {

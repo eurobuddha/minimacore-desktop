@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.206] — miniMall: orders and payments made while the app was closed are read
+
+- The miniMall scan read 256 blocks on its first pass and 64 after that, with the "done" mark kept in memory only, so orders and payments made while the app was closed for more than a few hours were never read. Like Mail, it now keeps the tip it last covered: the next pass reaches back to it (up to 1024 blocks), and an older gap is walked down by a paced backfill, 512 blocks more per pass, until it is covered or the node serves no deeper (then it stops and says so in the log). Test: `scripts/shop-test.cjs`.
+
 ## [0.18.205] — miniMall vendor: the payout address stays and every published one is read
 
 - On every start the vendor side asked the node for an address (`getaddress` gives one of the wallet's default addresses at random) and read payments only at that one, while buyers pay the address written in the published .shop: after a restart their payments went unseen. The vendor address is now kept once chosen, and the payment scan (and coin notification) covers every distinct payout address of the shops made on this computer. Test: `scripts/shop-test.cjs`.
