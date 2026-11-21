@@ -619,6 +619,8 @@ test("keyuses: 250000 for the commands that set every key's uses, 10000 for rest
   assert.match(G.keyusesProblem("sendfrom fromaddress:0x01 address:0x02 amount:1 privatekey:0x03 keyuses:262144"), /must be a whole number from 0 to 262143/);
   await assert.rejects(G.checkCommand("megammrsync action:resync host:h:9001 keyuses:262143", io), /at most 250000/);
   // (0.18.278) a verb not named as single-signature gets the lower, setting bound: an unknown or future verb is never let through at 262143
+  // (0.18.284) the higher bound only when every reading is a single-signature verb: a loose reading never raises it
+  for (const c of ['"sendfrom"archive action:resync host:h:9001 keyuses:262143', '"sendfrom archive" keyuses:262143', "sendfrom:x keyuses:262143"]) assert.match(G.keyusesProblem(c), /at most 250000/, c);
   for (const c of ["somefutureverb keyuses:", "restorekeys file:/x/k keyuses:"]) { assert.equal(G.keyusesProblem(c + "250000"), "", c); assert.match(G.keyusesProblem(c + "262143"), /at most 250000/, c); }
   assert.ok(!/above that number|above the (?:number of )?signatures/.test(rd("renderer/app.js") + rd("main/cmdgate.js")), "uses is the next leaf: the figure is 'at least', never 'above'");
   const app = rd("renderer/app.js");

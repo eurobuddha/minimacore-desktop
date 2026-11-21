@@ -193,7 +193,8 @@ const REPASTED_WHY = "The node pastes this command's values, unquoted, into a se
 // signatures per key before the node's limit) and 10000 for restoresync's ADD; neither is presented as a target.
 const KEYUSES_MAX = 262143, KEYUSES_SET_MAX = 250000, KEYUSES_ADD_MAX = 10000;
 // the five single-signature verbs by name (0.18.278); restoresync adds; EVERY other verb that names keyuses gets the setting bound, the lower
-// one (an unknown verb defaulted to 262143)
+// one (an unknown verb defaulted to 262143); the higher bound only when EVERY reading of the verb is a single-signature one (0.18.284: one
+// loose reading was enough), so a loose reading can only lower the bound
 const SINGLE_VERBS = ["txnsign", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom"];
 const KEYUSES_WHY = "keyuses: must be a whole number from 0 to " + KEYUSES_MAX + ": a key of this wallet has 262144 one-time uses, numbered 0 to " + KEYUSES_MAX + ", and a higher figure would make the wallet sign with one-time keys it has already used, which can lose funds. Nothing was run.";
 // uses is the NEXT leaf to sign at, so the number of times a key has already signed is itself a safe figure: "at least", not "above" (0.18.278);
@@ -203,7 +204,7 @@ const KEYUSES_ADD_WHY = "keyuses: on restoresync is added to how many times ever
 /** Why a keyuses: value is refused ("" = it is not, or there is none): plain digits, at most the bound of what the command does with it. */
 function keyusesProblem(command) {
   for (const part of V.parts(command)) {
-    const [max, why] = V.is(part, "restoresync") ? [KEYUSES_ADD_MAX, KEYUSES_ADD_WHY] : SINGLE_VERBS.some(v => V.is(part, v)) ? [KEYUSES_MAX, KEYUSES_WHY] : [KEYUSES_SET_MAX, KEYUSES_SET_WHY];
+    const [max, why] = V.is(part, "restoresync") ? [KEYUSES_ADD_MAX, KEYUSES_ADD_WHY] : V.verbs(part).every(v => SINGLE_VERBS.includes(v)) ? [KEYUSES_MAX, KEYUSES_WHY] : [KEYUSES_SET_MAX, KEYUSES_SET_WHY];
     if (V.read(part).params.some(([n, v]) => V.fold(n) === "keyuses" && !(/^\d{1,15}$/.test(v) && Number(v) <= max))) return why;
   }
   return "";
