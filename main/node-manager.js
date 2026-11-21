@@ -279,7 +279,7 @@ class NodeManager extends EventEmitter {
     args.push(...keymode.startFlags(cfg.keyMode));
 
     // Additional raw args, appended verbatim (quote-aware split). Never a key-mode flag (start() refuses those first).
-    for (const tok of tokenizeArgs(cfg.extraArgs)) if (!PARAMS.keyModeArg(tok)) args.push(tok);
+    for (const tok of tokenizeArgs(cfg.extraArgs)) if (!PARAMS.keyModeArg(tok) && !PARAMS.mdsArg(tok)) args.push(tok);   // never MDS (0.19.291)
     return args;
   }
 
@@ -304,7 +304,7 @@ class NodeManager extends EventEmitter {
     flags.push(...keymode.startFlags(cfg.keyMode));   // the wallet's key mode (see buildArgs)
     for (const tok of tokenizeArgs(cfg.extraArgs)) {
       const key = tok.replace(/^-+/, "").toLowerCase();
-      if (PARAMS.keyModeArg(tok)) continue;
+      if (PARAMS.keyModeArg(tok) || PARAMS.mdsArg(tok)) continue;   // never MDS (0.19.291)
       if (tok.startsWith("-") && PARLONS_REFUSED.has(key)) continue;
       flags.push(/\s/.test(tok) ? q(tok) : tok);
     }

@@ -160,6 +160,8 @@ function save(patch) {
   if (arg) throw new Error(arg + " cannot be set in the extra arguments. The wallet's key mode sets it.");
   const owned = PARAMS.reservedArg(cfg.extraArgs);
   if (owned) throw new Error(owned + " cannot be set in the extra arguments. The app sets it itself.");
+  const mds = PARAMS.mdsArg(cfg.extraArgs);
+  if (mds) throw new Error(mds + " cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.");   // 0.19.291
   if (cfg.params) { cfg.params = Object.assign({}, cfg.params); for (const f of PARAMS.KEY_MODE_FLAGS) delete cfg.params[f]; }
   const cur = load();
   // Route secret params (passwords / DSNs) to the Keychain; store only a boolean "set" marker in config.

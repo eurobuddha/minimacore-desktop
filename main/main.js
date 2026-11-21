@@ -238,10 +238,21 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
   // a command that moves funds or keys whose text the node reads otherwise than it looks is refused, not guessed (0.19.266, main/cmdverb.js read)
   const unclear = cmdverb.unclear(command); if (unclear) throw new Error(unclear);
-  // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
+  // an escaped ";" (\u003b) the node decodes in a JSON value and a command it builds from it then runs as a second command (0.19.291)
+  const smuggled = cmdverb.smuggled(command); if (smuggled) throw new Error(smuggled);
   for (const part of cmdverb.parts(command)) {
+    // a send naming amount, tokenid, address or fromaddress twice is refused (0.19.191, released 0.18.187): the node keeps the LAST
     const twice = cmdverb.is(part, "send") ? cmdverb.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
     if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
+    // the commands that move funds from a key or build commands of their own: any parameter named twice (0.19.291)
+    if (["sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread", "sphincs"].some(v => cmdverb.is(part, v))) {
+      const again = cmdverb.repeated(part); if (again.length) throw new Error("This command names " + again.join(", ") + " more than once (the node would use only the last). Write each once. Nothing was run.");
+    }
+    // a MiniDapp's waiting command runs with full rights past every check here; a multisig spend copies a coin's state from the chain
+    // into commands the node runs itself, where a ";" starts a second command, and this app cannot read that state first (0.19.291)
+    const action = cmdverb.fold(cmdverb.paramValue(part, "action") || "");
+    if (cmdverb.is(part, "mds") && action === "accept") throw new Error("mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.");
+    if ((cmdverb.is(part, "multisig") || cmdverb.is(part, "multisigread")) && action === "spend") throw new Error("A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.");
   }
   // archive / mysql / reset with a phrase or a backup, vault action:resetkeys: the keys change with no engine held and no key-mode check (0.19.218)
   if (restore.replacesKeysElsewhere(command)) throw new Error("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.");

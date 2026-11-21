@@ -138,7 +138,14 @@
     return "";
   }
 
-  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+  /** The first extra-argument token that would turn MiniDapps (MDS) on ("-mdsenable", any -mds…), or "" (0.19.291): this app never
+   *  runs MDS, and an MDS that is on lets a MiniDapp's waiting command run with full rights past every check of the app. */
+  function mdsArg(extra) {
+    var toks = String(extra == null ? "" : extra).split(/\s+/);
+    for (var i = 0; i < toks.length; i++) { var t = toks[i].replace(/["']/g, ""); if (t.charAt(0) === "-" && /^mds/i.test(t.replace(/^-+/, ""))) return "-" + t.replace(/^-+/, "").split("=")[0].toLowerCase(); }
+    return "";
+  }
+  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, mdsArg: mdsArg, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;

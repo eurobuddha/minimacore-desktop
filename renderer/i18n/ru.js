@@ -5330,7 +5330,12 @@
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "Адрес для выплат {address} не является действительным адресом Minima. Ничего не сохранено; проверьте адрес и сохраните снова.",
   "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "Платежи на {address} не читаются: это недействительный адрес Minima. Исправьте адрес для выплат магазина в miniMall Studio.",
   "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.": "P2P Chance не дочитал ставки этого кошелька за {m} мин., поэтому нельзя проверить, открыта ли какая-либо из них.",
-  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.": "Оплата miniMall сейчас отправляется на узел. Если остановить сейчас, она может пройти, а может и нет: дождитесь ответа, затем посмотрите заказ."
+  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.": "Оплата miniMall сейчас отправляется на узел. Если остановить сейчас, она может пройти, а может и нет: дождитесь ответа, затем посмотрите заказ.",
+  "This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.": "Эта команда содержит символ, записанный escape-кодом (точку с запятой или управляющий символ), который узел раскодирует и может выполнить как вторую команду. Ничего не было запущено.",
+  "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.": "Эта команда указывает {names} больше одного раза (узел использует только последнее). Укажите каждый один раз. Ничего не было запущено.",
+  "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.": "mds action:accept выполняет ожидающую команду MiniDapp с полными правами, в обход всех проверок этого приложения. Из терминала она не запускается. Ничего не было запущено.",
+  "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.": "Мультиподписная трата копирует состояние монеты из сети в команды, которые узел выполняет сам, где оно может запустить вторую команду, а это приложение не может заранее прочитать это состояние. Из терминала она не запускается. Ничего не было запущено.",
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} нельзя задать в дополнительных аргументах: это приложение никогда не включает MiniDapps (MDS)."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5430,5 +5435,10 @@
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
   "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.",
   "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.",
-  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order."
+  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.",
+  "This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.",
+  "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.",
+  "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.",
+  "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.",
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on."
 ] });

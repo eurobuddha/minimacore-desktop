@@ -5317,7 +5317,12 @@
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.": "收款地址 {address} 不是有效的 Minima 地址。未保存任何内容；请检查地址后再保存。",
   "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.": "发往 {address} 的付款不会被读取：它不是有效的 Minima 地址。请在 miniMall Studio 中更正商店的收款地址。",
   "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.": "P2P Chance 在 {m} 分钟后仍未读完此钱包的投注，因此无法检查是否仍有未结束的投注。",
-  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.": "一笔 miniMall 付款正在发送到节点。现在停止，它可能成功也可能不成功：请等待其回复，然后查看订单。"
+  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.": "一笔 miniMall 付款正在发送到节点。现在停止，它可能成功也可能不成功：请等待其回复，然后查看订单。",
+  "This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.": "此命令包含一个以转义码写出的字符（分号或控制字符），节点会将其解码，并可能作为第二条命令运行。未运行任何命令。",
+  "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.": "此命令多次指定了 {names}（节点只会使用最后一个）。每个只写一次。未运行任何命令。",
+  "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.": "mds action:accept 会以完全权限运行某个 MiniDapp 等待中的命令，绕过本应用的所有检查。它不能从终端运行。未运行任何命令。",
+  "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.": "多签支出会把链上币的状态复制到节点自己运行的命令中，在那里它可能启动第二条命令，而本应用无法事先读取该状态。它不能从终端运行。未运行任何命令。",
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on.": "{arg} 不能在额外参数中设置：本应用从不开启 MiniDapp（MDS）。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5417,5 +5422,10 @@
   "The payout address {address} is not a valid Minima address. Nothing was saved; check the address and save again.",
   "Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.",
   "P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked.",
-  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order."
+  "A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order.",
+  "This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.",
+  "This command names {names} more than once (the node would use only the last). Write each once. Nothing was run.",
+  "mds action:accept runs a MiniDapp's waiting command with full rights, past every check of this app. It is not run from the Terminal. Nothing was run.",
+  "A multisig spend copies the coin's state from the chain into commands the node runs itself, where it could start a second command, and this app cannot read that state first. It is not run from the Terminal. Nothing was run.",
+  "{arg} cannot be set in the extra arguments: this app never turns MiniDapps (MDS) on."
 ] });

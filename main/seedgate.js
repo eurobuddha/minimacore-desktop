@@ -97,7 +97,7 @@ function create(sys, now) {
     pass = null;
     const c = String(command == null ? "" : command), { kind, chain } = classify(c); if (!kind) throw new Error("This command needs no check.");
     if (chain) throw new Error(CHAIN);
-    const unclear = V.unclear(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.19.266): refused before any question
+    const unclear = V.unclear(c) || V.smuggled(c); if (unclear) throw new Error(unclear);   // read otherwise than it looks (0.19.266), an escaped ";" (0.19.291): refused before any question
     // a repeated parameter first (released 0.18.202): what the phrase is depends on the action, and the node keeps the last
     const twice = V.repeated(c);
     if (twice.length) throw new Error("This command names " + twice.join(", ") + " more than once (the node would keep only the last). Write each parameter once. Nothing was run.");

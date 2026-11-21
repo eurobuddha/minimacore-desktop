@@ -121,7 +121,7 @@ const FRAME_TXN = {
  *  per-command check), no parameter that reads or writes a FILE, picks key uses, carries a private key or a password,
  *  or makes txnpost sign / mine / burn. */
 function dexCommand(c) {
-  if (typeof c !== "string" || !c.trim() || c.length > 300000 || /[;\x00-\x1f\x7f]/.test(c)) throw new Error("bad command");
+  if (typeof c !== "string" || !c.trim() || c.length > 300000 || /[;\x00-\x1f\x7f]/.test(c) || require("./cmdverb").smuggled(c)) throw new Error("bad command");   // an escaped ";" too (0.19.291)
   // The verb and the parameter names are read the way the node reads them (main/cmdverb.js, 0.19.193): EVERY reading of
   // the verb must be on the list, and a parameter is seen quoted or spaced (`"privatekey":0x…`, `file : x` passed before).
   const verbs = require("./cmdverb").verbs(c), verb = verbs.length === 1 ? verbs[0] : "";

@@ -281,7 +281,9 @@ test("a send that repeats amount, tokenid, address or fromaddress is refused bef
   const run0 = new Function("cmdverb", "restore", "command", body), run = (V, c) => run0(V, require("../main/restore"), c);
   for (const c of ["send amount:1 address:0xA amount:9", '"send" address:0xA amount:1 "address":0xB', "status;send amount:1 tokenid:0x00 address:0xA tokenid:" + MXUSD])
     assert.throws(() => run(V, c), /^Error: This send names (amount|address|tokenid) more than once \(the node would use only the last\)\. Write each once\.$/, c);
-  for (const c of ["send amount:1 address:0xA", "sendpoll action:list action:remove", "txnoutput id:a amount:1 amount:2"]) assert.doesNotThrow(() => run(V, c), c);
+  for (const c of ["send amount:1 address:0xA", "txnoutput id:a amount:1 amount:2"]) assert.doesNotThrow(() => run(V, c), c);
+  // CHANGED on purpose (0.19.291): sendpoll (and sendfrom, signfrom, consolidatefrom, createtokenfrom, multisig, multisigread, sphincs) refuses any name given twice
+  assert.throws(() => run(V, "sendpoll action:list action:remove"), /names action more than once/);
 });
 
 // ---- 0.19.236: the Wallet names a token by its id, never by the name its creator wrote on the chain ----

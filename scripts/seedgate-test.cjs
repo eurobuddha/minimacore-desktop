@@ -152,7 +152,7 @@ test("Show seed phrase (Backup & Recovery): the same checks before the node is a
 
 test("main: the general command channel refuses vault and seedrandom without a pass; the window reaches the seed only through the gates", () => {
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
-  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,10}?  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
+  assert.ok(/^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,30}?  requireRunning\(\);\n[^\n]*\n  const gated = seedgate\.refusal\(command, secretGate\.take\); if \(gated\) throw new Error\(gated\);/.test(h), "control characters first, then the node, then the gate: the first things the handler checks");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
   assert.ok(/if \(!firstRunOpen \|\| node\.freshAtFirstStart !== true\) throw new Error\("The seed is shown here only while a new wallet is being made\."\);/.test(main) && /if \(c\.walletDone\) firstRunOpen = false;/.test(main), "the first-run seed: only in that step (CHANGED on purpose, 0.19.220: decided from the launch's own facts)");
   assert.equal((main.match(/"vault"/g) || []).length, 1, "main asks for the vault in one place of its own (the first-run step); the reveal is in seedgate.js");
@@ -370,4 +370,31 @@ test("unclear lets txnstate's quoted [..] value through, as the node reads it; a
   const c = 'txnstate id:x port:1 value:"[hello world]"';
   assert.equal(V.unclear(c), ""); assert.deepEqual(V.read(c).params, [["id", "x"], ["port", "1"], ["value", "[hello world]"]]);
   for (const bad of ['send amount:1 address:0xA state:"[a b]"', 'vault password:"{" action:wipekeys', 'txnstate id:x port:1 value:"[a" b]']) assert.match(V.unclear(bad), /differently from how it is written/, bad);
+});
+
+// ---- 0.19.291: an escaped ";" (;) the node decodes in a JSON value, then pastes into a command it runs itself, is refused for every verb ----
+test("an escaped semicolon or control character smuggles no second command; mds accept and a multisig spend are not run from the Terminal; ordinary JSON states still run", async () => {
+  const V = require("../main/cmdverb.js"), R = require("../main/restore.js"), SC = "\\u003b";
+  const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes")), hs = {}, sent = [];
+  new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", h)(
+    { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (c) => { sent.push(c); return {}; }, { rpcCall: async (p, s, c) => { sent.push(c); return { status: true }; } },
+    { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
+  const refused = [
+    ['sendfrom fromaddress:0x01 address:0x02 amount:0.0001 script:"RETURN TRUE" privatekey:0x00 keyuses:1 state:{"1":"[a' + SC + 'send address:0xATT amount:500 tokenid:0x00' + SC + 'b]"}', /escape code/],
+    ['multisig action:create amount:1 required:1 publickeys:["0x' + SC + 'rpc action:adduser username:a password:b mode:write' + SC + 'xxxx"]', /escape code/],
+    ['send amount:1 address:0xA state:{"0":"a\\u000Aphrase:x"}', /escape code/], ['txnstate id:x port:1 value:{"a":"\\u003B"}', /escape code/],
+    ["mds action:accept uid:0x01", /mds action:accept runs a MiniDapp's waiting command/], ["multisig action:spend id:abc amount:1 address:0x02", /multisig spend copies the coin's state/], ["multisigread action:spend data:0x01", /multisig spend/],
+    ["sendfrom fromaddress:0x01 address:0x02 address:0x03 amount:1 privatekey:0x00 keyuses:1", /names address more than once/], ["sphincs action:transaction amount:1 amount:2", /names amount more than once/]];
+  for (const [c, why] of refused) { await assert.rejects(hs["mcd:cmd"](null, c), why, c); }
+  assert.deepEqual(sent, [], "none reached the node");
+  for (const c of ['send amount:1 address:0xA state:{"0":"hello"}', 'txnstate id:x port:1 value:"[hello world]"', 'send amount:1 address:0xA state:{"0":"caf\\u00e9"}']) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
+  await assert.rejects(G.create({ check: async () => { throw new Error("no question"); } }).open('vault action:seed password:"a' + SC + 'b"', "SHOW SEED"), /escape code/, "refused before the gate asks");
+  assert.throws(() => V.oneCommand('send state:{"1":"' + SC + '"}'), /escape code/, "and for a command the app builds");
+  for (const v of ["sphincs", "sendpoll", "sendfrom", "signfrom", "consolidatefrom", "createtokenfrom", "multisig", "multisigread"]) assert.match(V.unclear(v + ' x:"a"b'), /differently from how it is written/, v + " is a sensitive verb");
+  // a stored mysql login is pasted by the node's autobackup: white space, a quote or ";" in it is refused; a host:port is not
+  assert.equal(R.replacesKeysElsewhere('mysql action:setlogin host:127.0.0.1:3306 database:db user:u password:"x action:resync phrase:a b"'), true);
+  assert.equal(R.replacesKeysElsewhere("mysql action:setlogin host:127.0.0.1:3306 database:db user:u password:secret1"), false);
+  // no MDS: refused in the extra node arguments, and never passed to the node
+  const P = require("../renderer/params.js"); assert.equal(P.mdsArg("-mdsenable"), "-mdsenable"); assert.equal(P.mdsArg('-p2pnodes x "-MDSPASSWORD=y"'), "-mdspassword"); assert.equal(P.mdsArg("-test -nop2p"), "");
+  assert.ok(SRC("main/config.js").includes("const mds = PARAMS.mdsArg(cfg.extraArgs);") && (SRC("main/node-manager.js").match(/PARAMS\.mdsArg\(tok\)/g) || []).length === 2, "config refuses it, both node kinds skip it");
 });

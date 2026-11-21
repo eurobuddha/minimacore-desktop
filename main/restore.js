@@ -211,8 +211,11 @@ function activeWorkProblem(list) {
 // A value holding white space, ":", a quote or ";" there becomes more parameters of that second command (phrase: among them), so
 // such a command is read as one that replaces the keys. The other builders found (send/wallet/*from, multisig, consolidate,
 // sphincs, txnauto, megammrsync's restore file:) build send / txn* / restore commands; megammrsync file: is refused already.
-const REPASTED = { reset: () => true, archive: (a) => /^(import|importold|importraw)$/.test(a), mysql: (a) => a === "reset", txpow: () => true };
-const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => runsAs(part, v) && REPASTED[v](action)) && V.read(part).params.some(([, val]) => /[\s:";]/.test(val));
+// 0.19.291: mysql setlogin stores host, user, password and database, which Main's autobackup pastes into "mysql host:" + host +
+// " … password:" + password + " action:update" (and mysqlcoins the same); there a ":" stays inside its own token, so only white
+// space, a quote or ";" are refused.
+const REPASTED = { reset: () => /[\s:";]/, archive: (a) => (/^(import|importold|importraw)$/.test(a) ? /[\s:";]/ : null), mysql: (a) => (a === "reset" ? /[\s:";]/ : a === "setlogin" ? /[\s";]/ : null), txpow: () => /[\s:";]/ };
+const repastedUnsafe = (part, action) => Object.keys(REPASTED).some(v => { const bad = runsAs(part, v) && REPASTED[v](action); return !!bad && V.read(part).params.some(([, val]) => bad.test(val)); });
 function replacesKeysElsewhere(command) {
   return V.parts(command).some(part => {
     const action = (V.paramValue(part, "action") || "").toLowerCase(), named = (n) => V.paramValue(part, n) != null;
