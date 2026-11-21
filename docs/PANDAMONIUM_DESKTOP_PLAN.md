@@ -407,6 +407,70 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.19.262 | review B12 | P2P Chance: the restore gate and Quit read the settle loop's count on every install | `restore-test` |
 | 0.19.263 | review C5 | Web Wallet send guard, whole identifiers in the Mail header and Send picker, four fragments translated, chat Escape listener | `shell-test` |
 | 0.19.264 | review B11 | digest manifests for `main/atomix/` and `main/casino/` (`scripts/vendored-manifest.cjs`), PandaPools stray check, CI step | the manifests themselves |
+| 0.19.265 | released 0.18.224 | miniMall buyer: no "not sent" or Retry while the payment is at the node in this process | `shop-test` |
+| 0.19.266 | review | one reader of command text, the node's own (`cmdverb.read`: CommandRunner.getCommand ported); unclear texts of fund / key commands refused | `seedgate-test`, fixture `node-command-reading.json` |
+| 0.19.267 | review | AtomiX: the old swap database's owed move survives a quit (written to config.json) | `restore-test` |
+| 0.19.268 | review | one main-side stop guard in front of every node stop or restart (`inflight.stopGuard`) | `inflight-test` |
+| 0.19.269 | review | P2P Chance: a settle loop with no clean scan is "could not be checked" | `restore-test` |
+| 0.19.270 | released 0.18.263 | Web Wallet: the chain's key-use floor for every unacknowledged entry, checked in main | `inject-test` |
+| 0.19.271 | review | PandaPools: a fund-queue slot always settles | `engine-abort` |
+| 0.19.272 | review | miniMall dust coins bounded at 256 with a running exact sum | `shop-store-test` |
+| 0.19.273 | review | miniMall: a payout address the node refuses is skipped and logged; the Inbox notice cleared by a later full pass | `shop-store-test` |
+| 0.19.274 | review | a 0-byte database file kept aside under `-empty-YYYYMMDD`, said with its path | `atomix-unit` |
+| 0.19.275 | review | ETH Wallet: a refused saved endpoint said once | `atomix-unit` |
+| 0.19.276 | review C5 | AtomiX "Need X USDT" said in the app's language | `mainsaid-test` |
+| 0.19.277 | review | AtomiX market editor rungs in exact decimals | `dexicon-ax` |
+| 0.19.278 | review | Web Wallet: "could not be read from the key-use service" | `apps-money` |
+| 0.19.279 | review | overlay test checks each overlay in the function that draws it | `shell-test` |
+| 0.19.280 | review B11 | manifest checks in the local suites; `.DS_Store` ignored | the manifests |
+| 0.19.281 | review | Terminal: a value the node re-pastes into its own command (reset, archive import, mysql reset, txpow) refused | `restore-test` |
+| 0.19.282 | review | privatekey: hidden; words after a hidden value hidden; reply params scrubbed | `seedgate-test` |
+| 0.19.283 | review | Terminal commands that stop the node ask the stop guard | `inflight-test` |
+| 0.19.284 | review | miniMall payout address judged by its checksum, never by a node error; skipped for 5 minutes | `shop-store-test` |
+| 0.19.285 | review | P2P Chance: a settle loop stuck two minutes no longer blocks wallet replacement for good | `restore-test` |
+| 0.19.286 | review | AtomiX owed move names its file (inode, birth time) | `restore-test` |
+| 0.19.287 | review | stop acknowledgement tied to its action; patches saved only after the guard | `inflight-test` |
+| 0.19.288 | review | miniMall payments at the node in the Quit / Shutdown warning | `inflight-test` |
+| 0.19.289 | review | AtomiX screens never round a number up | `dexicon-ax` |
+| 0.19.290 | review | txnstate's quoted [..] value no longer "unclear" | `seedgate-test` |
+| 0.19.291 | review | no second command smuggled through a `\u` escape; builders and mds accept / multisig spend refused | `seedgate-test` |
+| 0.19.292 | review | a node reply never shows a secret of the typed command; listusers / mds list / sphincs generate gated | `seedgate-test` |
+| 0.19.293 | review | gate and echo show the command as the node reads it | `seedgate-test` |
+| 0.19.294 | review | Restore from file and Apply and restart ask the stop guard | `inflight-test` |
+| 0.19.295 | review | AtomiX owed move cleared after any successful move | `restore-test` |
+| 0.19.296 | review | a Windows path in a re-pasted file parameter runs | `restore-test` |
+| 0.19.297 | review | AtomiX book sizes and live estimate cut from exact text | `dexicon-ax` |
+| 0.19.298 | review | rpc / slavenode / webhooks / mds actions refused from the Terminal | `seedgate-test` |
+| 0.19.299 | review | builder values that would rewrite their commands refused; multisig keys checked | `seedgate-test` |
+| 0.19.300 | review | `smuggled()` counts only a real `\u` escape | `seedgate-test` |
+| 0.19.301 | review | `-rescuenode` host:port only; mds parameters never passed | `config-keys-test` |
+| 0.19.302 | review | node log hides a privatekey in its Mx form | `node-log-test` |
+| 0.19.303 | review | a UNC file parameter of the restore family refused | `seedgate-test` |
+| 0.19.304 | review | POST Content-Length (superseded by 0.19.305) | `rpc-test` |
+| 0.19.305 | review | a POST body is pure ASCII; anything else by GET, bounded | `rpc-test` |
+| 0.19.306 | released 0.18.230 | a secret of several words said with its word count | `seedgate-test` |
+| 0.19.307 | review | signfrom / postfrom data: is 0x hex with a plain id | `seedgate-test` |
+| 0.19.308 | review | builder state values only strings, numbers, booleans; every builder sensitive | `seedgate-test` |
+| 0.19.309 | review | a file on another computer refused for every command | `seedgate-test` |
+| 0.19.310 | review | builder checks follow what each builder really pastes | `seedgate-test` |
+| 0.19.311 | review | text the node would refuse masked with the word count | `seedgate-test` |
+| 0.19.312 | review | SHA-3 from `main/sha3.js` (Electron's crypto has none) | `futurecash-test`, `keyuses-test` |
+| 0.19.313 | review | the stop guard decides one stop at a time | `inflight-test` |
+| 0.19.314 | review | AtomiX owed move: config.json written only on change, paced retries | `restore-test` |
+| 0.19.315 | review | action values and names folded as the node folds them | `seedgate-test` |
+| 0.19.316 | released 0.18.253 | the stop guard holds after a yes until the node has stopped (at most 30 s) | `inflight-test` |
+| 0.19.317 | review | `output:` (decryptbackup) in the file-on-another-computer rule | `seedgate-test` |
+| 0.19.318 | review | the NT prefix `\??\` is a file on another computer | `seedgate-test` |
+| 0.19.319 | review | a stop that failed with the node running ends the guard's hold (`held()`) | `seedgate-test` |
+| 0.19.320 | review | multisig file with a drive letter and forward slashes runs | `seedgate-test` |
+| 0.19.321 | review | the stop guard's in-flight reads side by side, each bounded | `inflight-test` |
+| 0.19.322 | review of 0.19.317 to 0.19.321 | `release(id)`: a failure never ends another request's hold | `inflight-test` |
+| 0.19.323 | review (critical) | Web Wallet key-use ceiling: 262143 is a custom key's last use; above it refused at ack, a chain figure at or past 262144 never adopted, a stored count past it sends nothing | `inject-test` |
+| 0.19.324 | review of 0.19.323 | damaged entry's old count is a floor (fraction rounded up); over-count explained; window refuses a fraction; toast says the kept figure; ids wrap in toasts | `inject-test`, `apps-money` |
+| 0.19.325 | review (critical) | `keyuses:` digits only and at most 262143 (classic) / 268435454 (block) for every command and restore screen, in main | `seedgate-test`, `mainsaid-test` |
+| 0.19.326 | review of 0.19.319 | a Terminal stop with no answer (a cut `quit`) keeps the guard's hold | `seedgate-test` |
+| 0.19.327 | released 0.18.201 | every mcd:cmd check in one function, `seedgate.checkCommand` (pure refactor, proved by a two-way table of 557520 runs) | `seedgate-test`, `wallet-money-test` |
+| 0.19.328 | released 0.18.206 / 0.18.213 | miniMall stepped backfill: a long absence read back in steps to its end | `shop-store-test` |
 
 Version line (19 Nov 2026): the released main line owns 0.18.65 to 0.18.69 (its Mail work). This branch reused those numbers, up to 0.18.148, for unpushed commits; they are not renumbered. `v0.18.69` was merged at 0.19.0 and every later change on this branch is 0.19.x.
 
@@ -583,16 +647,21 @@ Source: the released desktop's `security/backport-2026-11-20` (`84d946b48e57889e
 - **Not changed on purpose:** command text the vendored engines build and only their glue reads: `main/atomix.js` `AX_PUBLISH_SEND` (its own publish send), `main/casino.js` `refused()` (settle-only engine's covenant guard), `main/dexicon.js` `buildMds` post count, `main/pandapools.js` failure verb (a log). The Terminal's send note (`termSendNote`) still reads `/^send\s/`: it is a note, decides nothing, and is shown after main's answer.
 - **The gate under load:** with the machine's load above 40, `dexicon-host.test.cjs` "Dexicon's lanes" (a 400 ms network limit) and the timing tests of `reserve-test.cjs` failed once each and passed on the next run; they pass alone.
 
-### Review fixes of 21 Nov 2026 (0.19.218 to 0.19.264): what is still owed
+### Review fixes of 21 Nov 2026 (0.19.218 to 0.19.328): what is still owed
 
-From the three whole-branch reviews at 779ab08. Done: A1 to A9, B1 to B12, C1 to C5 (0.19.218 to 0.19.264, rows above), the released follow-ups 0.18.189 to 0.18.218 where the same code exists here, and the two items the released review left open (0.19.250, 0.19.255). Still owed:
-- **Released 0.18.201** (`mcd:cmd`'s policy as one tested function): not ported. Moving the checks out of `main.js` breaks about eight tests that pin those sentences to `main.js` (restore-test, seedgate-test, wallet-money-test, mainsaid-test MAIN_* codes); a patch and its test are drafted, the test changes are not.
-- **Released 0.18.213, the stepped backfill**: not ported. This branch reads a gap of up to 4096 blocks in one pass (0.19.232); what is older is now kept and said on the Inbox (0.19.249), never read.
+From the three whole-branch reviews at 779ab08 and the reviews of 0.19.265 to 0.19.321. Done: A1 to A9, B1 to B12, C1 to C5 (0.19.218 to 0.19.264), the released follow-ups 0.18.189 to 0.18.263 where the same code exists here, the released 0.18.201 (`checkCommand`, 0.19.327) and 0.18.213 (the stepped backfill, 0.19.328), the key-use ceilings (0.19.323 to 0.19.325) and the stop-guard fixes (0.19.322, 0.19.326), rows above. Still owed:
+- **Nothing has been run in the app.** Every change from 0.19.108 on is proven by the test suites only (node --test, no Electron, no node, no java). Every box of section 9 is open, and so are the additions listed below.
+- **The side-by-side DMG is 0.19.321** (`/Users/eurobuddha/Projects/minima/_artifacts/pandamonium-desktop/PandamoniumDesktop-0.19.321-arm64.dmg`): 0.19.322 to 0.19.328 are in no build. The README beside it (`/Users/eurobuddha/Projects/minima/_artifacts/pandamonium-desktop/README.txt`) still begins with the 0.19.107 notes.
+- **The fixed node jars are not in this tree.** `/Users/eurobuddha/Projects/minima/_artifacts/node-cmdinject-2026-11-21/` holds the rebuilt jars of the command-injection fix (classic 1.1.2.3-euro5, 1.1.2.31-euro10 and euro11-block, parlons-node 0.2.157 / 0.2.158-block, with `SHA256SUMS` and `BUILD.md`); `resources/minima.jar` is still the old line and `package.json` still pins the old parlons-node. Choosing, proving on the dev node and committing them is owed (with the pins, and section 7's key-mode rule).
+- **The dev-node checklist additions** written in that README and not yet in section 9: the TEST copy (0.18.140), SHA-3 (0.19.312: Future Cash Next, the key-use audit, Entropy, miniMall), the Terminal gates (0.19.266 to 0.19.321), secrets (0.19.282 to 0.19.311), the restart guard (0.19.268 to 0.19.321), the miniMall buyer's in-flight payment (0.19.265) and a long Terminal command with accented letters or emoji (0.19.305). To add for 0.19.322 to 0.19.328: the Web Wallet's key-use field (262143 accepted, 262144 refused, the toast's figure); a restore with `keyuses:300000` on a classic wallet refused before the node; `quit` in the Terminal while something is in flight, then a second stop at once: refused; a miniMall vendor closed for more than 4096 blocks: the Inbox says "Reading orders and payments from while the app was closed (back to block N)" and the older orders appear within a few blocks.
+- **Stop guard, said for the coordinator:** a release names its hold through `stopGuard.holding()`, read right after the yes (0.19.322), not through a stamp returned by `pass()`: the same guarantee (a release never ends a hold another request took), and `pass()` keeps its true / false that the tests read.
+- **Not fixed, small:** `inFlightWork`'s per-read timers (`one()`, 0.19.321) are not cleared when the read answers (they are unref'd and end in 4 s), and the guard's own 5 s race timer in `decide` / `decideQuit` is never cleared; the 0.19.321 tests assert a read that never answers is null, not one that rejects (the code handles both). A failed backfill step shows the Inbox's "Recent orders could not be read" sentence (the 0.18 tree says "Older orders").
+- **Node-wallet keys** (the node's own `txnsign publickey:<key>` / auto: Future Cash Next, AtomiX, PandaPools, Dexicon, Mail, miniMall) are counted by the node; the node line this app ships starts a classic key again at use 0 at 262144 (Wallet.signData sets the stored uses, TreeKey.sign wraps). No desktop path passes a count for them; Future Cash Next's 50 signatures a day per address keep one key far from it. Reported, not changed here.
 - **`main/atomix/lib/ui.js`**: an old copy of the donor's page script, loaded by nothing, no longer equal to the donor. Named in `scripts/vendored-manifest.cjs` so the stray check passes; deleting it is the owner's call.
-- **C5 fragments**: the four the screens still built in English are translated (0.19.263); the rest of the review's list was already wrapped. A sweep of every screen in the dev preview is still owed.
-- **AtomiX CSV price column**: `renderer/dexicon-ax.js` `csv()` still writes the price as `toPrecision(8)` (a rounded ratio). The file feeds `tools/dexHistory` (its columns are parsed by name), so it was left as it is; cutting it is owed with a check of the ledger.
-- **Tests that are source checks**: the Dexicon tick guard (0.19.242) is exercised by extracting `tick` from the file, the restart paths and the overlays (0.19.257, 0.19.258) by source checks. A run in the app is owed (never run here).
-- **The gate under load**: `dexicon-host.test.cjs` "Dexicon's lanes" (a 400 ms limit) failed on the full run and alone several times while other test runs shared the machine; it passed on the next run each time.
+- **C5 fragments**: a sweep of every screen in the dev preview is still owed.
+- **AtomiX CSV price column**: `renderer/dexicon-ax.js` `csv()` still writes the price as `toPrecision(8)` (a rounded ratio); it feeds `tools/dexHistory` (columns parsed by name). Cutting it is owed with a check of the ledger.
+- **Tests that are source checks**: the Dexicon tick guard (0.19.242), the restart paths and the overlays (0.19.257, 0.19.258) are source checks; a run in the app is owed.
+- **The gate under load**: `dexicon-host.test.cjs` "Dexicon's lanes" (a 400 ms limit) fails while other programs load the machine; at 0.19.328 it failed three times alone on the committed 0.19.327 files too (load about 7) and passed alone on a later rerun.
 
 Notes: B1's intents cover the on-chain trade, the on-chain edit and the relay list; the market maker's own dialogs are hosted from the page, so its `mm_config` (enabled) and its wake-up are allowed only after a main-process question. B2's page-only prefix is applied by the bridge (the vendored page is not edited): the page keeps its ids, the node sees `pgx` + id. A3: a first run that tried a restore and then switches to New Wallet in the same launch must restart the app to see the new seed.
 
