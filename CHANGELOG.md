@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.199] — Web Wallet: an unreachable key-use service is said plainly
+
+- When the key-use service cannot be reached, Confirm and Check on-chain now say so plainly, and that nothing can be sent from this wallet until it can (a figure that is too low could lose funds). There is no way round it (owner decision). Test: `scripts/webwallet-ui-test.cjs`.
+
 ## [0.18.198] — the Touch ID refusal names the commonest reason first
 
 - When Touch ID has worked before but cannot be asked now, the message now first says: if the lid is closed or your Touch ID keyboard is unplugged, open the lid or connect it and try again. Test: `scripts/ethkey-test.cjs`.

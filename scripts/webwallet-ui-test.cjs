@@ -97,3 +97,10 @@ test("restore, resync, Web Wallet and backup screens refuse ';' in a seed, a fil
   for (const [text, n, what] of checks) assert.equal(count(text), n, what + ": " + text);
   const seedRe = new RegExp("[\"" + BS + BS + ";]"); for (const s of ["apple; vault", 'a"b', "a" + BS + "b"]) assert.ok(seedRe.test(s)); assert.ok(!seedRe.test("apple banana cherry"));
 });
+
+// ---- 0.18.199: an unreachable key-use service is said plainly ----
+test("Web Wallet: when the key-use service cannot be reached, the screen says so and that nothing can be sent until it can", () => {
+  assert.ok(app.includes("The key-use service (eurobuddha.com) cannot be reached, so this key's on-chain uses could not be read. Nothing can be sent from this wallet until it can"), "Confirm");
+  assert.ok(app.includes("The key-use service (eurobuddha.com) cannot be reached, so the on-chain uses could not be read. Nothing was changed, and nothing can be sent from this wallet until it can."), "Check on-chain");
+  assert.ok(/if \(n == null\) \{\n\s*\/\/ 0\.18\.199[^\n]*\n\s*toast\("The key-use service/.test(app) && /if \(n == null\) \{[\s\S]{0,600}return;\n\s*\}/.test(app), "and Confirm still refuses: no way round it");
+});
