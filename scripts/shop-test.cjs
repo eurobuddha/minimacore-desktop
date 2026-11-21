@@ -669,6 +669,14 @@ test("an order whose payment is older than the order is held for a check by hand
     assert.equal(m.store.order("ORD-L").orderBlock, undefined);
     assert.equal(m.store.order("ORD-L").paid, true, "no block: paid as before"); }
 });
+// 0.18.286: past the tree, orders read whole but the payments read cut by the reply cap: the payments' cause is the reply cap
+test("past the tree with only the payments read cut by the reply cap, the notice names the reply cap for the payments", async () => {
+  const t = await javaSetup("paycut"); const m = await t.reopen();
+  const run = javaNode(m, t.st); m.shop._setRunner(async (c) => c.startsWith("coins address:" + t.st.vaddr) && /depth:(\d+)/.exec(c) && Number(/depth:(\d+)/.exec(c)[1]) > 1024 ? { status: true, response: { tooBig: true } } : run(c));
+  for (let i = 0; i < 4; i++) { t.st.tip = 2500 + i; await m.shop.scanOnce(); }
+  assert.equal(m.store.getMeta("unreadWhy"), "treePayCap");
+  assert.equal(m.shop.scanState().text, "Orders older than block 1476 may not have been read: the node keeps only its recent blocks. Payments to your shops older than block 1476 may not have been read: the node's answer for them was too large.");
+});
 // (5) 0.18.277: the unread notice is shown only with a shop, and can be dismissed (the fact stays in the log)
 test("the unread notice: only for someone with a shop, dismissable, shown again for a newer one", async () => {
   const t = await javaSetup("notice"); const m = t.m;

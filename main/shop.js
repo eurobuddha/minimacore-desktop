@@ -467,7 +467,7 @@ async function scanOnce() {
         if (readFailed) { /* a failed read moves nothing: the same reads are tried on the next pass */ }
         else if (stall && stall < 3) store.setMeta("bfStall", stall);
         else {
-          const why = (ordersCut ? "cap" : "tree") + (root ? "Root" : "");
+          const why = ordersCut ? (root ? "capRoot" : "cap") : root ? "treeRoot" : "treePayCap";   // treePayCap: orders read whole, payments cut (0.18.286)
           store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("bfStall", 0); store.setMeta("unreadBelow", floor); store.setMeta("unreadWhy", why);
           console.error("[miniMall] " + unreadText(floor, why));
           changed = true;
@@ -561,8 +561,10 @@ function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an 
 /** What the order scan could not read yet, for the miniMall status line (0.18.213). */
 // What may not have been read below block N, and why (0.18.283: "may not have been", since a tree longer than 1024 blocks read some
 // of them). why: "tree" or "cap" (the node keeps only its recent blocks / its answer was too large), + "Root" when the payments read
-// reached the tree's root, where every unspent payment coin is kept whatever its age.
+// reached the tree's root, where every unspent payment coin is kept whatever its age; "treePayCap" (0.18.286): the orders read was whole
+// and only the payments read was cut by the reply cap.
 function unreadText(n, why) {
+  if (why === "treePayCap") return "Orders older than block " + n + " may not have been read: the node keeps only its recent blocks. Payments to your shops older than block " + n + " may not have been read: the node's answer for them was too large.";
   const root = /Root$/.test(String(why)), cause = /^cap/.test(String(why)) ? "the node's answer for older blocks was too large." : "the node keeps only its recent blocks.";
   return root ? "Orders older than block " + n + ", and payments to your shops that were already spent, may not have been read: " + cause + " Payments not yet spent were read."
     : "Orders and payments older than block " + n + " may not have been read: " + cause;
