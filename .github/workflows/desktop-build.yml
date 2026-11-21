@@ -118,6 +118,10 @@ jobs:
       - name: Verify chat
         run: npm run test:chat
 
+      # The panels: each one's styles stay inside it, its dialogs carry its own look, nothing that moves value changed.
+      - name: Verify panels
+        run: npm run test:panels
+
       # Engine parity + fund-safety gate. main/pandapools/*.js is copied verbatim from the pandapools-mds
       # MiniDapp; that donor repo is not checked out here, so this verifies the COMMITTED digest manifest rather
       # than the donor tree (scripts/pandapools-parity-check.cjs does the donor comparison locally, before a

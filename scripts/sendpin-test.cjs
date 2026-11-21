@@ -31,7 +31,7 @@ test("a send written with quotes, a control character or ':' spacing is pinned l
     const r = rig(); assert.equal(await pinMinimaSend(r.run, c), c, JSON.stringify(c)); assert.deepEqual(r.asked, []);
   }
   const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8");
-  assert.ok(/const pinned = await pinMinimaSend\(run, command\);/.test(main) && !/\/\^send\\s\/\.test\(command\)/.test(main), "mcd:cmd no longer decides with /^send\\s/");
+  assert.ok(/pin: \(c\) => pinMinimaSend\(run, c\)/.test(main) && !/\/\^send\\s\/\.test\(command\)/.test(main), "mcd:cmd no longer decides with /^send\\s/ (its pin goes through checkCommand since 0.18.201)");
 });
 test("the RPC write timeout reads the verb as the node does", () => {
   const { _timeoutFor } = require("../main/rpc");
@@ -47,8 +47,7 @@ test("the pin reads the LAST tokenid and amount and a top-level fromaddress only
   r = rig(); const st = 'send amount:1 address:0xCD state:{"1":"fromaddress:0xEE"}'; assert.equal(await pinMinimaSend(r.run, st), st + " fromaddress:" + A, "fromaddress: inside a state's JSON is not the parameter");
   r = rig(); const big = "send amount:1 amount:9 address:0xCD"; await pinMinimaSend(r.run, big);
   assert.ok(r.asked.some(q => q.startsWith("coins ")), "the amount looked for is the last one (9)");
-  const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8");
-  assert.ok(/repeated\(part, \["amount", "tokenid", "address", "fromaddress"\]\);\n\s*if \(twice\.length\) throw new Error\("This send names "/.test(main), "mcd:cmd refuses a send that repeats one");
+  await assert.rejects(require("../main/cmdgate").checkCommand("send amount:1 tokenid:0x00 tokenid:0x01 address:0xA", { take: () => false, running: () => true }), /This send names tokenid more than once/, "mcd:cmd refuses a send that repeats one (checkCommand, 0.18.201)");
   const V = require("../main/cmdverb");
   assert.deepEqual(V.repeated("send amount:1 address:0xA address : 0xB", ["amount", "tokenid", "address", "fromaddress"]), ["address"]);
   assert.deepEqual(V.repeated('send amount:1 address:0xA state:{"address":"x"}', ["address"]), [], "a key inside a state's JSON is not a parameter");

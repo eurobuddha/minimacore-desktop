@@ -87,4 +87,24 @@ function refusal(command, take) {
   return "GATED:" + kind + ": " + NAMES + " show a seed or a private key or change the keys; this one " + (kind === "seed" ? "shows the seed phrase" : kind === "key" ? "shows a private key" : "changes this wallet's keys or their lock") + ". Type " + PHRASE[kind] + " to run it.";
 }
 
-module.exports = { classify, create, refusal, masked, PHRASE, PASS_MS };
+/**
+ * checkCommand(command, io) (0.18.201): everything mcd:cmd decides before a text reaches the node, in order:
+ *   1. a non-empty string;  2. no control character (tab and line end allowed; the node trims and reads the others in
+ *   ways no check here can follow);  3. a send that names amount, tokenid, address or fromaddress twice is refused (the
+ *   node keeps the last; the pin and every review read one);  4. the secret-command gate (refusal);  5. the node running
+ *   (io.running() throws if not);  6. the beacon-dust pin of a MINIMA send (io.pin). → the text to run; throws the reason.
+ */
+async function checkCommand(command, io) {
+  if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
+  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(command)) throw new Error("This command holds a control character. Type it again without one.");
+  for (const part of V.parts(command)) {
+    if (!V.is(part, "send")) continue;
+    const twice = V.repeated(part, ["amount", "tokenid", "address", "fromaddress"]);
+    if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
+  }
+  const gated = refusal(command, io.take); if (gated) throw new Error(gated);
+  io.running();
+  return io.pin ? await io.pin(command) : command;
+}
+
+module.exports = { classify, create, refusal, masked, checkCommand, PHRASE, PASS_MS };

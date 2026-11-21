@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.201] — the command channel's policy is one tested function; panels test in CI
+
+- Everything `mcd:cmd` decides before a text reaches the node (empty text, control characters, a send that repeats amount, tokenid, address or fromaddress, the secret-command gate, the node running, the beacon-dust pin) is now one function, `cmdgate.checkCommand`, tested by its behaviour instead of by reading main.js. The red `scripts/panels-test.cjs` check was stale (it counted dialogs inserted with "beforeend" but not 'beforeend', so the backup dialog looked unstyled); it is fixed and `npm run test:panels` is now a CI step. Tests: `scripts/cmdgate-test.cjs`, `scripts/sendpin-test.cjs`, `scripts/panels-test.cjs`.
+
 ## [0.18.200] — Logs: one line buffer per node process
 
 - The unfinished last line of the node's output was kept on the manager, shared by every node start: a late chunk of a stopped node could join the next node's first line. Each start now has its own buffer, the streams decode UTF-8 across chunks (a character split between two chunks stays whole), and the last unended line is logged before the "[app] node exited" line (and anything after exit on close). Test: `scripts/node-log-test.cjs`.

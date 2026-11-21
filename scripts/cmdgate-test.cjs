@@ -48,7 +48,7 @@ test("no pass: refused; a pass is for one exact command, once, within 60 s; a ch
 test("mcd:cmd refuses before anything is sent; the Terminal keeps no gated command or answer; first run reads the seed through the gate", () => {
   const main = rd("main/main.js"), app = rd("renderer/app.js");
   const h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'), main.indexOf("});", main.indexOf('ipcMain.handle("mcd:cmd"')));
-  assert.ok(/const gated = require\("\.\/cmdgate"\)\.refusal\(command, cmdGate\.take\); if \(gated\) throw new Error\(gated\);\n\s*requireRunning\(\);/.test(h), "the refusal is the handler's first check");
+  assert.ok(/const ready = await require\("\.\/cmdgate"\)\.checkCommand\(command, \{ take: cmdGate\.take,[^\n]*\n\s*return run\(ready\);\n\}\);/.test(main), "the handler runs only what checkCommand returns (0.18.201)");
   assert.ok(/ipcMain\.handle\("mcd:cmdGate", \(_e, command, typed\) => cmdGate\.arm\(command, typed\)\);/.test(main));
   assert.equal((main.match(/ipcMain\.handle\("mcd:[A-Za-z]+", (async )?\(_e, (command|cmd)\b/g) || []).length, 3, "mcd:cmd, mcd:cmdGate and mcd:cmdKind (advice only, 0.18.194) are the only handlers that take a command text");
   const term = app.slice(app.indexOf("async function termSubmit(c) {"), app.indexOf("function renderTerminal() {"));
@@ -158,8 +158,7 @@ test("every text the node runs as a gated command is gated (68 variants: quotes,
     if (["balance", "keys action:list", "send amount:1 address:0xAA", 'backup password:"x"', 'megammrsync action:resync phrase:"x" host:h:9001'].includes(text)) assert.equal(k, "", text + " is not gated");
   }
   assert.equal(gatedByNode, 46, "46 of the 68 texts are run by the node as a gated command");
-  const main = rd("main/main.js");
-  assert.ok(/if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character/.test(main), "mcd:cmd refuses a control character first");
+  // CHANGED on purpose (0.18.201): mcd:cmd's policy is checkCommand, tested by its behaviour below
 });
 test("a failed try clears an earlier pass; the refusal names every gated command", async () => {
   const g = G.create(SYS({ can: () => false }));
@@ -247,4 +246,22 @@ test("must be armable: a restore with a 24-word phrase, wipekeys with a seed, lo
   await assert.rejects(G.create(SYS({ can: () => true })).arm(long, "SHOW KEY"), /longer than the Touch ID prompt can show in full/);
   let box = ""; await G.create(SYS({ can: () => false, confirm: async (d) => { box = d; return true; } })).arm("keys action:genkey modifier:" + "y".repeat(100), "SHOW KEY");
   assert.ok(box.includes("y".repeat(100)), "the dialog shows the whole command");
+});
+
+// ---- 0.18.201: mcd:cmd's policy is one function ----
+test("checkCommand: empty, control characters, a repeated send parameter and the gate are refused before the node is asked; then the pin", async () => {
+  const io = (o) => Object.assign({ take: () => false, running: () => true, pin: async (c) => c + " fromaddress:0xPIN" }, o);
+  const asked = [];
+  const track = io({ running: () => { asked.push("running"); return true; }, pin: async (c) => { asked.push("pin " + c); return c + " fromaddress:0xPIN"; } });
+  for (const [c, re] of [["", /empty command/], ["   ", /empty command/], [null, /empty command/], ["status\u0001", /control character/], ["send amount:1\u007f address:0xA", /control character/],
+    ["send amount:1 address:0xA amount:2", /names amount more than once/], ['send amount:1 address:0xA "address":0xB', /names address more than once/], ["status; send amount:1 address:0xA address:0xB", /names address more than once/],
+    ["vault", /GATED:seed:/], ["status;vault", /GATED: this chain/], ["keys action:genkey", /GATED:key:/], ["vault action:passwordunlock password:x", /GATED:change:/]])
+    await assert.rejects(G.checkCommand(c, track), re, JSON.stringify(c));
+  assert.deepEqual(asked, [], "nothing reached the running check or the pin");
+  assert.equal(await G.checkCommand("send amount:1 address:0xA", track), "send amount:1 address:0xA fromaddress:0xPIN");
+  assert.equal(await G.checkCommand("balance\ttokenid:0x00", io({ pin: async (c) => c })), "balance\ttokenid:0x00", "tab is allowed");
+  await assert.rejects(G.checkCommand("status", io({ running: () => { throw new Error("node not running"); } })), /node not running/);
+  const g = G.create(SYS({})); await g.arm("vault", "SHOW SEED");
+  assert.equal(await G.checkCommand("vault", io({ take: g.take, pin: async (c) => c })), "vault", "a passed gate runs, once");
+  await assert.rejects(G.checkCommand("vault", io({ take: g.take })), /GATED:seed:/);
 });

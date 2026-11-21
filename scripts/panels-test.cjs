@@ -283,7 +283,8 @@ test("0.17.20 review fixes stay fixed — scrim, RULE 2, quote race, style-stamp
   // an in-flight quote is retired when the amount is cleared, so it cannot repaint under an empty field
   assert.ok(/parseFloat\(amt\) <= 0\) \{ ppQuoteSeq\+\+;/.test(src), "the early return bumps the quote sequence");
   // every dialog carries the ◐ STYLE state, not just the panel body
-  const sites = (src.match(/insertAdjacentHTML\("beforeend"/g) || []).length + (src.match(/document\.body\.appendChild\(ov\)/g) || []).length;
+  // both quote styles: the backup dialog (ppbOv) is inserted with 'beforeend', and counting only "beforeend" made this red (0.18.201)
+  const sites = (src.match(/insertAdjacentHTML\(["']beforeend["']/g) || []).length + (src.match(/document\.body\.appendChild\(ov\)/g) || []).length;
   const stamped = (src.match(/`\); *ppApplyStyle\(\);/g) || []).length + (src.match(/appendChild\(ov\); ppApplyStyle\(\);/g) || []).length;
   assert.equal(stamped, sites, "each of the " + sites + " overlay sites re-stamps the style");
   assert.ok(/querySelectorAll\("\.overlay\.ppapp"\)\.forEach\(o => o\.setAttribute\("data-ppstyle"/.test(src), "and ppApplyStyle reaches them");
