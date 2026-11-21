@@ -416,7 +416,12 @@ async function scanOnce() {
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
     let failed = !tip || len === 0 || a === null || b === null, stepFailed = false, changed = !!(a || b);   // the tree's length unread: what was read is judged, nothing moves
     const bf0 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
-    if (!failed) {
+    if (!failed && prev && tip < prev) {
+      // the chain is BELOW what was read before (a resync, or a reorganisation onto a lower branch): the cursor follows the chain down, so a
+      // catch-up faster than the poll still reads the new branch's blocks below the old cursor (0.19.336, as released 0.18.281; 0.19.332 kept
+      // it up and they were skipped); a pending backfill waits, and it is no failure
+      store.setMeta("scanned_tip_block", tip);
+    } else if (!failed) {
       const covered = tip - served;   // the oldest block this pass read (less than asked when the node served less)
       // a gap below this pass (the app was away longer than one pass reads, or the node served less): the backfill reaches down to the
       // oldest unread block and starts just under this pass; a gap that opens while an older one is still being read keeps the oldest
@@ -425,7 +430,7 @@ async function scanOnce() {
         const t0 = meta("backfill_target_block"); store.setMeta("backfill_target_block", t0 ? Math.min(t0, prev) : prev); store.setMeta("backfill_floor_block", covered);
         store.log("miniMall: the app was away for " + (tip - prev) + " blocks; this pass read back to block " + covered + ", and the older blocks are read in steps, back to block " + (t0 ? Math.min(t0, prev) : prev));
       }
-      store.setMeta("scanned_tip_block", Math.max(prev, tip));   // never DOWN (0.19.332): a node resynced to a lower tip does not make the scan read again what it read
+      store.setMeta("scanned_tip_block", tip);
       const target = meta("backfill_target_block"), floor = meta("backfill_floor_block");
       // ONE step per pass: a widening query is heavy on the shared MINIMERCH address; a tip not above the floor (a fresh sync or a resync with
       // the store kept) puts the step off, not called a failure (0.19.332)

@@ -600,7 +600,7 @@ test("vendor: the no-deeper-history notice survives later passes, ends when a la
 });
 
 // ---- 0.19.332: a failed backfill step is said as OLDER orders; a tip not above the floor puts the step off; the cursor never goes down ----
-test("vendor: a failed backfill step is not 'recent orders could not be read'; a tip below the backfill floor postpones it without a failure; a lower tip never moves the cursor down", async () => {
+test("vendor: a failed backfill step is not 'recent orders could not be read'; a tip below the backfill floor postpones it without a failure; the cursor follows a lower tip (0.19.336)", async () => {
   let tip = 500000, failDeep = false; const asked = []; store.setLog(() => {});
   shop._setRunner(async (c) => { if (c === "block") return { status: true, response: { block: String(tip) } }; if (c === "status") return { status: true, response: { chain: { length: 1000000 } } };
     const m = / depth:(\d+)$/.exec(c); if (m) { asked.push(Number(m[1])); if (failDeep && Number(m[1]) > 4096) throw new Error("timed out"); } return { status: true, response: [] }; });
@@ -614,7 +614,7 @@ test("vendor: a failed backfill step is not 'recent orders could not be read'; a
   tip = floor - 5000; asked.length = 0; await shop.scanOnce();
   { const st = shop.scanState(); assert.deepEqual([st.readFailed, st.stepFailed, st.catchingUpTo], [false, false, 490000], "put off, not failed"); }
   assert.ok(asked.every(d => d <= 4096), "no step was read: " + asked.join(","));
-  assert.equal(store.getMeta("scanned_tip_block"), 500000, "the cursor never moves down");
+  assert.equal(store.getMeta("scanned_tip_block"), floor - 5000, "the cursor follows the chain down (0.19.336, changed on purpose: 0.19.332 kept it up)");
   tip = 500001; await shop.scanOnce(); assert.equal(shop.scanState().stepFailed, false);
   store.setLog((m) => { throw new Error("no log expected: " + m); });
 });
@@ -636,4 +636,45 @@ test("vendor: a backfill step after a restart does not open again an order coin 
     const which = opened.map(b => JSON.parse(Buffer.from(String(b).slice(2), "hex")).ref);
     assert.ok(which.includes("BELOW"), "below the floor: read by the step"); assert.ok(!which.includes("ABOVE"), "above the floor: an earlier pass read it, the step skips it: " + which);
   } finally { sc.open = open0; store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+
+// ---- a stand-in node shaped as core/minima-core e64600285be (as the 0.18 tree's javaNode): the tree grows by one block a block, is cut at
+// 1124 back to 1024, a coins walk visits blocks tip..tip-min(depth, L-1), a spent coin or one above the tip is never returned, the root
+// carries this wallet's unspent coins of any age (relevant:true), the channel's coins only inside the tree; coins of another branch unseen ----
+function javaNode(st) {
+  return async (c) => {
+    if (c === "block") return { status: true, response: { block: String(st.tip) } };
+    if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
+    if (c === "status") return { status: true, response: { chain: { length: Math.min(st.L, st.tip) } } };
+    const m = / depth:(\d+)$/.exec(c); if (!m || !c.startsWith("coins ")) return { status: true, response: [] };
+    const d = Number(m[1]), L = Math.min(st.L, st.tip), low = st.tip - Math.min(d, L - 1), rootBlock = st.tip - (L - 1);
+    const live = (x) => x.created <= st.tip && !x.spent && (!x.chain || x.chain === st.chain);
+    if (c.startsWith("coins address:" + shop.MINIMERCH)) { if (st.hook) { const r = st.hook("M", d); if (r === "throw") throw new Error("RPC timed out"); if (r) return r; } return { status: true, response: st.msg.filter(x => live(x) && x.created >= low) }; }
+    if (c.startsWith("coins address:" + VENDOR)) { if (st.hook) { const r = st.hook("V", d); if (r === "throw") throw new Error("RPC timed out"); if (r) return r; }
+      return { status: true, response: st.pay.filter(x => live(x) && (x.created >= low || (/ relevant:true/.test(c) && d >= L - 1 && x.created < rootBlock))).map(x => Object.assign({}, x, { created: String(x.created) })) }; }
+    return { status: true, response: [] };
+  };
+}
+const jOrder = (ref, created, extra) => Object.assign({ coinid: "0xJO" + Buffer.from(ref).toString("hex"), created, state: { "99": hex(JSON.stringify({ type: "ORDER", ref, from: BUYER, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], amount: "1.5", currency: "Minima", shipping: "Digital" })) } }, extra || {});
+const jPay = (ref, created, extra) => Object.assign({ coinid: "0xJP" + Buffer.from(ref + ":" + created).toString("hex"), tokenid: "0x00", amount: "1.5", created, state: { "1": hex(ref) } }, extra || {});
+async function javaSetup(tip, L) {
+  delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop");
+  for (const k of ["scanned_tip_block", "backfill_target_block", "backfill_floor_block", "unread_below_block", "unread_why", "backfill_stall", "unread_dismissed"]) store.setMeta(k, 0);
+  const st = { tip, L: L || 1100, chain: "a", msg: [], pay: [], hook: null };
+  shop._setRunner(javaNode(st)); await shop.init(); store.setLog(() => {});
+  return st;
+}
+const jTip = (st, t) => { for (let b = st.tip + 1; b <= t; b++) { st.L++; if (st.L >= 1124) st.L = 1024; } st.tip = t; };
+
+// ---- 0.19.336 (as released 0.18.281): a reorganisation onto a lower branch, then a catch-up faster than the poll: the new branch is read ----
+test("vendor: after a reorganisation onto a lower branch and a fast catch-up, the new branch's orders and payments below the old cursor are read", async () => {
+  const st = await javaSetup(1000);
+  try {
+    await shop.scanOnce(); jTip(st, 1500); await shop.scanOnce(); assert.equal(store.getMeta("scanned_tip_block"), 1500);
+    st.chain = "b"; st.tip = 1100;
+    st.msg.push(jOrder("ORD-RB1", 1110, { chain: "b" }), jOrder("ORD-RB2", 1215, { chain: "b" }), jOrder("ORD-RB3", 1320, { chain: "b" })); st.pay.push(jPay("ORD-RB1", 1112, { chain: "b" }));
+    for (const tip of [1100, 1200, 1300, 1400, 1500, 1501]) { jTip(st, tip); await shop.scanOnce(); assert.equal(shop.scanState().readFailed, false, "no failure at " + tip); }
+    for (const r of ["ORD-RB1", "ORD-RB2", "ORD-RB3"]) assert.ok(store.order(r), r + " on the new branch is read");
+    assert.equal(store.order("ORD-RB1").paid, true, "and its payment counted"); assert.equal(store.getMeta("scanned_tip_block"), 1501);
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
 });
