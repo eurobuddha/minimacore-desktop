@@ -2862,7 +2862,8 @@ async function renderShopOrderDetail(ref) {
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
       ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "Your listing says nothing is due for this order, so it is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Received so far: " + esc(o.paidAmount || "0")}</div>` : ""}
-      ${(!isSell && d.ambiguous) ? `<div class="shop-warn" style="margin-top:8px">⚠ The payment timed out — it may already have gone through. Check your Balance/History before sending again, to avoid paying twice.</div>` : ""}
+      ${(!isSell && d.ambiguous && !o.paid) ? `<div class="shop-warn" style="margin-top:8px">⚠ This payment may already have gone through (the node did not answer, or the app closed while it was being sent). Check your Balance and History before you pay again, so you do not pay twice.
+        <button class="btn btn--outline btn--full" id="shopNotSent" style="margin-top:8px">I checked my History: it was not sent</button></div>` : ""}
       ${(!isSell && d.unpaid && !d.ambiguous && !o.paid) ? `<button class="btn btn--primary btn--full" id="shopRetry" style="margin-top:8px">Retry payment</button>` : ""}
       ${isSell ? shopAdvanceRow(o) : ""}
     </div>
@@ -2870,6 +2871,14 @@ async function renderShopOrderDetail(ref) {
       <div class="row" style="margin-top:8px;gap:6px"><input class="field__input" id="shopMsg" placeholder="Message the ${isSell ? "buyer" : "vendor"}…" style="flex:1" autocomplete="off"/><button class="btn btn--outline btn--sm" id="shopSend">Send</button></div>
     </div>`;
   el("shopBack").onclick = () => { shopOrderRef = null; renderShopOrders(); };
+  if (el("shopNotSent")) el("shopNotSent").onclick = async () => {
+    const yes = await showConfirm("Not sent?", "Confirm only if your History shows NO payment for this order:\n\nAmount\n" + o.amount + " " + ShopRules.cur(o.currency)
+      + "\n\nToken id\n" + o.tokenid + "\n\nVendor's payment address\n" + String(o.vendorAddress || "")
+      + "\n\nThis offers Retry again. If the payment did go through, paying again pays twice.", "It was not sent", true);
+    if (!yes) return;
+    try { await api.shopNotSent(ref); toast("Marked as not sent: Retry is available", "ok"); } catch (e) { toast(e.message || "failed", "warn"); }
+    renderShopOrderDetail(ref);
+  };
   if (el("shopRetry")) el("shopRetry").onclick = async () => { el("shopRetry").disabled = true; try { await api.shopRetryPay(ref); toast("Payment sent ✓", "ok"); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {

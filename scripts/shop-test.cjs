@@ -586,3 +586,31 @@ test("a failed or thrown read is not covered: nothing advances, the status says 
   assert.ok(/ipcMain\.handle\("mcd:shopScanState", \(\) => shop\.scanState\(\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
   assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").includes("const scanLine = scan && scan.text ?"), "shown on the orders screen");
 });
+
+// ---- 0.18.217: an uncertain payment is shown as such, and the buyer can say it was not sent ----
+test("buyer: an in-flight or timed-out payment shows as 'may already have gone through'; 'it was not sent' clears it and offers Retry", async () => {
+  const m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", "");
+  const vendor = await m.sc.deriveIdentity("notsent vendor"); let mode = "timeout";
+  m.shop._setRunner(async (c) => {
+    if (c.startsWith("vault")) return { status: true, response: { phrase: "notsent buyer" } };
+    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: "MxG0" + "B".repeat(56) } };
+    if (c.startsWith("checkaddress")) return { status: true, response: { simple: true } };
+    if (c.startsWith("coins")) return { status: true, response: [] };
+    if (c.startsWith("send ") && c.includes("address:" + ADDR)) { if (mode === "timeout") throw new Error("timed out"); }
+    return { status: true, response: { txpowid: "0x01" } };
+  });
+  const cfg = shopOf({ vendorPublicId: vendor.publicId });
+  const r = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", "");
+  assert.equal(m.shop.orderDetail(r.ref).ambiguous, true); assert.equal(m.shop.ordersList().find(o => o.ref === r.ref).ambiguous, true);
+  const q = await m.shop.placeOrder(cfg, [{ product: "Tea", quantity: 1 }], "1.5", "", "home", "");
+  m.store.setMetaSync("ambiguous:" + q.ref, false);   // only the in-flight mark is left (a quit during the send)
+  assert.equal(m.shop.orderDetail(q.ref).ambiguous, true, "in flight shows the same warning");
+  assert.throws(() => m.shop.paymentNotSent("ORD-NONE"), /Order not found/);
+  m.shop.paymentNotSent(r.ref);
+  const d = m.shop.orderDetail(r.ref); assert.equal(d.ambiguous, false); assert.equal(d.unpaid, true);
+  assert.throws(() => m.shop.paymentNotSent(r.ref), /no payment that may have gone through/, "only once");
+  mode = "ok"; await m.shop.retryPayment(r.ref); assert.equal(m.shop.orderDetail(r.ref).unpaid, false);
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes('id="shopNotSent"') && app.includes('"\\n\\nToken id\\n" + o.tokenid + "\\n\\nVendor\'s payment address\\n" + String(o.vendorAddress || "")'), "the confirmation shows the amount, the token id and the vendor address whole");
+  assert.ok(/ipcMain\.handle\("mcd:shopNotSent", \(_e, ref\) => shop\.paymentNotSent\(ref\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
+});

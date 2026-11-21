@@ -424,11 +424,20 @@ function deleteShop(shopId) { store.deleteShop(shopId); emitter.emit("update"); 
 function ordersList() {
   return store.orders().map(o => ({ ref: o.ref, role: o.role, shopId: o.shopId, shopName: o.shopName, status: o.status,
     amount: o.amount, due: o.due || "", unchecked: !!(o.problems && o.problems.length), currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread,
-    unpaid: !!store.getMeta("unpaid:" + o.ref), ambiguous: !!store.getMeta("ambiguous:" + o.ref) })).sort((a, b) => (b.date || 0) - (a.date || 0));
+    unpaid: !!store.getMeta("unpaid:" + o.ref), ambiguous: !!(store.getMeta("ambiguous:" + o.ref) || store.getMeta("inflight:" + o.ref)) })).sort((a, b) => (b.date || 0) - (a.date || 0));
 }
 function orderDetail(ref) {
   const o = store.order(ref); if (!o) return null; store.markOrderRead(ref); if (o.role === "sell") store.ensureChecked(o);
-  return { order: o, chat: store.chat(ref), unpaid: !!store.getMeta("unpaid:" + ref), ambiguous: !!store.getMeta("ambiguous:" + ref) };
+  // a payment still marked in flight (a quit or crash during the send) is shown as "may already have gone through" too (0.18.217)
+  return { order: o, chat: store.chat(ref), unpaid: !!store.getMeta("unpaid:" + ref), ambiguous: !!(store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)) };
+}
+/** The buyer checked their History and the uncertain payment was not sent (0.18.217): Retry is offered again. */
+function paymentNotSent(ref) {
+  const o = store.order(ref); if (!o || o.role !== "buy") throw new Error("Order not found.");
+  if (o.paid) throw new Error("This order is already paid.");
+  if (!store.getMeta("ambiguous:" + ref) && !store.getMeta("inflight:" + ref)) throw new Error("This order has no payment that may have gone through.");
+  store.setMetaSync("ambiguous:" + ref, false); store.setMetaSync("inflight:" + ref, false); store.setMetaSync("unpaid:" + ref, true);
+  emitter.emit("update"); return { ok: true };
 }
 /** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
 function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
@@ -445,6 +454,6 @@ function newOrderCount() { return store.orders().filter(o => o.role === "sell" &
 module.exports = {
   emitter, init, invalidateIdentity, myIdentity, vendorCard, startLoop, stopLoop, scanOnce,
   myShops, saveShop, deleteShop, ordersList, orderDetail, newOrderCount, scanState,
-  placeOrder, retryPayment, advanceStatus, reply, checkImported, vendorCheck,
+  placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
   _setRunner, MINIMERCH, USDT_TOKEN, tokenFor
 };

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.217] — miniMall buyer: an uncertain payment is shown, and can be marked not sent
+
+- A payment still marked in flight (the app closed while it was being sent) blocked Retry but was not explained on the screen. Both an in-flight and a timed-out payment are now shown as "may already have gone through", with an explicit action, "I checked my History: it was not sent". Its confirmation shows the amount, the token id and the vendor's payment address whole, and only then are the marks cleared and Retry offered. Test: `scripts/shop-test.cjs`.
+
 ## [0.18.216] — ETH endpoint with a name or password: refused with a reason
 
 - Since 0.18.210 the AtomiX network list refuses a url carrying a name or password, but the custom Ethereum endpoint setting still accepted one, so it was saved and then silently never used. It is now refused when set, with the reason, and a saved endpoint that is no longer allowed is dropped at load with a line in the log (the built-in endpoints are used). Test: `scripts/atomix-unit.js`.
