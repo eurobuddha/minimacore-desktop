@@ -135,7 +135,7 @@ function setupTray() {
       { label: "minimaCore — " + node.state, enabled: false },
       { type: "separator" },
       { label: "Show", click: () => { if (win) win.show(); else createWindow(); } },
-      { label: "Restart node", click: () => { mayStop().then(() => node.restart()).catch(() => {}); } },   // main's own question when anything is in flight (0.18.223)
+      { label: "Restart node", click: () => { stopping(() => node.restart()).catch(() => {}); } },   // main's own question when anything is in flight (0.18.223)
       ...(updater.current().available ? [{ type: "separator" }, { label: "Update to minimaCore " + updater.current().version + "…", click: () => { if (win) { win.show(); win.webContents.send("mcd:openUpdate"); } } }] : []),
       { type: "separator" },
       { label: "Quit", click: () => app.quit() }
@@ -177,6 +177,9 @@ async function mayStop() {
   if (!r) throw new Error("The node keeps running: nothing was stopped.");
 }
 node.on("status", (s) => stopGuard.seen(s && s.state));
+/** The guarded stop, then what it was for (0.18.257): when that fails (a restore with a wrong password, an import that fails fast, a
+ *  config save that throws), the hold the yes started is released, so an immediate retry is asked again instead of refused. */
+async function stopping(fn) { await mayStop(); try { return await fn(); } catch (e) { stopGuard.release(); throw e; } }
 /** A config patch from the window, with what Settings' save does after it (Casino loop, login item). */
 function saveConfigPatch(patch) {
   const c = config.save(patch || {});
@@ -205,8 +208,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
   const run = (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c);
   const ready = await require("./cmdgate").checkCommand(command, { take: cmdGate.take, running: () => { requireRunning(); return true; }, pin: (c) => pinMinimaSend(run, c) });
   // quit, a megammrsync / archive / mysql / reset resync or import, megammr import, restore, vault resetkeys: the node stops at the end (0.18.223)
-  if (require("./stopguard").stopsNode(ready)) await mayStop();
-  return require("./cmdgate").scrubReply(await run(ready), command);   // no secret of the typed command comes back to the window (0.18.222)
+  const reply = require("./stopguard").stopsNode(ready) ? await stopping(() => run(ready)) : await run(ready);
+  return require("./cmdgate").scrubReply(reply, command);   // no secret of the typed command comes back to the window (0.18.222)
 });
 
 // Clipboard writes go through the main process — main-process clipboard.writeText is synchronous and never subject
@@ -229,10 +232,10 @@ ipcMain.handle("mcd:pickFolder", async () => {
 ipcMain.handle("mcd:nodeStatus", () => node.snapshot());
 ipcMain.handle("mcd:nodeStart", async () => { await node.start(); return node.snapshot(); });
 // Stop whatever node holds our port/data folder (an earlier launch's), then start. Same reclaim as every start.
-ipcMain.handle("mcd:nodeReclaim", async () => { await mayStop(); await node.stop(); await node.start(); return node.snapshot(); });
-ipcMain.handle("mcd:nodeStop", async () => { await mayStop(); await node.stop(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeReclaim", () => stopping(async () => { await node.stop(); await node.start(); return node.snapshot(); }));
+ipcMain.handle("mcd:nodeStop", () => stopping(async () => { await node.stop(); return node.snapshot(); }));
 // patch: the setup screen's or Contribute's config, saved only once the guard let the restart go, so a refusal changes nothing (0.18.223)
-ipcMain.handle("mcd:nodeRestart", async (_e, patch) => { await mayStop(); if (patch) saveConfigPatch(patch); await node.restart(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeRestart", (_e, patch) => stopping(async () => { if (patch) saveConfigPatch(patch); await node.restart(); return node.snapshot(); }));
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());
 
@@ -244,11 +247,12 @@ ipcMain.handle("mcd:parlonsOpenExternal", () => parlons.openExternal());
 ipcMain.handle("mcd:setNodeKind", async (_e, kind, heapMb) => {
   const k = kind === "minima" ? "minima" : "parlons";
   if (k === "parlons") { const why = node.parlonsBlocker(); if (why) throw new Error(why); }
-  await mayStop();   // main's own question when anything is in flight (0.18.223); the heap size is saved only after it
-  config.save(heapMb === undefined ? { nodeKind: k } : { nodeKind: k, heapMb });
-  chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
-  await node.restart();
-  return node.snapshot();
+  return stopping(async () => {   // main's own question when anything is in flight (0.18.223); the heap size is saved only after it
+    config.save(heapMb === undefined ? { nodeKind: k } : { nodeKind: k, heapMb });
+    chat.stopLoop();   // restart re-gates chat (both kinds run keets since 0.18.6)
+    await node.restart();
+    return node.snapshot();
+  });
 });
 
 // JAR UPDATER DISABLED. The node jar is shipped with the app and is the only jar we run.
@@ -397,23 +401,24 @@ ipcMain.handle("mcd:chatOpenBackup", async (_e, pass) => {
 ipcMain.handle("mcd:chatApplyBackup", async () => {
   const b = pendingChatBackup;
   if (!b) throw new Error("Open the backup again.");
-  await mayStop();   // main's own question when anything is in flight (0.18.223); the backup stays open after a no
-  pendingChatBackup = null;
-  // The sidecar reads its keypair only at spawn: stop the node, write, start.
-  chat.stopLoop();
-  await node.stop();
-  if (b.keypair) {
-    fs.mkdirSync(path.dirname(keetsKeypairFile()), { recursive: true });
-    const tmp = keetsKeypairFile() + ".restore";
-    fs.writeFileSync(tmp, b.keypair, { mode: 0o600 });
-    fs.renameSync(tmp, keetsKeypairFile());
-  }
-  const payaddr = {};
-  for (const c of b.contacts) if (c.payaddr) payaddr[c.pubkey] = c.payaddr;
-  chatStore.mergeBackup(b.contacts, b.messages, payaddr, b.manifest.chatName || "");
-  chat.forgetIdentity();
-  await node.start();   // status "running" restarts the chat loop
-  return true;
+  return stopping(async () => {   // main's own question when anything is in flight (0.18.223); the backup stays open after a no
+    pendingChatBackup = null;
+    // The sidecar reads its keypair only at spawn: stop the node, write, start.
+    chat.stopLoop();
+    await node.stop();
+    if (b.keypair) {
+      fs.mkdirSync(path.dirname(keetsKeypairFile()), { recursive: true });
+      const tmp = keetsKeypairFile() + ".restore";
+      fs.writeFileSync(tmp, b.keypair, { mode: 0o600 });
+      fs.renameSync(tmp, keetsKeypairFile());
+    }
+    const payaddr = {};
+    for (const c of b.contacts) if (c.payaddr) payaddr[c.pubkey] = c.payaddr;
+    chatStore.mergeBackup(b.contacts, b.messages, payaddr, b.manifest.chatName || "");
+    chat.forgetIdentity();
+    await node.start();   // status "running" restarts the chat loop
+    return true;
+  });
 });
 
 // backup: keys stay in main; the renderer only supplies the passphrase and triggers the file dialog.
@@ -668,11 +673,12 @@ ipcMain.handle("mcd:wwKeyuses", (_e, address) => webwallet.keyusesInfo(address))
 ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(address, count));
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
 ipcMain.handle("mcd:wwEnableMegammr", async () => {
-  await mayStop();   // main's own question when anything is in flight (0.18.223)
-  const c = config.load();
-  config.save({ params: Object.assign({}, c.params, { megammr: true }) });
-  await node.restart();
-  return node.snapshot();
+  return stopping(async () => {   // main's own question when anything is in flight (0.18.223)
+    const c = config.load();
+    config.save({ params: Object.assign({}, c.params, { megammr: true }) });
+    await node.restart();
+    return node.snapshot();
+  });
 });
 webwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:webwallet"); });
 

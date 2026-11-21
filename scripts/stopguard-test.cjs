@@ -59,17 +59,19 @@ test("main: every stop or restart handler asks the guard before the node is touc
   const main = rd("main/main.js");
   const handler = (name) => { const i = main.indexOf('ipcMain.handle("' + name + '"'); assert.ok(i > 0, name); return main.slice(i, main.indexOf("\nipcMain.handle(", i + 1)); };   // up to the next handler
   for (const n of ["mcd:nodeReclaim", "mcd:nodeStop", "mcd:nodeRestart", "mcd:setNodeKind", "mcd:chatApplyBackup", "mcd:wwEnableMegammr"]) {
-    const h = handler(n), g = h.indexOf("await mayStop()"), touch = Math.min(...["node.stop()", "node.restart()", "config.save(", "saveConfigPatch(", "pendingChatBackup = null"].map(x => h.indexOf(x)).filter(x => x >= 0));
-    assert.ok(g > 0 && g < touch, n + ": the guard comes first");
+    const h = handler(n), g = h.indexOf("stopping(async () => {"), touch = Math.min(...["node.stop()", "node.restart()", "config.save(", "saveConfigPatch(", "pendingChatBackup = null"].map(x => h.indexOf(x)).filter(x => x >= 0));
+    assert.ok(g > 0 && g < touch, n + ": the guard comes first (CHANGED on purpose, 0.18.257: through stopping(), which releases the hold if the operation fails)");
   }
-  assert.ok(/\{ label: "Restart node", click: \(\) => \{ mayStop\(\)\.then\(\(\) => node\.restart\(\)\)\.catch\(\(\) => \{\}\); \} \}/.test(main), "the tray asks too");
-  assert.ok(/if \(require\("\.\/stopguard"\)\.stopsNode\(ready\)\) await mayStop\(\);\n  return /.test(main), "a Terminal command that stops the node asks before it is sent");
+  assert.ok(/\{ label: "Restart node", click: \(\) => \{ stopping\(\(\) => node\.restart\(\)\)\.catch\(\(\) => \{\}\); \} \}/.test(main), "the tray asks too");
+  assert.ok(/const reply = require\("\.\/stopguard"\)\.stopsNode\(ready\) \? await stopping\(\(\) => run\(ready\)\) : await run\(ready\);/.test(main), "a Terminal command that stops the node asks before it is sent");
   assert.equal(main.split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n").match(/node\.(stop|restart)\(\)/g).length, 8, "no other stop: the six handlers, the tray, and the quit (before-quit stops the node as the app goes)");
   // run mcd:nodeRestart with the guard refusing and allowing: the patch is saved only once the guard let it go
   const src = main.slice(main.indexOf('ipcMain.handle("mcd:nodeRestart"'), main.indexOf("\n", main.indexOf('ipcMain.handle("mcd:nodeRestart"')));
   for (const allow of [false, true]) {
     const hs = {}, did = [];
-    new Function("ipcMain", "mayStop", "saveConfigPatch", "node", src)({ handle: (n, f) => { hs[n] = f; } }, async () => { did.push("guard"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
+    const mayStop = async () => { did.push("guard"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); };
+    const stopping = async (fn) => { await mayStop(); return fn(); };
+    new Function("ipcMain", "stopping", "saveConfigPatch", "node", src)({ handle: (n, f) => { hs[n] = f; } }, stopping,
       (p) => did.push("save " + JSON.stringify(p)), { restart: async () => did.push("restart"), snapshot: () => ({}) });
     const p = hs["mcd:nodeRestart"](null, { contribute: true });
     if (allow) { await p; assert.deepEqual(did, ["guard", 'save {"contribute":true}', "restart"]); }
@@ -143,4 +145,17 @@ test("stopGuard is single-flight: two requests at once show one question and giv
   running = false; assert.equal(await g.pass(), true, "a node that is not running is never held");
   const main = rd("main/main.js");
   assert.ok(/if \(r === "busy"\) throw new Error\("The node is already being stopped or restarted, or the question about it is still open\. Nothing more was done\."\);/.test(main) && /node\.on\("status", \(s\) => stopGuard\.seen\(s && s\.state\)\);/.test(main), "main says it, and tells the guard when the node stopped");
+});
+
+// ---- 0.18.257: when what the yes was for fails without stopping the node, the hold ends: a retry is asked again, not refused ----
+test("a stop let go whose operation then fails releases the hold: the retry is asked again", async () => {
+  let asks = 0;
+  const g = S.stopGuard({ running: () => true, gather: async () => ({ atomix: { ready: true, swaps: ["0xAB"] }, pools: [] }), log: () => {}, ask: async () => { asks++; return true; } });
+  assert.equal(await g.pass(), true); assert.equal(await g.pass(), "busy", "held after a yes");
+  g.release(); assert.equal(await g.pass(), true, "released: asked again"); assert.equal(asks, 2);
+  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function stopping(fn)"), main.indexOf("\n", main.indexOf("async function stopping(fn)")));
+  const released = [], run = (passOk) => new Function("mayStop", "stopGuard", src + "\nreturn stopping;")(async () => { if (!passOk) throw new Error("kept running"); }, { release: () => released.push(1) });
+  await assert.rejects(run(true)(async () => { throw new Error("Wrong password"); }), /Wrong password/); assert.equal(released.length, 1, "the operation failed: released");
+  await assert.rejects(run(false)(async () => 1), /kept running/); assert.equal(released.length, 1, "a refused or busy guard releases nothing (another request's hold stays)");
+  assert.equal(await run(true)(async () => 7), 7); assert.equal(released.length, 1);
 });
