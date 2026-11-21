@@ -67,7 +67,7 @@ function rawCall(port, secret, command) {
       res.on("end", () => {
         if (res.statusCode === 401) { reject(new Error("RPC authentication failed")); return; }
         try { resolve(JSON.parse(body)); }
-        catch (e) { reject(new Error("bad RPC reply (" + res.statusCode + "): " + body.slice(0, 120))); }
+        catch (e) { reject(new Error("bad RPC reply (HTTP " + res.statusCode + ", " + body.length + " characters, not JSON)")); }   // never the body (0.19.260, as released 0.18.211): a reply can carry a seed or a key
       });
     });
     req.on("timeout", () => { req.destroy(new Error("RPC timeout")); });

@@ -3521,7 +3521,7 @@ function ewSendDialog(b, startAsset) {
       if (r.err) { toast(r.err, "warn"); return; }
       close(); ewConfirmSend(b, cur, r);
     } }] });
-  const paint = () => { el("ewTokLine").textContent = I18N.t("Token: {label}  (click to change · balance {bal})", { label: cur.label, bal: ewCut(cur.bal) }); };
+  const paint = () => { el("ewTokLine").textContent = I18N.t("Token: {label}  (click to change · balance {bal})", { label: cur.label, bal: cur.bal == null ? I18N.t("Not read yet") : ewCut(cur.bal) }); };
   paint();
   el("ewTokLine").onclick = async () => { const i = await appPick(I18N.t("Send which token"), assets.map(a => a.label)); if (i != null) { cur = assets[i]; if (d.root.isConnected) paint(); } };
   el("ewScan").onclick = async () => { const got = await scanQR(I18N.t("Scan recipient address")); const m = /0x[0-9a-fA-F]{40}/.exec(String(got || "")); if (m && d.root.isConnected) el("ewTo").value = m[0]; };

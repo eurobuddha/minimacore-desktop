@@ -556,7 +556,7 @@ function computeQuote(A, SP, sell, amountStr, slipPct, b, bals) {
     // the balance. Same guard as the donor (atomix-mds app.js onReview).
     const haveUsdt = Number(bals.usdt);
     if (!isFinite(haveUsdt)) return { err: "Can’t read your USDT balance right now — hit Refresh on the Wallet tab, then try again.", meta };
-    if (plan.totalUsdt > haveUsdt + 1e-9) return { err: "Need ≈ " + plan.totalUsdt.toFixed(6) + " USDT for that — you have " + bals.usdt + " USDT.", meta };
+    if (plan.totalUsdt > haveUsdt + 1e-9) return { err: "Need " + truncDp(plan.totalUsdt, 6) + " USDT or more for that — you have " + bals.usdt + " USDT.", meta };   // cut, never rounded (0.19.260, as released 0.18.211 / 0.18.218)
     model = { mode: "sweep", sell: false, plan };
   }
   return { model, meta };
@@ -1038,7 +1038,19 @@ function ethTokensLoad() {
   ethTokensSave();
   return ethTokenList;
 }
-function ethTokensSave() { try { fs.writeFileSync(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || []), "utf8"); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
+// a whole new file or the old one, never half of one (0.19.260, as released 0.18.211)
+function writeAtomic(file, text) { const tmp = file + ".tmp"; fs.writeFileSync(tmp, text, "utf8"); fs.renameSync(tmp, file); }
+function ethTokensSave() { try { writeAtomic(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || [])); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
+/** A figure cut to dp decimals, never rounded, an exponent form written out exactly (as released 0.18.211 / 0.18.218). */
+function truncDp(x, dp) {
+  let t = String(x), neg = "";
+  if (t[0] === "-") { neg = "-"; t = t.slice(1); }
+  const m = /^(\d+)(?:\.(\d*))?e([+-]?\d+)$/i.exec(t);
+  if (m) { const digits = m[1] + (m[2] || ""), point = m[1].length + Number(m[3]);
+    t = point <= 0 ? "0." + "0".repeat(-point) + digits : point >= digits.length ? digits + "0".repeat(point - digits.length) : digits.slice(0, point) + "." + digits.slice(point); }
+  const [i, f = ""] = t.split(".");
+  return neg + (dp > 0 ? (i.replace(/^0+(?=\d)/, "") || "0") + "." + (f + "0".repeat(dp)).slice(0, dp) : i);
+}
 /** sanitise a contract-supplied symbol(): printable, trimmed, capped — it is attacker-controlled (any contract). */
 function ethCleanSymbol(sym, addr) {
   // printable-only, and ALSO strip HTML-dangerous chars server-side (defense-in-depth: the renderer esc()s every
@@ -1105,10 +1117,11 @@ async function ethBalances() {
   const addr = vmCtx().eth.address;
   await ensureRpcOverride();
   const ops = A.ethops.make(ctx.RPC, vmCtx().eth.privKey, addr);
-  const out = { address: addr, eth: "0", ethWei: "0", tokens: [], at: Date.now() };
+  // A balance that could not be read is null (0.19.260), never "0": the screen says "Not read yet" instead of an empty wallet.
+  const out = { address: addr, eth: null, ethWei: null, tokens: [], at: Date.now() };
   await p(cb => ctx.RPC.getBalance(addr, cb)).then(wei => { out.ethWei = wei.toString(); out.eth = A.dec.formatUnits(wei, 18); }).catch(() => {});
   for (const t of ethTokensLoad()) {
-    let raw = "0", bal = "0";
+    let raw = null, bal = null;
     try { const r = await p(cb => ops.balanceOf(t.address, cb)); raw = r.toString(); bal = A.dec.formatUnits(r, t.decimals); } catch (e) {}
     out.tokens.push({ symbol: t.symbol, address: t.address, decimals: t.decimals, balance: bal, raw });
   }
@@ -1339,7 +1352,7 @@ async function ethSetRpc(url) {
   const v = ethValidateRpc(url);
   if (v.err) return { err: v.err };
   ethRpcOverride = { url: v.url, host: v.host }; ethUserHosts.add(v.host);
-  try { fs.writeFileSync(ETH_RPC_FILE(), JSON.stringify(ethRpcOverride), "utf8"); } catch (e) {}
+  try { writeAtomic(ETH_RPC_FILE(), JSON.stringify(ethRpcOverride)); } catch (e) {}
   try { ctx.RPC.setUrl(v.url); ethRpcAppliedUrl = v.url; } catch (e) {}
   emitter.emit("update");
   return { ok: true, rpc: v.url };
@@ -1368,5 +1381,6 @@ module.exports = {
     ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,
     ethTokensLoad, ethRpcLoad, ETH_FALLBACK_GP, ETH_FEE_MULT, ETH_MAX_GAS_PRICE },
   // test-only: reset the module-level ETH caches so a harness can drive a fresh userData dir per case
+  _truncDp: truncDp,
   _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethUserHosts.clear(); }
 };

@@ -101,6 +101,24 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     assert.ok(!/shim\.flush\(\); \} catch \(e\) \{\} return; \}/.test(ax) && /if \(sqlShim\) sqlShim\.dispose\(\);/.test(ax) && /storage\.dispose\(\);/.test(pp), "a disowned database is disposed, not flushed");
   });
 
+  await okA("ETH Wallet: an unread balance is null, not 0; the token list and the endpoint are written whole via temp and rename; the amount a swap needs is cut (0.19.260)", async () => {
+    const m = require("../main/atomix"), d = fs.mkdtempSync(path.join(os.tmpdir(), "axeth-"));
+    m._setDataDir(d); m._resetEthCaches();
+    const prev = m._ctx();
+    m._setCtx({ READY: true, CTX: { eth: { address: "0x" + "ab".repeat(20), privKey: "0x" + "11".repeat(32) } }, RPC: { getBalance: (a, cb) => cb(new Error("down")) },
+      AX: { ethops: { make: () => ({ balanceOf: (t, cb) => cb(new Error("down")) }) }, dec: { formatUnits: (w) => String(w) } } });
+    try {
+      fs.writeFileSync(path.join(d, "ethtokens.json"), JSON.stringify([{ address: "0x" + "cd".repeat(20), symbol: "TKN", decimals: 6 }]));
+      const b = await m.ethBalances();
+      assert.equal(b.eth, null); assert.equal(b.ethWei, null); assert.ok(b.tokens.every(t => t.balance === null && t.raw === null), JSON.stringify(b.tokens));
+    } finally { m._setCtx(prev); m._resetEthCaches(); }
+    assert.equal(m._truncDp(12.3456789, 6), "12.345678"); assert.equal(m._truncDp(1e-7, 9), "0.000000100"); assert.equal(m._truncDp(2.9999999, 6), "2.999999");
+    const src = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8"), rpc = fs.readFileSync(path.join(__dirname, "..", "main", "rpc.js"), "utf8");
+    assert.ok(!/Need ≈|totalUsdt\.toFixed/.test(src) && /"Need " \+ truncDp\(plan\.totalUsdt, 6\)/.test(src), "the amount needed is cut");
+    assert.ok(/writeAtomic\(ETH_TOKENS_FILE\(\)/.test(src) && /writeAtomic\(ETH_RPC_FILE\(\)/.test(src) && !/fs\.writeFileSync\(ETH_(TOKENS|RPC)_FILE/.test(src), "temp and rename");
+    assert.ok(!/body\.slice\(/.test(rpc) && /characters, not JSON/.test(rpc), "no reply body in a parse error");
+  });
+
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
   // HERMETIC since 0.18.140. It used to run `docker exec` into a fixed container name for the crypto-bearing
   // commands; on the owner's machine that container is a wallet with real funds, and this "unit" check read its
