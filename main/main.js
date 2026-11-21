@@ -485,9 +485,11 @@ async function fcGuardian(on) {
   return futurecash.setGuardian(true);
 }
 async function fcRevoke() {
-  const wk = futurecash.walletKey;
-  if (wk) { config.setFcGrant(wk, null); node.log("[futurecash] the user took back background signing for the wallet whose first key is " + wk); }
-  return futurecash.setGuardian(false);
+  const wk = futurecash.walletKey || null;   // the store never opened: every grant is taken back (review L1)
+  config.setFcGrant(wk, null);
+  node.log("[futurecash] the user took back background signing " + (wk ? "for the wallet whose first key is " + wk : "for every wallet (Future Cash Next had not started)"));
+  const r = await futurecash.setGuardian(false).catch(() => null);
+  return r && r.ok ? r : { ok: true };
 }
 ipcMain.handle("mcd:fc", (_e, op, ...args) => { if (typeof op !== "string" || !Object.hasOwn(FC_OPS, op)) throw new Error("Unknown Future Cash action."); requireRunning(); return FC_OPS[op](...args); });
 

@@ -225,10 +225,11 @@ function effectiveParams() {
  * number) is not a grant: the question is asked again.
  */
 function setFcGrant(walletKey, at, safe) {
-  if (!/^0x[0-9a-f]{64}$/.test(String(walletKey))) throw new Error("Unknown wallet.");
+  const all = walletKey === null && !at;   // Revoke with no wallet known (the store never opened): every grant (review L1)
+  if (!all && !/^0x[0-9a-f]{64}$/.test(String(walletKey))) throw new Error("Unknown wallet.");
   if (at && !/^M[xX][0-9A-Za-z]{30,100}$/.test(String(safe || ""))) throw new Error("A grant names its safe destination.");
-  const cur = load(), g = Object.assign({}, cur.fcGrant && typeof cur.fcGrant === "object" ? cur.fcGrant : {});
-  if (at) g[walletKey] = { at: Number(at), safe: String(safe) }; else delete g[walletKey];
+  const cur = load(), g = all ? {} : Object.assign({}, cur.fcGrant && typeof cur.fcGrant === "object" ? cur.fcGrant : {});
+  if (all) {} else if (at) g[walletKey] = { at: Number(at), safe: String(safe) }; else delete g[walletKey];
   cur.fcGrant = g;
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));

@@ -470,6 +470,7 @@ test("the grant: asked natively in main, written only by config.setFcGrant, neve
   assert.ok(fn.indexOf("dialog.showMessageBox(") > 0 && fn.indexOf("dialog.showMessageBox(") < fn.indexOf("config.setFcGrant(wk, Date.now(), safe)"), "the question comes before the grant");
   assert.ok(/if \(r\.response !== 0\) return \{ ok: false, declined: true \};/.test(fn), "anything but Allow declines");
   assert.ok(/revoke: \(\) => fcRevoke\(\)/.test(main));
+  assert.ok(main.includes("const wk = futurecash.walletKey || null;") && main.includes("config.setFcGrant(wk, null);") && cfg.includes("const all = walletKey === null && !at;"), "Revoke works with no store open: every grant (review L1)");
   const ops = main.slice(main.indexOf("const FC_OPS"), main.indexOf(" * THE ONE NATIVE GRANT"));
   assert.ok(!/setFcGrant|fcGrant:/.test(ops.replace(/fcGuardian|fcRevoke/g, "")), "no screen op writes the grant directly");
 });
@@ -735,4 +736,14 @@ test("M4: a stake list over 5,000 rows skips detection, but known rows are still
   assert.equal((await e.status()).tooMany, true);
   assert.equal(e.activity().filter(l => /^More than 5,000 stakes/.test(l.msg)).length, 1);
   assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "futurecash.js"), "utf8").includes("st.tooMany"));
+});
+
+test("L1: Revoke during a pass: nothing more is posted after the grant is gone", async () => {
+  const at = []; for (let i = 1; i <= 4; i++) at.push(stake(i, PAY0, { mature: 100 }));
+  let grant = { at: 1, safe: SAFE_MX };
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: at } }, { granted: () => grant, get: async () => ({ status: true, results: [] }) });
+  await e.setSafeExternal(SAFE_MX); e._store().kv.setBool(FC.K.AUTO_COLLECT_SAFE, true); await e.setGuardian(true);
+  node.n.answer.txnpost = async () => { grant = null; return undefined; };   // the user takes it back while the first post is out
+  node.sent.length = 0; await e.pass(150);
+  assert.equal(node.sent.filter(c => /^txnpost/.test(c)).length, 1, "the post under way ends; no other starts");
 });

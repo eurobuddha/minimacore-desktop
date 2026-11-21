@@ -780,6 +780,7 @@ function create(o) {
       if (!bareSafe && !toSweep) continue;   // can't act safely yet: left in the contract, where it is not at risk
       if (!aboveFloor(row.tokenid, row.amount)) continue;   // dust, or a token: left for Collect by hand (it is safe in the contract)
       if (parts(row.coinid, row.payout, row.amount, row.tokenid)) continue;   // malformed: never claimed, never a post slot
+      if (!running()) return;   // taken back (Revoke) or stopped while this pass ran: nothing more is posted (review L1)
       if (budget.collects-- <= 0) return;
       if (!store.claimForPost(row.coinid, bareSafe ? S.COLLECT_POSTED_SAFE : S.COLLECT_POSTED, t)) continue;
       const res = await collectTx(row.coinid, row.payout, row.amount, row.tokenid, sets);
@@ -831,6 +832,7 @@ function create(o) {
       const key = await signKeyFor(row.address);
       if (!owns(sets, row.address) || !key) { activity("error", "Can't sweep: no signing key for this address on this node | coin:" + row.coinid + " | on:" + row.address); continue; }
       if (!signsLeft(row.address)) continue;   // this address's daily limit of unattended signatures (classic keys)
+      if (!running()) return;   // taken back (Revoke) or stopped while this pass ran: nothing more is signed (review L1)
       if (budget.sweeps-- <= 0) return;
       if (!store.claimSweepForPost(row.coinid, t)) continue;
       const res = await sweepTx(row.coinid, row.address, safe, row.amount, row.tokenid, key, sets);
