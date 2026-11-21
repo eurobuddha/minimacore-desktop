@@ -71,4 +71,11 @@ function forFile(text, secret) {
   return String(text == null ? "" : text).slice(-SAVE_MAX).split(/\r?\n/).map(l => scrub(redact(l), secret)).join("\n") + "\n";
 }
 
-module.exports = { createNodeLog, DEFAULT_MAX_BYTES, forFile, SAVE_MAX, scrub };
+/** What Save to file writes (0.19.221): the node log FILES on disk (node.log.1 then node.log), never text from the window.
+ *  log = createNodeLog's { file, older }. A file that cannot be read is left out. */
+function fileText(log) {
+  let text = "";
+  for (const f of [log && log.older, log && log.file]) { if (!f) continue; try { text += fs.readFileSync(f, "utf8"); } catch (e) { /* not there yet */ } }
+  return text;
+}
+module.exports = { createNodeLog, DEFAULT_MAX_BYTES, forFile, fileText, SAVE_MAX, scrub };

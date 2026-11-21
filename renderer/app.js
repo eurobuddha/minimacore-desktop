@@ -3321,8 +3321,8 @@ async function renderLogs() {
   el("logsFilter").value = logsFilter;
   el("logsFilter").oninput = () => { logsFilter = el("logsFilter").value; paintLogs(); };
   el("logsSave").onclick = async () => {
-    const text = el("logsBox").textContent; if (!text.trim()) return;   // as the phone's Share: nothing to share, nothing happens
-    try { const p = await api.logsSave(text); if (p) toast(t("Saved to {p}", { p: p }), "ok"); } catch (e) { toast(t("Could not save: {e}", { e: ipcError(e) }), "warn"); }
+    // the main process saves the log FILES from disk, scrubbed again (0.19.221): the screen's text is not sent
+    try { const p = await api.logsSave(); if (p) toast(t("Saved to {p}", { p: p }), "ok"); } catch (e) { toast(t("Could not save: {e}", { e: ipcError(e) }), "warn"); }
   };
   paintLogChips();
   if (running && !logsSeeded) { logsSeeded = logsSync({ response: await tryCmd("logs") }); paintLogChips(); }   // what the node logs now

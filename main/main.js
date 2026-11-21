@@ -376,11 +376,12 @@ ipcMain.handle("mcd:inFlight", async (_e, how) => { const w = inflight.inFlight(
 ipcMain.handle("mcd:nodeRestart", async () => { await node.restart(); return node.snapshot(); });
 ipcMain.handle("mcd:nodeLogs", () => node.logs.slice(-800));
 // Logs, "Save to file" (the phone's Share): the text the screen shows, redacted again here, to a file the user chooses.
-ipcMain.handle("mcd:logsSave", async (_e, text) => {
+ipcMain.handle("mcd:logsSave", async () => {   // the log files on disk through the scrubber (0.19.221), never text the window sends
   const d = new Date(), two = (n) => String(n).padStart(2, "0");
   const r = await dialog.showSaveDialog(win, { title: lang.t("Save node log"), defaultPath: "minima-node-log-" + d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) + "-" + two(d.getHours()) + two(d.getMinutes()) + ".txt", filters: [{ name: "Text", extensions: ["txt"] }] });
   if (r.canceled || !r.filePath) return null;
-  fs.writeFileSync(r.filePath, require("./nodelog").forFile(text, config.rpcSecret()), { encoding: "utf8", mode: 0o600 });
+  const nl = require("./nodelog");
+  fs.writeFileSync(r.filePath, nl.forFile(nl.fileText(node.diskLog()), config.rpcSecret()), { encoding: "utf8", mode: 0o600 });
   return r.filePath;
 });
 ipcMain.handle("mcd:portmapStatus", () => portmap.status());

@@ -889,7 +889,7 @@ test("0.19.106: what continues a cut line is not a fresh line: the rest of a lin
 });
 
 // ---- 0.19.121: the one place every log line passes ----
-test("0.19.121: log() takes the RPC secret, seed phrases and bidirectional controls out of every line, before the 400-character cut", () => {
+test("0.19.121: log() takes the RPC secret, seed phrases and bidirectional controls out of every line, which it keeps whole (0.19.221)", () => {
   freshInstall(); const m = manager(true), SECRET = "Zk3_rpc-secret-0123456789abcdefXY", was = m.secret;
   const last = (line) => { m.log(line); return m.logs[m.logs.length - 1]; };
   try {
@@ -897,10 +897,12 @@ test("0.19.121: log() takes the RPC secret, seed phrases and bidirectional contr
     assert.equal(last(SECRET + " at the start"), "••• at the start");
     assert.equal(last("Minima @ 1 : -rpcpassword " + SECRET + " -daemon"), "Minima @ 1 : -rpcpassword ••• -daemon");
     assert.equal(last("at the end " + SECRET), "at the end •••");
-    for (const at of [380, 395, 399, 400]) {   // the secret across the cut: nothing of it is left on either side
+    for (const at of [380, 395, 399, 400]) {   // CHANGED on purpose (0.19.221): no cut any more; the line is whole and the secret gone
       const shown = last("x".repeat(at) + SECRET + " tail");
-      assert.ok(shown.length <= 401 && !shown.includes(SECRET.slice(0, 4)) && !shown.includes(SECRET.slice(-4)), at + ": " + shown.slice(370));
+      assert.equal(shown, "x".repeat(at) + "••• tail", at + ": " + shown.slice(370));
     }
+    const id = "0x" + "AB".repeat(32), long = "coin " + id + " ".repeat(2) + "y".repeat(600) + " " + id;
+    assert.equal(last(long), long, "a long line keeps every id whole (the 400-character cut is gone)");
     assert.equal(last("megammrsync phrase:ONE TWO THREE host:a.example:9001"), "megammrsync phrase:••• host:a.example:9001");
     assert.equal(last("a\u202Eb\u2066c\u200F"), "abc");
     const onDisk = fs.readFileSync(m.diskLog().file, "utf8").split("\n").slice(-20).join("\n");   // this test's lines

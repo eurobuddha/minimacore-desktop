@@ -138,8 +138,22 @@ test("Logs, Save to file: every line is redacted again in the main process; a Pa
   assert.equal(out[3], out[1], "an already redacted line is unchanged");
   assert.ok(!/usual place|secret words/.test(out.join("\n")));
   assert.ok(forFile("x".repeat(SAVE_MAX + 10)).length <= SAVE_MAX + 1);
-  assert.ok(/ipcMain\.handle\("mcd:logsSave"[\s\S]{0,700}dialog\.showSaveDialog\([\s\S]{0,500}require\("\.\/nodelog"\)\.forFile\(text, config\.rpcSecret\(\)\)/.test(mainJs), "the file is written by the main process, after a dialog, from forFile()");
+  assert.ok(/ipcMain\.handle\("mcd:logsSave"[\s\S]{0,700}dialog\.showSaveDialog\([\s\S]{0,500}nl\.forFile\(nl\.fileText\(node\.diskLog\(\)\), config\.rpcSecret\(\)\)/.test(mainJs), "the file is written by the main process, after a dialog, from forFile()");
   assert.ok(/parlonsNotify\.redact\(l\)/.test(R("main/node-manager.js")), "lines are redacted before they reach the view (node-manager, unchanged)");
+});
+test("0.19.221: Save to file writes the node log files from disk (node.log.1, then node.log) through the scrubber, never the window's text", () => {
+  const nl = require("../main/nodelog"), os = require("os"), dir = fs.mkdtempSync(path.join(os.tmpdir(), "logsave-"));
+  try {
+    const log = nl.createNodeLog(dir, { maxBytes: 400 }), id = "0x" + "CD".repeat(32);
+    log.append("first " + id); log.append("x".repeat(200)); log.append("last phrase:\"ONE TWO\" " + id);
+    const text = nl.fileText(log), saved = nl.forFile(text, "");
+    assert.ok(fs.existsSync(log.older), "rotated: two files");
+    assert.ok(text.indexOf("first " + id) < text.indexOf("last "), "the older file first");
+    assert.ok(saved.includes("first " + id) && saved.includes('phrase:"•••"') && !saved.includes("ONE TWO"), "whole ids, the phrase scrubbed again");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  assert.ok(/ipcMain\.handle\("mcd:logsSave", async \(\) =>/.test(mainJs), "the handler takes no text from the window");
+  assert.ok(/logsSave: \(\) => ipcRenderer\.invoke\("mcd:logsSave"\)/.test(R("main/preload.js")));
+  assert.ok(!/out\.push\(a\.length > 60/.test(R("main/node-manager.js")), "start arguments are logged whole");
 });
 
 // ---- Freeze ----

@@ -113,7 +113,7 @@ function redactArgs(args, rpcSecret) {
       out.push(a); if (i + 1 < args.length && !String(args[i + 1]).startsWith("-")) { out.push("•••"); i++; }
       continue;
     }
-    out.push(a.length > 60 ? a.slice(0, 57) + "…" : a);
+    out.push(a);   // whole (0.19.221): an argument can be a path or an id, and a cut one cannot be copied; secrets are redacted above
   }
   let line = out.join(" ");
   if (rpcSecret) line = line.split(rpcSecret).join("•••");
@@ -844,9 +844,9 @@ class NodeManager extends EventEmitter {
       // Redact a seed phrase / private key if the node ever echoes one into an error line (the Web Wallet derives
       // & signs over loopback via `keys genkey phrase:"…"` / `sendfrom … privatekey:0x…`), so they can NEVER end
       // up in the Logs view; and the RPC secret, which the node prints with its start parameters; and the
-      // bidirectional controls (main/nodelog.js scrub). Before the 400-character cut, so no part of one is left.
+      // bidirectional controls (main/nodelog.js scrub). Whole (0.19.221: the 400-character cut is gone; the Logs view wraps).
       l = scrub(l, this.secret);
-      this.logs.push(l.length > 400 ? l.slice(0, 400) + "…" : l);
+      this.logs.push(l);
       // The same redacted line, on disk and untruncated (main/nodelog.js): the RAM ring holds ~800 lines,
       // and the one line that explained a lost swap had rolled out of it long before anyone looked.
       this.diskLog().append(l);
