@@ -383,6 +383,30 @@ complete. miniMall is kept. Nothing is pushed or released without the owner's wo
 | 0.19.238 | review B7 | Chat payments as Mail's; a txid verifies only its first claiming message (payclaims.json) | `chatfiles-test.cjs`, `payverify-test.cjs` |
 | 0.19.239 | review B9 | Vestr: chain state checked before commands, status true each step, unanswered post / lock "may have gone", exact units, whole-hour grace | `inject-test.cjs` |
 | 0.19.240 | review B12 (part) | AtomiX glue: no shortAddr; no-symbol token named by its whole address | `apps-money.test.cjs`, `ethwallet-unit.js` |
+| 0.19.241 | review B8 | miniMall: the same ref from two buyers kept (second under `ref~<buyer id>`), both Unchecked; Retry only behind `unpaid:` with an on-disk `inflight:` mark and the full "Pay …?" review; "I checked my History: it was not sent" | `shop-test`, `shop-store-test`, `apps-money` |
+| 0.19.242 | review B10 | Dexicon service tick sequence number | `dexicon-host` (the guard run alone) |
+| 0.19.243 | review B10 | `quiet()` says whether it went quiet, holds released only then; AtomiX store move owed (init throws until done) | `engine-abort` |
+| 0.19.244 | review B10 | AtomiX network list https only, no credentials, no GET redirects; custom endpoint with credentials refused, a saved one dropped | `atomix-unit` |
+| 0.19.245 | review B10 | `sqlshim.js`: 0-byte file fresh, non-SQLite refused, no 0-byte export, debounced save synced, file and folder fsync, disposed never writes | `atomix-unit` |
+| 0.19.246 | review B10 | PandaPools `swap` / `createPool` through `queuedAction`; MxUSD only; decimals from the node | `engine-abort` |
+| 0.19.247 | released 0.18.195 / 0.18.218 | miniMall older-store migration (kept verdict; old figure without coin ids counted again) | `shop-migrate-test` (new, in `test:apps`) |
+| 0.19.248 | released 0.18.190 | dust coins counted together once they cover what is still due | `shop-store-test` |
+| 0.19.249 | released 0.18.213 (adapted) | a failed read at any payout address advances nothing; Inbox says what was not read | `shop-store-test` |
+| 0.19.250 | review open item | an empty quoted value no longer hides the next parameter (namesText, paramsText) | `seedgate-test`, `wallet-money-test` |
+| 0.19.251 | released 0.18.198 | Touch ID refusal: open the lid / connect the keyboard first | `seedgate-test` |
+| 0.19.252 | released 0.18.214 | `masked`: an unquoted secret ends at a quote | `seedgate-test` |
+| 0.19.253 | released 0.18.200 (rest) | node output UTF-8 decoded across chunks | `keymode-test` |
+| 0.19.254 | released 0.18.199 | Web Wallet: the key-use service unreachable said plainly | `apps-money` |
+| 0.19.255 | released 0.18.215 + review open item | one damaged key-use entry isolated; re-confirmed only at or above the chain's figure, checked in main | `inject-test` |
+| 0.19.256 | review C4 | AtomiX `fmtPx` / `cut` truncate; rung prices never round up | `dexicon-ax.test` |
+| 0.19.257 | review C4 | every node restart / switch path shows Shutdown's in-flight warning | `shell-test` |
+| 0.19.258 | review C4 | `#tokDetail`, action sheet, prompt, pay result, `#histDetail`, QR scanner modal (`modalize`) | `shell-test` |
+| 0.19.259 | review C4 | "Copy the listed rows" formula guard; Future Cash Collect names the real unit | `shell-test` |
+| 0.19.260 | review B12 | ETH balance unread = null ("Not read yet"); temp+rename ETH files; "Need … or more" cut; no RPC reply body | `atomix-unit` |
+| 0.19.261 | review B12 | Mail never learns an older pay address over a newer one | `mail-test` |
+| 0.19.262 | review B12 | P2P Chance: the restore gate and Quit read the settle loop's count on every install | `restore-test` |
+| 0.19.263 | review C5 | Web Wallet send guard, whole identifiers in the Mail header and Send picker, four fragments translated, chat Escape listener | `shell-test` |
+| 0.19.264 | review B11 | digest manifests for `main/atomix/` and `main/casino/` (`scripts/vendored-manifest.cjs`), PandaPools stray check, CI step | the manifests themselves |
 
 Version line (19 Nov 2026): the released main line owns 0.18.65 to 0.18.69 (its Mail work). This branch reused those numbers, up to 0.18.148, for unpushed commits; they are not renumbered. `v0.18.69` was merged at 0.19.0 and every later change on this branch is 0.19.x.
 
@@ -559,16 +583,16 @@ Source: the released desktop's `security/backport-2026-11-20` (`84d946b48e57889e
 - **Not changed on purpose:** command text the vendored engines build and only their glue reads: `main/atomix.js` `AX_PUBLISH_SEND` (its own publish send), `main/casino.js` `refused()` (settle-only engine's covenant guard), `main/dexicon.js` `buildMds` post count, `main/pandapools.js` failure verb (a log). The Terminal's send note (`termSendNote`) still reads `/^send\s/`: it is a note, decides nothing, and is shown after main's answer.
 - **The gate under load:** with the machine's load above 40, `dexicon-host.test.cjs` "Dexicon's lanes" (a 400 ms network limit) and the timing tests of `reserve-test.cjs` failed once each and passed on the next run; they pass alone.
 
-### Review fixes of 21 Nov 2026 (0.19.218 to 0.19.240): not done, owed
+### Review fixes of 21 Nov 2026 (0.19.218 to 0.19.264): what is still owed
 
-From the three whole-branch reviews at 779ab08. Done: A1 to A9, B1 to B7, B9, C1 to C3, the Terminal half of C4, part of B12, and the released follow-ups 0.18.189, 0.18.191, 0.18.192, 0.18.194, 0.18.196, 0.18.197 (partly, earlier) and 0.18.202's repeated-parameter order. Owed:
-- **B8** miniMall: the same ref from two senders kept as two Unchecked orders; `retryPayment` behind `unpaid:` with a persisted in-flight flag and the full "Pay …?" review.
-- **B10** Dexicon tick sequence number; AtomiX failed store move = owed flag; `quiet()` result before releasing reservations; PandaPools `swap` / `createPool` through `queuedAction`, market-fed token, decimals from the node; AtomiX https-only RPC without redirects; `sqlshim.js` empty-file and fsync.
-- **B11** committed digest manifests for `main/atomix/` and `main/casino/`, stray check for PandaPools.
-- **B12** rest: mail pay-address backfill order, ETH Wallet balance error shown, casino settle loop and the engines' hold, `rpc.js` parse error without the reply body, temp+rename for `ethtokens.json` / `ethrpc.json`, "Need ≈" truncation, "mxUSDT" in comments.
-- **C4** rest: Future Cash Collect unit, AtomiX `fmtPx` / `cut` / rung truncation, in-flight warning on every node restart path, overlay modality (`#tokDetail`, `showActionSheet`, `showPrompt`, `showPayResult`, `#histDetail`, `scanQR`), the "Copy the listed rows" formula guard.
-- **C5** nits (Web Wallet send guard, `.mm-cs` / `.send-tok` ellipses, the listed untranslated fragments, the chat dialog's Escape listener).
-- Released follow-ups not ported: 0.18.190 (dust coins summed once they cover what is still due), 0.18.195 (legacy `shop.json` order migration: this branch's store layout differs from the released one and needs its own migration), 0.18.198 (lid sentence), 0.18.199 to 0.18.201.
+From the three whole-branch reviews at 779ab08. Done: A1 to A9, B1 to B12, C1 to C5 (0.19.218 to 0.19.264, rows above), the released follow-ups 0.18.189 to 0.18.218 where the same code exists here, and the two items the released review left open (0.19.250, 0.19.255). Still owed:
+- **Released 0.18.201** (`mcd:cmd`'s policy as one tested function): not ported. Moving the checks out of `main.js` breaks about eight tests that pin those sentences to `main.js` (restore-test, seedgate-test, wallet-money-test, mainsaid-test MAIN_* codes); a patch and its test are drafted, the test changes are not.
+- **Released 0.18.213, the stepped backfill**: not ported. This branch reads a gap of up to 4096 blocks in one pass (0.19.232); what is older is now kept and said on the Inbox (0.19.249), never read.
+- **`main/atomix/lib/ui.js`**: an old copy of the donor's page script, loaded by nothing, no longer equal to the donor. Named in `scripts/vendored-manifest.cjs` so the stray check passes; deleting it is the owner's call.
+- **C5 fragments**: the four the screens still built in English are translated (0.19.263); the rest of the review's list was already wrapped. A sweep of every screen in the dev preview is still owed.
+- **AtomiX CSV price column**: `renderer/dexicon-ax.js` `csv()` still writes the price as `toPrecision(8)` (a rounded ratio). The file feeds `tools/dexHistory` (its columns are parsed by name), so it was left as it is; cutting it is owed with a check of the ledger.
+- **Tests that are source checks**: the Dexicon tick guard (0.19.242) is exercised by extracting `tick` from the file, the restart paths and the overlays (0.19.257, 0.19.258) by source checks. A run in the app is owed (never run here).
+- **The gate under load**: `dexicon-host.test.cjs` "Dexicon's lanes" (a 400 ms limit) failed on the full run and alone several times while other test runs shared the machine; it passed on the next run each time.
 
 Notes: B1's intents cover the on-chain trade, the on-chain edit and the relay list; the market maker's own dialogs are hosted from the page, so its `mm_config` (enabled) and its wake-up are allowed only after a main-process question. B2's page-only prefix is applied by the bridge (the vendored page is not edited): the page keeps its ids, the node sees `pgx` + id. A3: a first run that tried a restore and then switches to New Wallet in the same launch must restart the app to see the new seed.
 
