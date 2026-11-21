@@ -125,3 +125,22 @@ test("setup screen: the form stays until the node really stops; a refused restar
   assert.ok(/finally \{ setupRestarting = false; \}/.test(branch));
   assert.ok(/if \(setupRestarting && s\.state !== "running" && !el\("startStat"\)\) showStarting\(\);/.test(app), "the progress replaces the form once the node is really stopping");
 });
+
+// ---- 0.18.253: one question, one stop: a second request while the first is asked about, or let go and not stopped yet, is refused ----
+test("stopGuard is single-flight: two requests at once show one question and give one stop; a stop that happened ends the hold", async () => {
+  let t = 1000, asks = 0, answer = null, running = true;
+  const busy = { atomix: { ready: true, swaps: ["0xAB"] }, pools: [] };
+  const waitAsk = async () => { for (let k = 0; k < 300 && !answer; k++) await new Promise(r => setTimeout(r, 1)); assert.ok(answer, "a question was asked"); };
+  const g = S.stopGuard({ running: () => running, gather: async () => busy, log: () => {}, now: () => t, ask: () => { asks++; return new Promise(r => { answer = r; }); } });
+  const p1 = g.pass(), p2 = g.pass();
+  assert.equal(await p2, "busy", "the second while the first question is open"); await waitAsk();
+  answer(true); assert.equal(await p1, true); assert.equal(asks, 1, "one question");
+  assert.equal(await g.pass(), "busy", "let go, the node not stopped yet: no second stop");
+  g.seen("stopping"); running = true; answer = null;
+  const p3 = g.pass(); await waitAsk(); answer(false); assert.equal(await p3, false, "after the stop happened a new request is asked again"); assert.equal(asks, 2);
+  t += 31000; answer = null; const p4 = g.pass(); await waitAsk(); answer(true); assert.equal(await p4, true);
+  t += 31000; answer = null; const p5 = g.pass(); await waitAsk(); answer(false); await p5; assert.equal(asks, 4, "the hold runs out");
+  running = false; assert.equal(await g.pass(), true, "a node that is not running is never held");
+  const main = rd("main/main.js");
+  assert.ok(/if \(r === "busy"\) throw new Error\("The node is already being stopped or restarted, or the question about it is still open\. Nothing more was done\."\);/.test(main) && /node\.on\("status", \(s\) => stopGuard\.seen\(s && s\.state\)\);/.test(main), "main says it, and tells the guard when the node stopped");
+});

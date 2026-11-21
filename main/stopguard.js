@@ -65,14 +65,24 @@ function inFlight(work, nowMs) {
 }
 
 /**
- * The guard. d = { running(), gather() → work, ask(w) → true to stop, log(line), now(), waitMs }. pass() → true: go on.
+ * The guard. d = { running(), gather() → work, ask(w) → true to stop, log(line), now(), waitMs }. pass() → true: go on; false: the
+ * user kept it running; "busy": another stop is being asked about or was let go and the node has not stopped yet (0.18.253: two
+ * requests at once showed two questions and gave two stops). seen(state): the node's state, so a stop that happened ends the hold.
  * With the node not running nothing is asked; with nothing in flight and everything checked nothing is asked.
  */
+const HOLD_MS = 30000;
 function stopGuard(d) {
   const now = d.now || Date.now;
+  let asking = false, wentAt = 0;
   return {
+    seen(state) { if (state !== "running") wentAt = 0; },
     async pass() {
       if (!d.running()) return true;
+      if (asking || (wentAt && now() - wentAt < HOLD_MS)) return "busy";
+      asking = true;
+      try { const go = await this.ask(); if (go) wentAt = now(); return go; } finally { asking = false; }
+    },
+    async ask() {
       let work = null;
       try { work = await Promise.race([d.gather(), new Promise(r => setTimeout(() => r(null), d.waitMs || 5000))]); } catch (e) { work = null; }
       const w = inFlight(work || {}, now());

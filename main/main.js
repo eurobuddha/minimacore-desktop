@@ -171,7 +171,12 @@ const stopGuard = stopguard.stopGuard({ running: () => node.state === "running",
     const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: ["Stop the node anyway", "Keep it running"], defaultId: 1, cancelId: 1, noLink: true, title: "minimaCore", message: w.title, detail: w.message });
     return r.response === 0;
   } });
-async function mayStop() { if (!await stopGuard.pass()) throw new Error("The node keeps running: nothing was stopped."); }
+async function mayStop() {
+  const r = await stopGuard.pass();
+  if (r === "busy") throw new Error("The node is already being stopped or restarted, or the question about it is still open. Nothing more was done.");   // one question, one stop (0.18.253)
+  if (!r) throw new Error("The node keeps running: nothing was stopped.");
+}
+node.on("status", (s) => stopGuard.seen(s && s.state));
 /** A config patch from the window, with what Settings' save does after it (Casino loop, login item). */
 function saveConfigPatch(patch) {
   const c = config.save(patch || {});
