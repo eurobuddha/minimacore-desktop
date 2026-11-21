@@ -677,6 +677,10 @@ ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
 ipcMain.handle("mcd:wwRead", (_e, address, nodeSeed) => webwallet.read(address, nodeSeed));
 ipcMain.handle("mcd:wwKeyuses", (_e, address) => webwallet.keyusesInfo(address));
 ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(address, count));
+// the chain's key-use figure, read here with the same pinned, no-redirect, bounded fetch as the window's audit (0.18.262): a damaged
+// count is confirmed again only at or above it
+const keyuses = require("./keyuses");
+webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
 ipcMain.handle("mcd:wwEnableMegammr", async () => {
   return stopping(async () => {   // main's own question when anything is in flight (0.18.223)

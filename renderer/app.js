@@ -804,7 +804,7 @@ function renderWwWallet(body) {
         return;
       }
       try { wwKu = await api.wwAckKeyuses(a.address, n); renderWebWallet(); toast("Key-uses confirmed: " + n, "ok"); }
-      catch (e) { toast("Could not save key-uses", "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; } }
+      catch (e) { toast(ipcMsg(e) || "Could not save key-uses", "err"); if (btn.isConnected) { btn.disabled = false; btn.textContent = "Confirm"; } }   // main's reason (0.18.262: below the chain's figure, or the figure unread)
     });
     el("wwKuCheck").addEventListener("click", async () => {
       const btn = el("wwKuCheck"); btn.disabled = true; btn.textContent = "Checking…";

@@ -105,12 +105,28 @@ function entryFor(store, addr) {
   return entryOk(store[addr]) ? store[addr] : { keyuses: 0, ack: false, damaged: true };   // unknown: must be confirmed again
 }
 
-/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. */
-function ackKeyuses(address, count) {
+// The chain's figure for a key (main.js: main/keyuses.js onchainUses over the pinned, no-redirect fetch, 0.18.262, as Pandamonium
+// Desktop 0.19.255): a whole number, or null when it was not read. The public key of each address this session derived, so main
+// asks for the right key itself and never takes one from the window.
+let onchainOf = async () => null;
+const derivedKeys = new Map();
+function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
+const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
+
+/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. A damaged entry is
+ *  unknown: its new figure must be at least what the chain shows, checked HERE, in main (0.18.262; the floor was in the window
+ *  only), and it is refused while that figure cannot be read. */
+async function ackKeyuses(address, count) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count.trim()) ? Number(count.trim()) : NaN);
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("The key uses must be a whole number of at least 0.");   // "1e309" was Infinity, stored as null, read back as 0 (0.18.203)
-  const store = loadStore();
+  if (entryFor(loadStore(), address).damaged) {
+    const pk = derivedKeys.get(String(address).toLowerCase());
+    let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
+    if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(DAMAGED_UNREAD);
+    if (n < chain) throw new Error("The chain shows " + chain + " uses of this key. Confirm at least that many. Nothing was saved.");
+  }
+  const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
   e.keyuses = e.damaged ? n : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown
   delete e.damaged; e.ack = true;
@@ -183,6 +199,7 @@ async function derive(seed) {
   const d = resp(r);
   if (!d || !d.address) throw new Error("Could not derive wallet from seed");
   const isNodeSeed = await isNodeOwnSeed(d.publickey, seed);
+  if (/^0x[0-9A-Fa-f]{1,64}$/.test(String(d.address)) && d.publickey) derivedKeys.set(String(d.address).toLowerCase(), String(d.publickey));   // public material only (0.18.262)
   return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script, isNodeSeed };
 }
 
@@ -287,7 +304,7 @@ async function send(opts) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = {
+module.exports = { setOnchain,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status,
   _setRunner: (fn) => { runner0 = fn; },

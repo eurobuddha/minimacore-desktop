@@ -70,7 +70,7 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
     : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
-  ww.ackKeyuses(FROM, 0);
+  await ww.ackKeyuses(FROM, 0);
   const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
   assert.equal(r.ok, true);
   const line = ww.status().log.slice(-1)[0];
@@ -97,11 +97,11 @@ test("Web Wallet counters: only a missing file is a fresh start; a damaged or un
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), A = "0x" + "A1".repeat(32);
   try { fs.rmSync(file, { force: true }); } catch (e) {}
   assert.deepEqual(ww.keyusesInfo(A), { address: A, keyuses: 0, ack: false }, "no file yet: a fresh start");
-  for (const bad of ["1e309", "Infinity", "-1", "1.5", "", null, -1, 1.5, Infinity, NaN, "12abc"]) assert.throws(() => ww.ackKeyuses(A, bad), /whole number of at least 0/, String(bad));
-  assert.equal(ww.ackKeyuses(A, "7").keyuses, 7); assert.equal(ww.ackKeyuses(A, 3).keyuses, 7, "never lowered");
+  for (const bad of ["1e309", "Infinity", "-1", "1.5", "", null, -1, 1.5, Infinity, NaN, "12abc"]) await assert.rejects(ww.ackKeyuses(A, bad), /whole number of at least 0/, String(bad));   // async since 0.18.262
+  assert.equal((await ww.ackKeyuses(A, "7")).keyuses, 7); assert.equal((await ww.ackKeyuses(A, 3)).keyuses, 7, "never lowered");
   const good = fs.readFileSync(file, "utf8");
   fs.writeFileSync(file, "{ not json");
-  assert.throws(() => ww.keyusesInfo(A), /are damaged\. Nothing was signed/); assert.throws(() => ww.ackKeyuses(A, 9), /damaged/);
+  assert.throws(() => ww.keyusesInfo(A), /are damaged\. Nothing was signed/); await assert.rejects(ww.ackKeyuses(A, 9), /damaged/);
   assert.equal(fs.readFileSync(file, "utf8"), "{ not json", "a damaged file is never overwritten");
   // CHANGED on purpose (0.18.215): one damaged entry refuses only that address, as unknown (must be confirmed again)
   for (const bad of [-3, null]) { fs.writeFileSync(file, JSON.stringify({ [A]: { keyuses: bad, ack: true } })); assert.deepEqual(ww.keyusesInfo(A), { address: A, keyuses: 0, ack: false, damaged: true }, String(bad)); }
@@ -122,7 +122,7 @@ test("Web Wallet counters: only a missing file is a fresh start; a damaged or un
 // ---- 0.18.204: "is this the node's own wallet?" never answers no on a failed read ----
 test("Web Wallet: a failed key list or a locked vault refuses the send instead of taking the foreign path", async () => {
   const ww = require("../main/webwallet"), FROM = "0x" + "A2".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "B2".repeat(32);
-  ww.ackKeyuses(FROM, 0);
+  await ww.ackKeyuses(FROM, 0);
   const rig2 = (keys, vault) => { const sent = []; ww._setRunner(async (c) => { sent.push(c.split(" ")[0] + " " + (c.split(" ")[1] || ""));
     return c === "status" ? { status: true, response: { megammr: true } }
     : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
@@ -194,7 +194,39 @@ test("Web Wallet: a locked vault with a readable key list is a foreign seed; one
   await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /saved key-use count is damaged[\s\S]*Nothing was sent/);
   assert.ok(!sent.some(c => c.startsWith("sendfrom")));
   from = B; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).keyuse, 4, "another address still sends");
-  assert.equal(ww.ackKeyuses(A, 2).keyuses, 2, "confirmed again: the new figure (the screen asks for at least the chain's)");
+  // CHANGED on purpose (0.18.262): a damaged entry is confirmed again only at or above the chain's figure, read in main
+  ww.setOnchain(async () => 2); assert.equal((await ww.ackKeyuses(A, 2)).keyuses, 2, "confirmed again at the chain's figure"); ww.setOnchain(async () => null);
   from = A; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).keyuse, 2);
   assert.equal(ww.keyusesInfo(B).keyuses, 5);
+});
+
+// ---- 0.18.262 (as Pandamonium Desktop 0.19.255): a damaged entry is confirmed again only at or above the chain's figure, read in MAIN ----
+test("Web Wallet: a damaged key-use entry is confirmed again only at or above the chain's figure, read in main for the key main derived, and refused while unread", async () => {
+  const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
+  const FROM = "0x" + "A5".repeat(32), OTHER = "0x" + "A6".repeat(32), PK = "0x" + "B5".repeat(32);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C5".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "x", ack: true }, [OTHER]: { keyuses: 5, ack: true } }));
+  await ww.derive("alpha beta");   // the session's key for FROM is known to main
+  let chain = null; const asked = []; ww.setOnchain(async (pk) => { asked.push(pk); return chain; });
+  await assert.rejects(ww.ackKeyuses(FROM, 50), /chain's figure for this key could not be read/, "unread: refused, never taken as 0");
+  assert.deepEqual(asked, [PK], "the chain is asked for this address's own key, the one main derived");
+  chain = 12; await assert.rejects(ww.ackKeyuses(FROM, 3), /The chain shows 12 uses of this key\. Confirm at least that many/);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, "x", "nothing saved by a refusal");
+  assert.deepEqual(await ww.ackKeyuses(FROM, 12), { address: FROM, keyuses: 12, ack: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8"))[OTHER], { keyuses: 5, ack: true });
+  asked.length = 0; await ww.ackKeyuses(FROM, 2); assert.equal(ww.keyusesInfo(FROM).keyuses, 12, "a sound entry never goes down"); assert.deepEqual(asked, [], "and needs no chain read");
+  ww.setOnchain(async () => null);
+  assert.ok(rd("main/main.js").includes("webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));"), "main reads the chain with the same pinned fetch");
+});
+test("keyuses.onchainUses: the larger of spend blocks and spent coins for THIS key; null for no answer, a status that is not true, an error row, another key's row, a count that is not whole", async () => {
+  const K = require("../main/keyuses"), PK = "0x" + "AB".repeat(32), urls = [];
+  const get = (reply) => async (url) => { urls.push(url); if (reply instanceof Error) throw reply; return reply; };
+  assert.equal(await K.onchainUses(PK, get({ status: true, keys: [{ publickey: PK.toLowerCase(), spend_blocks: 3, spent_coins: "7" }] })), 7);
+  assert.equal(urls[0], "https://eurobuddha.com/keyaudit?keys=" + encodeURIComponent(PK), "the pinned host, this key only");
+  for (const r of [null, new Error("timeout"), { status: false, keys: [] }, { keys: [{ publickey: PK, spend_blocks: 1, spent_coins: 1 }] }, { status: true, keys: [{ publickey: PK, error: "x", spend_blocks: 1, spent_coins: 1 }] },
+    { status: true, keys: [{ publickey: "0x" + "CD".repeat(32), spend_blocks: 1, spent_coins: 1 }] }, { status: true, keys: [{ publickey: PK, spend_blocks: 1.5, spent_coins: 1 }] }, { status: true, keys: [{ publickey: PK, spend_blocks: -1, spent_coins: 1 }] }])
+    assert.equal(await K.onchainUses(PK, get(r)), null, JSON.stringify(r && r.message || r));
+  assert.equal(await K.onchainUses("0x12", get({ status: true, keys: [] })), null, "a malformed key is never asked about");
 });
