@@ -64,6 +64,34 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
     }
   });
 
+  ok("net allowlist: https only, no credentials, and the engine's GETs follow no redirect (0.18.210)", () => {
+    const m = require("../main/atomix");
+    assert.equal(m._allowedUrl("https://ethereum-rpc.publicnode.com/"), true);
+    assert.equal(m._allowedUrl("https://api.mexc.com/api/v3/ticker/price?symbol=MINIMAUSDT"), true);
+    for (const u of ["http://ethereum-rpc.publicnode.com/", "ws://ethereum-rpc.publicnode.com/", "https://user:pw@ethereum-rpc.publicnode.com/", "https://evil.example/", "https://ethereum-rpc.publicnode.com.evil.example/"]) assert.equal(m._allowedUrl(u), false, u);
+    const src = fs.readFileSync(path.join(__dirname, "..", "main", "atomix.js"), "utf8");
+    assert.ok(/netfetch\.fetchJson\(String\(url\), \{ noRedirect: true \}\)/.test(src), "MDS.net.GET passes noRedirect");
+  });
+
+  await okA("the database file: empty or not SQLite is refused, a missing one is fresh, saves are synced (0.18.210)", async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "axsql2-")), f = path.join(d, "x.sqlite");
+    fs.writeFileSync(f, ""); await assert.rejects(makeSqlShim(f), /is empty or damaged/); assert.equal(fs.readFileSync(f).length, 0, "left as it is");
+    fs.writeFileSync(f, "x".repeat(4096)); await assert.rejects(makeSqlShim(f), /is empty or damaged/);
+    fs.rmSync(f); const s2 = await makeSqlShim(f); s2.sql("CREATE TABLE t (a int)"); s2.sql("INSERT INTO t VALUES (7)"); assert.equal(s2.flush(), true);
+    const s3 = await makeSqlShim(f); assert.equal(s3.sql("SELECT a FROM t").rows[0].A, 7, "a real file reopens");
+    const src = fs.readFileSync(path.join(__dirname, "..", "main", "pandapools", "sqlshim.js"), "utf8");
+    assert.ok(/writeTimer = null;\s*flushChecked\(\);/.test(src), "the debounced save is the synced one");
+  });
+  ok("a wallet replacement moves the old swap records aside, never deletes them (0.18.210)", () => {
+    const m = require("../main/atomix"), d = fs.mkdtempSync(path.join(os.tmpdir(), "axinv-"));
+    m._setDataDir(d); fs.writeFileSync(path.join(d, "atomix.sqlite"), "old swaps");
+    m._setRunner(async () => { throw new Error("no node in this check"); });   // the restart after invalidate reaches no node
+    try { m.invalidate(); } finally { m.stopLoop(); }
+    const kept = fs.readdirSync(d).filter(n => n.startsWith("atomix.sqlite.replaced-"));
+    assert.equal(kept.length, 1, "kept aside"); assert.equal(fs.readFileSync(path.join(d, kept[0]), "utf8"), "old swaps");
+    assert.ok(!fs.existsSync(path.join(d, "atomix.sqlite")), "the new wallet starts fresh");
+  });
+
   // ---- 3. frozen-quote replay with a FUNDED mock node ----
   // Not hermetic: the crypto-bearing commands (vault/seedrandom/newscript/getaddress) go to a REAL node so the identity
   // and covenant derive for real. Until 0.18.161 that node was whatever docker container carried a fixed name; on the

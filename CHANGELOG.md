@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.210] — AtomiX: https-only network list, swap records kept, database files checked
+
+- The AtomiX engine's outbound list checked only the host name, so a plain `http://` url to a listed ETH RPC host went out in clear text (anyone on the path could answer for the chain); it now requires https and no credentials in the url, and the engine's GETs follow no redirect (the list was checked on the first url only). A wallet replacement deleted `atomix.sqlite`, with the secrets and coin ids a claim or refund of a swap still in flight needs; it is now moved aside (`atomix.sqlite.replaced-<time>`) and logged. The SQLite shim (AtomiX and PandaPools, Desktop-only, not in the vendored manifest) opened an empty file as a new empty database, so the records read as none and the next save overwrote them; an empty or non-SQLite file is now refused and left as it is, and every save is synced to disk before the rename. Tests: `scripts/atomix-unit.js`.
+
 ## [0.18.209] — Vestr: state read strictly; no answer is not a failure
 
 - A contract coin's state is anyone's (any wallet can make a coin at the shared covenant naming this one) and its values went into the collect transaction's commands as they were. A coin is now shown or collected only when the beneficiary is a whole 0x address, the amounts and blocks are plain numbers and every port is a bare value; others are left out and logged. The beneficiary typed for a new vest must be an address before it goes to `checkaddress`, and the reply must say true with a whole 0x address; the release cadence is a whole number of hours ("1e3", "-24" and "2.5" were taken). Every collect step must answer status true (an empty reply counted as success); a `txnpost` or lock `send` with no answer is reported as "may have been sent" rather than failed, so it is not repeated; the collected figure is exact decimal arithmetic. Test: `scripts/inject-test.cjs`.

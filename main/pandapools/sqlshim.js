@@ -21,7 +21,12 @@ async function makeSqlShim(filePath) {
   }
   const SQL = await sqlReady;
   let db;
-  try { db = new SQL.Database(new Uint8Array(fs.readFileSync(filePath)));
+  try { const bytes = fs.readFileSync(filePath);
+    // A file that is there but empty, or not an SQLite file, is refused (0.18.210): sql.js opened a zero-byte file as a
+    // new empty database, so the swap and pool records (secrets a refund or claim needs) read as none and the next save
+    // overwrote them. Only a missing file is a fresh start.
+    if (bytes.length < 100 || bytes.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") throw Object.assign(new Error("The database " + filePath + " is empty or damaged. Nothing was changed; keep that file and ask for help rather than deleting it."), { code: "EBADDB" });
+    db = new SQL.Database(new Uint8Array(bytes));
     const check=db.exec("PRAGMA quick_check");
     if(!check.length||check[0].values.some(row=>row[0]!=="ok"))throw new Error("Pool database integrity check failed.");
   }
@@ -32,12 +37,7 @@ async function makeSqlShim(filePath) {
     if (writeTimer) return;
     writeTimer = setTimeout(() => {
       writeTimer = null;
-      try {
-        const dir = path.dirname(filePath); fs.mkdirSync(dir, { recursive: true });
-        const tmp = filePath + ".tmp";
-        fs.writeFileSync(tmp, Buffer.from(db.export()));
-        fs.renameSync(tmp, filePath);
-      } catch (e) { /* retried on the next write */ }
+      flushChecked();   // written, synced to disk, then renamed (0.18.210: no sync, so a power cut could leave an empty file); retried on the next write
     }, 400);
   }
 
@@ -95,6 +95,7 @@ async function makeSqlShim(filePath) {
       fd = fs.openSync(tmp, "w", 0o600);
       fs.writeFileSync(fd, Buffer.from(db.export())); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
       fs.renameSync(tmp, filePath);
+      try { const dfd = fs.openSync(path.dirname(filePath), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) { /* the rename is still atomic */ }
       return true;
     } catch (e) { if (fd !== undefined) try { fs.closeSync(fd); } catch (_) {} return false; }
   }

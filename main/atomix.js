@@ -33,7 +33,9 @@ const NET_HOSTS = new Set([
 function allowedUrl(u) {
   // NET_HOSTS = the built-in ETH RPCs + MEXC. ethUserHosts = a user-set custom RPC host, already SSRF-validated
   // (https + non-private) at the point it was saved — never a raw user string reaching here unchecked.
-  try { const h = new URL(String(u)).hostname; return NET_HOSTS.has(h) || ethUserHosts.has(h); } catch (e) { return false; }
+  // https only, no credentials in the url (0.18.210): a plain http:// url to a listed host went out in clear text, where
+  // anyone on the path could answer for the ETH chain (a fake receipt or balance)
+  try { const x = new URL(String(u)); return x.protocol === "https:" && !x.username && !x.password && (NET_HOSTS.has(x.hostname) || ethUserHosts.has(x.hostname)); } catch (e) { return false; }
 }
 
 let ctx = null;               // the vm context (ctx.AX / ctx.READY / ctx.CTX)
@@ -172,7 +174,8 @@ function buildMds() {
     net: {
       GET(url, cb) {
         if (!allowedUrl(url)) return cb({});
-        netfetch.fetchJson(String(url)).then(obj => cb(obj == null ? {} : { response: obj }), () => cb({}));
+        // no redirects (0.18.210): the list is checked on the first url only, and a redirect went to any host
+        netfetch.fetchJson(String(url), { noRedirect: true }).then(obj => cb(obj == null ? {} : { response: obj }), () => cb({}));
       },
       POST(url, data, cb) {
         if (!allowedUrl(url)) return cb({});
@@ -240,7 +243,11 @@ function invalidate() {
   generation++;              // disown any in-flight init (old seed) BEFORE we tear down
   stopLoop();
   flush();
-  try { fs.unlinkSync(path.join(dir(), "atomix.sqlite")); } catch (e) {}
+  // The old wallet's swap records are moved aside, never deleted (0.18.210): they hold the secrets and coin ids a claim or
+  // refund of a swap still in flight needs (the same seed restored again can use them; the file is kept either way).
+  const db = path.join(dir(), "atomix.sqlite");
+  try { if (fs.existsSync(db)) { const kept = db + ".replaced-" + new Date().toISOString().replace(/[:.]/g, "-"); fs.renameSync(db, kept); log("the previous wallet's swap records were kept at " + kept); } }
+  catch (e) { log("could not move the previous wallet's swap records aside: " + (e && e.message)); }
   ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; lastTip = null;
   vmJsonParse = null; lastQuotes = {};   // realm-bound helpers + frozen quotes die with the old context
   ethRpcAppliedUrl = null;               // the new boot builds a fresh ctx.RPC → re-apply any saved custom RPC to it
@@ -1143,5 +1150,6 @@ module.exports = {
     ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,
     ethTokensLoad, ethRpcLoad, ETH_FALLBACK_GP, ETH_FEE_MULT, ETH_MAX_GAS_PRICE },
   // test-only: reset the module-level ETH caches so a harness can drive a fresh userData dir per case
-  _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethUserHosts.clear(); }
+  _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethUserHosts.clear(); },
+  _allowedUrl: allowedUrl
 };
