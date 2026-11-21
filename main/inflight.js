@@ -112,6 +112,35 @@ async function decideQuit(d) {
 }
 
 /**
+ * One guard in MAIN in front of every node stop or restart (0.19.268): the tray's Restart node, Shutdown, Restart, the node
+ * kind, Reclaim, the Web Wallet's MegaMMR switch, a Chat backup restore and a Terminal resync. The checks were in the window
+ * only, and four paths had none. With the node running and anything in flight or not checkable (inFlight's any), a stop goes
+ * on only with a one-time acknowledgement main issued with the warning the window showed (issue(), from mcd:inFlight; used
+ * once, for ACK_MS), or after main's own question (d.ask(w), a message box). d = { running(), gather(), ask(w), log(line),
+ * t() → the translator of the app's language, now(), waitMs }. pass(ack) → true: go on.
+ */
+const ACK_MS = 120000;
+function stopGuard(d) {
+  const acks = new Map(), now = d.now || Date.now;
+  return {
+    issue() { const a = require("crypto").randomBytes(16).toString("hex"); acks.set(a, now() + ACK_MS); return a; },
+    async pass(ack) {
+      const due = typeof ack === "string" ? acks.get(ack) : undefined; if (due !== undefined) acks.delete(ack);
+      for (const [a, until] of acks) if (until < now()) acks.delete(a);
+      if (!d.running()) return true;
+      if (due !== undefined && due >= now()) return true;   // the user saw main's warning and chose to go on
+      let work = null;
+      try { work = await Promise.race([d.gather(), new Promise(r => setTimeout(() => r(null), d.waitMs || 5000))]); } catch (e) { work = null; }
+      const at = now(), w = inFlight(work || {}, "shutdown", at, d.t ? d.t() : undefined);
+      if (!w.any) return true;
+      const en = inFlight(work || {}, "shutdown", at), go = !!(await d.ask(w));
+      d.log("[app] node stop asked with work in flight (" + en.busy.concat(en.unread.length ? ["could not be checked: " + en.unread.join("; ")] : []).join(" | ") + "): the user chose to " + (go ? "stop it" : "keep it running"));
+      return go;
+    }
+  };
+}
+
+/**
  * "The system asked this app to quit" (logout, restart, power off), true for a while after the system said so and
  * then no longer (0.19.103). It used to be a flag that stayed set for the rest of the session: a shutdown the user
  * CANCELLED (macOS asks every app first, and any app may refuse) left it set, and every later Quit went through with
@@ -119,4 +148,4 @@ async function decideQuit(d) {
  */
 function recently(ms = 60000, now = Date.now) { let at = 0; return { mark() { at = now(); }, on: () => at > 0 && now() - at < ms }; }
 
-module.exports = { inFlight, decideQuit, clock, recently };
+module.exports = { inFlight, decideQuit, stopGuard, clock, recently, ACK_MS };

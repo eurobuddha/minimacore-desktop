@@ -37,12 +37,12 @@ contextBridge.exposeInMainWorld("mcd", {
   // node lifecycle
   nodeStatus: () => ipcRenderer.invoke("mcd:nodeStatus"),
   nodeStart: () => ipcRenderer.invoke("mcd:nodeStart"),
-  nodeStop: () => ipcRenderer.invoke("mcd:nodeStop"),
+  nodeStop: (ack) => ipcRenderer.invoke("mcd:nodeStop", ack),
   freezeList: () => ipcRenderer.invoke("mcd:freezeList"),   // the frozen apps' ids (Apps tab)
   freezeSet: (id, on) => ipcRenderer.invoke("mcd:freezeSet", id, on),   // rejects with the reason when the app may not be frozen
   inFlight: (how) => ipcRenderer.invoke("mcd:inFlight", how),   // what a Shutdown ("shutdown") or a Quit ("quit") would interrupt: { title, message, any }
-  nodeRestart: () => ipcRenderer.invoke("mcd:nodeRestart"),
-  nodeReclaim: () => ipcRenderer.invoke("mcd:nodeReclaim"),
+  nodeRestart: (ack) => ipcRenderer.invoke("mcd:nodeRestart", ack),   // ack: from inFlight, the warning was shown (0.19.268)
+  nodeReclaim: (ack) => ipcRenderer.invoke("mcd:nodeReclaim", ack),
   nodeLogs: () => ipcRenderer.invoke("mcd:nodeLogs"),
   logsSave: () => ipcRenderer.invoke("mcd:logsSave"),   // Logs, Save to file: the log files on disk, redacted again in the main process; resolves the path or null
   portmapStatus: () => ipcRenderer.invoke("mcd:portmapStatus"),
@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld("mcd", {
   // Parlons account (the Parlons Node hosts it under this node's seed)
   parlonsStatus: () => ipcRenderer.invoke("mcd:parlonsStatus"),
   parlonsOpenExternal: () => ipcRenderer.invoke("mcd:parlonsOpenExternal"),
-  setNodeKind: (kind) => ipcRenderer.invoke("mcd:setNodeKind", kind),
+  setNodeKind: (kind, ack) => ipcRenderer.invoke("mcd:setNodeKind", kind, ack),
 
   // app updates from the minimaCore store feed
   flavor: () => ipcRenderer.invoke("mcd:flavor"),   // which app this is: { id, name, title, updates, loginItem, basePort }

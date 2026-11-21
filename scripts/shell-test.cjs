@@ -229,14 +229,16 @@ test("the renderer loads: every script of index.html, in its order, and no name 
 
 // ---- 0.19.257: every path that stops a running node shows Shutdown's in-flight warning first ----
 test("Restart node, the node kind, Save & Restart, Contribute, the Parlons switch and a first-run start ask what is in flight first, from Shutdown's own source", () => {
-  assert.ok(/async function nodeStopOk\(\) \{\s*if \(!running\) return true;\s*const w = await inFlightWarning\(\);\s*return !w\.any \|\| showConfirm\(w\.title, w\.message,/.test(app), "one helper over inFlightWarning");
+  assert.ok(/async function nodeStopOk\(\) \{\s*lastStopAck = "";\s*if \(!running\) return true;\s*const w = await inFlightWarning\(\);\s*if \(w\.any && !await showConfirm\(w\.title, w\.message,/.test(app), "one helper over inFlightWarning");
   assert.ok(/else if \(act === "shutdown"\) \{[\s\S]{0,400}const w = await inFlightWarning\(\);/.test(app), "Shutdown uses the same source");
-  for (const [where, rx] of [["Restart node", /el\("nRestart"\)\.onclick = async \(\) => \{ if \(!await nodeStopOk\(\)\) return;/], ["the node kind", /el\("setKindApply"\)\.onclick = async \(\) => \{[\s\S]{0,400}if \(!await nodeStopOk\(\)\) return;[\s\S]{0,200}await api\.setNodeKind\(want\)/],
+  for (const [where, rx] of [["Restart node", /el\("nRestart"\)\.onclick = async \(\) => \{ if \(!await nodeStopOk\(\)\) return;/], ["the node kind", /el\("setKindApply"\)\.onclick = async \(\) => \{[\s\S]{0,400}if \(!await nodeStopOk\(\)\) return;[\s\S]{0,200}await api\.setNodeKind\(want, stopAck\(\)\)/],
     ["Save & Restart", /"Restart node\?"[\s\S]{0,300}\n\s*if \(!await nodeStopOk\(\)\) return;/], ["Contribute", /if \(!await nodeStopOk\(\)\) return;\s*const params = Object\.assign\(\{\}, CFG\.params, turnOn/],
     ["the Parlons switch", /if \(!await nodeStopOk\(\)\) return;\s*b\.disabled = true; b\.textContent = "Switching…";/], ["a first-run start", /async function frStart\(restore\) \{\s*if \(running && !await nodeStopOk\(\)\) return;/]])
     assert.ok(rx.test(app), where);
-  const restarts = (app.match(/api\.nodeRestart\(\)/g) || []).length;
-  assert.equal(restarts, 4, "every nodeRestart call site is one of the guarded ones (frStart, Save & Restart, Contribute, Restart node)");
+  // 0.19.268: the call sites are no longer counted here: main refuses every stop with work in flight unless the window hands it
+  // the ack of the warning it showed (scripts/inflight-test.cjs, main's own guard); each call hands it on
+  assert.equal((app.match(/api\.nodeRestart\(\)/g) || []).length, 0, "no restart without the warning's ack");
+  assert.ok(/api\.nodeStop\(w\.ack \|\| ""\)/.test(app) && (app.match(/api\.setNodeKind\([^)]*stopAck\(\)\)/g) || []).length === 2);
 });
 
 // ---- 0.19.258: the remaining overlays are modal: data-modal, one at a time, Escape, focus in and back ----

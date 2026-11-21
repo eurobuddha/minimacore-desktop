@@ -375,6 +375,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     // ---- The rest of main/main.js (backups, files, the Terminal) ----
     ["MAIN_NODE_DOWN", I18N.N_("node not running")],
     ["MAIN_EMPTY", I18N.N_("empty command")],
+    ["MAIN_NOT_STOPPED", I18N.N_("The node keeps running: nothing was stopped.")],
     ["MAIN_LANGUAGE", I18N.N_("Unknown language.")],
     ["MAIN_JAR_UPDATER", I18N.N_("The in-app node updater is disabled.")],
     ["MAIN_NOT_VERIFIED", I18N.N_("The file is not verified yet.")],

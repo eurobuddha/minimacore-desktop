@@ -5300,7 +5300,10 @@
   "·  payment being sent": "·  付款发送中",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.": "付款正在发送到节点。请等待节点回复后再对此订单进行其他操作。",
   "This payment is being sent to the node now. Wait for its answer.": "此付款正在发送到节点。请等待其回复。",
-  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "节点读取此命令的方式与其写法不同（单词内部有引号或引号紧贴下一个单词、引号内有冒号，或在 JSON 值之外有 { 或 [）。请去掉这些后再写。未运行任何命令。"
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "节点读取此命令的方式与其写法不同（单词内部有引号或引号紧贴下一个单词、引号内有冒号，或在 JSON 值之外有 { 或 [）。请去掉这些后再写。未运行任何命令。",
+  "Stop the node anyway": "仍然停止节点",
+  "Keep it running": "保持运行",
+  "The node keeps running: nothing was stopped.": "节点保持运行：没有停止任何内容。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5383,5 +5386,8 @@
   "·  payment being sent",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.",
   "This payment is being sent to the node now. Wait for its answer.",
-  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run."
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.",
+  "Stop the node anyway",
+  "Keep it running",
+  "The node keeps running: nothing was stopped."
 ] });

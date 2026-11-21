@@ -331,7 +331,7 @@ async function frStart(restore) {
   waitingForNode = true;
   postBootStarted = false;      // let the post-boot wallet step run for this start
   showStarting();
-  if (running) await api.nodeRestart(); else await api.nodeStart();
+  if (running) await api.nodeRestart(stopAck()); else await api.nodeStart();
 }
 
 // ---- Startup Params (the phone's ParamsActivity, over the reconfigure logic the old wizard had) ------------
@@ -501,7 +501,7 @@ function renderParams(host, firstRun, done) {
     try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
     toast(t("Restarting the node…")); leave();
     waitingForNode = true;
-    if (running) await api.nodeRestart(); else await api.nodeStart();   // reconfigure = restart to apply
+    if (running) await api.nodeRestart(stopAck()); else await api.nodeStart();   // reconfigure = restart to apply
   };
 }
 // Electron wraps a main-process refusal as "Error invoking remote method 'x': Error: the message".
@@ -1010,7 +1010,7 @@ async function menuAction(act) {
     const w = await inFlightWarning();
     if (!await showConfirm(w.title, w.message, t("Shut down"), true)) return;
     toast(t("Shutting down the node…"));
-    try { await api.nodeStop(); } catch (e) { toast(e.message || String(e), "err"); }
+    try { await api.nodeStop(w.ack || ""); } catch (e) { toast(e.message || String(e), "err"); }
   }
 }
 
@@ -1023,11 +1023,17 @@ async function inFlightWarning() {
 /** Every path that stops a running node (Restart node, the node kind, Save & Restart, Contribute, the Parlons switch, a
  *  new start from the first-run screen) shows Shutdown's in-flight warning first when anything is in flight or could not
  *  be checked (0.19.257). → true: go on. */
+// The main process refuses a stop with work in flight unless it gets the one-time ack it issued with this warning (0.19.268):
+// nodeStopOk keeps it, stopAck() hands it to the next stop and forgets it.
+let lastStopAck = "";
 async function nodeStopOk() {
+  lastStopAck = "";
   if (!running) return true;
   const w = await inFlightWarning();
-  return !w.any || showConfirm(w.title, w.message, t("Restart anyway"), true);
+  if (w.any && !await showConfirm(w.title, w.message, t("Restart anyway"), true)) return false;
+  lastStopAck = w.ack || ""; return true;
 }
+function stopAck() { const a = lastStopAck; lastStopAck = ""; return a; }
 
 // ---- Language: the phone's chooser (Language.choose): the four languages, each named in itself, the current one marked.
 // The choice is saved by the main process (its own dialogs, menu and notifications follow it) and applied at once:
@@ -3060,7 +3066,7 @@ async function renderSettings() {
     el("setKindApply").disabled = true; stat.textContent = t("Restarting the node…");
     try {
       CFG = await api.saveConfig({ heapMb });
-      await api.setNodeKind(want);
+      await api.setNodeKind(want, stopAck());
       CFG = await api.getConfig();
       stat.textContent = want === "parlons" ? t("Parlons Node starting. Open Parlons from the app tray.") : t("Plain Minima node starting.");
       toast(t("Node restarting…"), "ok");
@@ -3327,10 +3333,10 @@ function renderNode(s) {
     const params = Object.assign({}, CFG.params, turnOn ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     CFG = await api.saveConfig({ contribute: turnOn, params });
     toast(turnOn ? t("Contributing. Restarting node…") : t("Back to light wallet. Restarting node…"));
-    api.nodeRestart();
+    api.nodeRestart(stopAck()).catch(e => toast(ipcError(e), "err"));
   };
   el("nReconfig").onclick = () => selectTab("params");
-  el("nRestart").onclick = async () => { if (!await nodeStopOk()) return; toast(t("Restarting node…")); api.nodeRestart(); };
+  el("nRestart").onclick = async () => { if (!await nodeStopOk()) return; toast(t("Restarting node…")); api.nodeRestart(stopAck()).catch(e => toast(ipcError(e), "err")); };
   const nReclaim = el("nReclaim");
   if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = t("Starting…"); try { await api.nodeReclaim(); toast(t("Node restarting…"), "ok"); } catch (e) { toast(e.message || String(e), "err"); } };
   // The in-app jar updater is disabled — the node jar ships with the app. See main/updater.js.
@@ -4235,7 +4241,7 @@ async function renderParlons() {
           t("Same chain, same wallet, same data folder — plus your Parlons account. The node restarts now."), t("Switch"))) return;
       if (!await nodeStopOk()) return;
       b.disabled = true; b.textContent = t("Switching…");
-      try { await api.setNodeKind("parlons"); CFG = await api.getConfig(); toast(t("Parlons Node starting…"), "ok"); renderParlons(); }
+      try { await api.setNodeKind("parlons", stopAck()); CFG = await api.getConfig(); toast(t("Parlons Node starting…"), "ok"); renderParlons(); }
       catch (e) { toast(ipcError(e), "err"); b.disabled = false; b.textContent = t("Switch to the Parlons Node"); }
     };
     return;

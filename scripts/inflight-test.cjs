@@ -72,7 +72,7 @@ test("Quit: asked when a user quits with work in flight; never asked for a syste
 test("wiring: one gather for Shutdown and Quit; the quit is asked before the node is stopped, and never for a system quit", () => {
   const main = read("main/main.js"), pre = read("main/preload.js"), app = read("renderer/app.js");
   assert.match(main, /const inFlightWork = async \(\) => \(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\),\n\s*dexicon: await dexicon\.activeWork\(\)\.catch\(\(\) => null\), casino: /);
-  assert.equal((main.match(/inFlightWork/g) || []).length, 4, "defined once, used by mcd:inFlight (Shutdown), by before-quit (Quit) and, since 0.19.117, by the Freeze check of Dexicon (main/freeze.js)");
+  assert.equal((main.match(/inFlightWork/g) || []).length, 5, "defined once, used by mcd:inFlight (Shutdown), by before-quit (Quit), since 0.19.117 by the Freeze check of Dexicon (main/freeze.js) and since 0.19.268 by the guard of every node stop");
   assert.match(pre, /inFlight: \(how\) => ipcRenderer\.invoke\("mcd:inFlight", how\)/); assert.match(app, /api\.inFlight\("shutdown"\)/);
   assert.ok(!/mcd:ppWork|mcd:dxWork/.test(main + pre), "the two reads the old Shutdown warning used are gone with it");
   const q = main.slice(main.indexOf('app.on("before-quit"'), main.indexOf("// ---- ", main.indexOf('app.on("before-quit"')) > 0 ? undefined : undefined);
@@ -132,4 +132,45 @@ test("languages: the same facts in the app's language for the question, and in E
   try { await decideQuit({ os: false, stopped: false, gather: async () => work, log: (l) => logs.push(l), t: I18N.t, ask: async (w) => { assert.ok(/[а-я]/i.test(w.title + w.message), "asked in Russian"); return false; } }); }
   finally { I18N.set("en"); }
   assert.match(logs[0], /^\[app\] quit asked with work in flight \(2 AtomiX swaps are not finished\./, "the log on disk stays English");
+});
+
+// ---- 0.19.268: one guard in MAIN in front of every node stop or restart (it replaces the count of the window's call sites) ----
+test("stopGuard: with work in flight a stop goes on only with main's own one-time ack (once, for two minutes) or after main's question", async () => {
+  const { stopGuard, ACK_MS } = require("../main/inflight.js");
+  let t = NOW, running = true, work = With({ pools: [{ type: "ADD", ts: NOW - 60000 }] }); const asked = [], logs = [];
+  let answer = false;
+  const g = stopGuard({ running: () => running, gather: async () => work, ask: async (w) => { asked.push(w.title); return answer; }, log: (l) => logs.push(l), now: () => t });
+  assert.equal(await g.pass(), false, "in flight, no ack: main asks, and a no keeps the node"); assert.equal(asked.length, 1); assert.match(logs[0], /pool transaction.*keep it running/);
+  answer = true; assert.equal(await g.pass("not one of main's"), true); assert.equal(asked.length, 2, "an ack main never issued is no ack");
+  answer = false; const a = g.issue(); assert.equal(await g.pass(a), true, "the warning the window showed"); assert.equal(asked.length, 2, "no second question");
+  assert.equal(await g.pass(a), false, "an ack works once"); assert.equal(asked.length, 3);
+  const b = g.issue(); t += ACK_MS + 1; assert.equal(await g.pass(b), false, "and only for two minutes");
+  work = IDLE; assert.equal(await g.pass(), true, "nothing in flight: no question"); assert.equal(asked.length, 4);
+  const h = stopGuard({ running: () => true, gather: async () => { throw new Error("down"); }, ask: async (w) => { asked.push(w.message); return false; }, log() {}, now: () => t });
+  assert.equal(await h.pass(), false, "what could not be checked is asked, never read as idle"); assert.match(asked[4], /Could not be checked/);
+  const slow = stopGuard({ running: () => true, gather: () => new Promise(() => {}), ask: async () => false, log() {}, waitMs: 20 });
+  assert.equal(await slow.pass(), false, "a gather that never answers is not idle");
+  running = false; work = With({ pools: [{ type: "ADD", ts: NOW - 60000 }] }); assert.equal(await g.pass(), true, "a node that is not running is not stopped by anything");
+});
+test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR switch and a Chat backup restore stop nothing unless the guard lets them", async () => {
+  const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), calls = {};
+  const walk = (n) => { if (ts.isCallExpression(n) && n.expression.getText(sf) === "ipcMain.handle" && ts.isStringLiteral(n.arguments[0])) calls[n.arguments[0].text] = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  const names = ["mcd:nodeRestart", "mcd:nodeStop", "mcd:nodeReclaim", "mcd:setNodeKind", "mcd:wwEnableMegammr", "mcd:chatApplyBackup"];
+  for (const allow of [false, true]) for (const name of names) {
+    const did = [], acks = [], h = {};
+    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async (ack) => { acks.push(ack); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
+      node: { state: "running", stop: async () => did.push("stop"), start: async () => did.push("start"), restart: async () => did.push("restart"), snapshot: () => ({}), parlonsBlocker: () => "", jarPath: () => "/x/minima.jar" },
+      config: { load: () => ({ params: {}, keyMode: "classic" }), save: () => did.push("save") }, chat: { stopLoop() {}, forgetIdentity() {}, init: async () => {} },
+      pendingChatBackup: { contacts: [], messages: [], manifest: {} }, chatStore: { mergeBackup() {} }, fs: { mkdirSync() {}, writeFileSync() {}, renameSync() {} }, path, keetsKeypairFile: () => "/x/k", require };
+    new Function("env", "with (env) { " + calls[name] + "; }")(env);
+    const args = name === "mcd:setNodeKind" ? [null, "minima", "ACK"] : [null, "ACK"];
+    if (allow) { await h[name](...args).catch(() => {}); assert.ok(did.some(d => d === "stop" || d === "restart"), name + " stops or restarts the node once allowed"); }
+    else { await assert.rejects(h[name](...args), /nothing was stopped/, name); assert.deepEqual(did, [], name + ": nothing stopped and nothing saved"); }
+    assert.equal(acks.length, 1, name + " asks the guard once");
+    if (!/ww|chat/i.test(name)) assert.equal(acks[0], "ACK", name + " hands the window's ack to the guard");
+  }
+  assert.ok(/label: lang\.t\("Restart node"\), click: \(\) => \{ mayStop\(\)\.then\(\(\) => node\.restart\(\)\)/.test(src), "the tray's Restart node asks the guard first");
+  assert.ok(calls["mcd:cmd"].includes("if (restore.isResync(command)) { await mayStop(); return runResync(command); }"), "a Terminal resync asks the guard first");
+  assert.ok(/ack: w\.any && how !== "quit" \? stopGuard\.issue\(\) : ""/.test(calls["mcd:inFlight"]), "the ack is issued only with a warning that was shown");
 });

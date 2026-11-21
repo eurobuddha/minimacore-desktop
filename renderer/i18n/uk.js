@@ -5313,7 +5313,10 @@
   "·  payment being sent": "·  оплата надсилається",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.": "Оплата зараз надсилається на вузол. Дочекайтеся його відповіді, перш ніж робити щось інше з цим замовленням.",
   "This payment is being sent to the node now. Wait for its answer.": "Ця оплата зараз надсилається на вузол. Дочекайтеся його відповіді.",
-  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "Вузол прочитав би цю команду не так, як її написано (лапки всередині слова або впритул до наступного, двокрапка всередині лапок, або { чи [ поза значенням JSON). Напишіть її без них. Нічого не запущено."
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.": "Вузол прочитав би цю команду не так, як її написано (лапки всередині слова або впритул до наступного, двокрапка всередині лапок, або { чи [ поза значенням JSON). Напишіть її без них. Нічого не запущено.",
+  "Stop the node anyway": "Усе одно зупинити вузол",
+  "Keep it running": "Залишити працювати",
+  "The node keeps running: nothing was stopped.": "Вузол працює далі: нічого не зупинено."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5396,5 +5399,8 @@
   "·  payment being sent",
   "The payment is being sent to the node now. Wait for its answer before you do anything else with this order.",
   "This payment is being sent to the node now. Wait for its answer.",
-  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run."
+  "The node would read this command differently from how it is written (a quote inside a word or glued to the next one, a colon inside quotes, or a { or [ outside a JSON value). Write it without them. Nothing was run.",
+  "Stop the node anyway",
+  "Keep it running",
+  "The node keeps running: nothing was stopped."
 ] });
