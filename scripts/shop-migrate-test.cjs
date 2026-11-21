@@ -57,5 +57,10 @@ test("a 0.18.69 shop.json: no coin counted twice, paid and shipped orders keep t
   }
   assert.equal(o("ORD-PAID").paid, true);
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(app.includes('if (o.status === "INQUIRY" || o.legacyVerdict) return "";') && app.includes("An older version of this app recorded ${esc(o.legacyPaid)}"));
+  // CHANGED on purpose (0.18.218): a kept verdict on an order that is not paid offers a hand check instead of nothing
+  assert.ok(app.includes('if (o.status === "INQUIRY") return "";') && app.includes("if (o.legacyVerdict) {") && app.includes("An older version of this app recorded ${esc(o.legacyPaid)}"));
+  assert.equal(store.mayAdvance(o("ORD-SHIP")), false, "shipped by an older version without a payment: stuck until checked");
+  assert.equal(store.handCheck("ORD-SHIP"), true, "a kept verdict without a payment can be checked by hand (0.18.218)");
+  assert.equal(store.mayAdvance(o("ORD-SHIP")), true);
+  assert.equal(store.handCheck("ORD-PAID"), false, "a paid one needs no hand check");
 });

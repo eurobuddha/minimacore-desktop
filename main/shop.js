@@ -429,7 +429,10 @@ function ordersList() {
 function orderDetail(ref) {
   const o = store.order(ref); if (!o) return null; store.markOrderRead(ref); if (o.role === "sell") store.ensureChecked(o);
   // a payment still marked in flight (a quit or crash during the send) is shown as "may already have gone through" too (0.18.217)
-  return { order: o, chat: store.chat(ref), unpaid: !!store.getMeta("unpaid:" + ref), ambiguous: !!(store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)) };
+  // a second buyer's copy of a reference (0.18.218): payments carrying that reference are counted on the first order
+  const first = o.wireRef ? store.order(o.wireRef) : null;
+  const sharedRef = first ? { ref: first.ref, received: first.paidAmount || "0" } : null;
+  return { order: o, chat: store.chat(ref), unpaid: !!store.getMeta("unpaid:" + ref), ambiguous: !!(store.getMeta("ambiguous:" + ref) || store.getMeta("inflight:" + ref)), sharedRef };
 }
 /** The buyer checked their History and the uncertain payment was not sent (0.18.217): Retry is offered again. */
 function paymentNotSent(ref) {

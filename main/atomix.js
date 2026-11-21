@@ -832,7 +832,15 @@ function writeAtomic(file, text) { const tmp = file + ".tmp"; fs.writeFileSync(t
 function ethTokensSave() { try { writeAtomic(ETH_TOKENS_FILE(), JSON.stringify(ethTokenList || [])); } catch (e) { log("ethtokens save failed: " + (e && e.message)); } }
 /** sanitise a contract-supplied symbol(): printable, trimmed, capped — it is attacker-controlled (any contract). */
 /** A figure cut to dp decimals, never rounded (0.18.211: toFixed rounded the amount a swap needs). */
-function truncDp(x, dp) { const t = String(x); if (/e/i.test(t)) return Number(x).toFixed(dp); const [i, f = ""] = t.split("."); return dp > 0 ? i + "." + (f + "0".repeat(dp)).slice(0, dp) : i; }
+function truncDp(x, dp) {
+  let t = String(x), neg = "";
+  if (t[0] === "-") { neg = "-"; t = t.slice(1); }
+  const m = /^(\d+)(?:\.(\d*))?e([+-]?\d+)$/i.exec(t);   // an exponent form, written out exactly (0.18.218: toFixed rounded it)
+  if (m) { const digits = m[1] + (m[2] || ""), point = m[1].length + Number(m[3]);
+    t = point <= 0 ? "0." + "0".repeat(-point) + digits : point >= digits.length ? digits + "0".repeat(point - digits.length) : digits.slice(0, point) + "." + digits.slice(point); }
+  const [i, f = ""] = t.split(".");
+  return neg + (dp > 0 ? (i.replace(/^0+(?=\d)/, "") || "0") + "." + (f + "0".repeat(dp)).slice(0, dp) : i);
+}
 function ethCleanSymbol(sym, addr) {
   // printable-only, and ALSO strip HTML-dangerous chars server-side (defense-in-depth: the renderer esc()s every
   // sink, but stripping < > " ' ` & \ here means a single future missed esc can't regress into stored injection —

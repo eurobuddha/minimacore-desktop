@@ -246,7 +246,9 @@ function flagDuplicate(ref, problem) {
 function handCheck(ref) {
   ensureLoaded(); const o = order(ref);
   if (!o || o.role !== "sell") return false;
-  ensureChecked(o); if (!o.problems.length && !o.legacyPaid) return false;   // an order an older version counted money for can be checked by hand too
+  // an order an older version counted money for can be checked by hand too, and one whose older verdict was kept but that is
+  // not paid (0.18.218: confirmed by an older version without a payment, it could never move on)
+  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid)) return false;
   o.handChecked = true; flush(); return true;
 }
 /** May the vendor confirm / ship / deliver this order? Paid by the listing's figure, or checked by hand. */

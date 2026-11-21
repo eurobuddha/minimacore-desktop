@@ -519,6 +519,9 @@ test("two buyers' orders with the same reference are both kept and neither is pa
   await m.shop.scanOnce();
   assert.equal(m.store.order("ORD-DUP").paid, false, "a payment with the shared reference pays neither");
   assert.equal(m.store.handCheck("ORD-DUP~" + b2.publicId), true, "the vendor can check either by hand");
+  const dd = m.shop.orderDetail("ORD-DUP~" + b2.publicId);   // 0.18.218: says where the payments with the reference are shown, and the total
+  assert.deepEqual(dd.sharedRef, { ref: "ORD-DUP", received: m.store.order("ORD-DUP").paidAmount || "0" }); assert.equal(m.shop.orderDetail("ORD-DUP").sharedRef, null);
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8").includes("Payments with the reference ${esc(o.wireRef)} are shown on order ${esc(d.sharedRef.ref)}"));
 });
 
 test("buyer: a retry pays only after a refused payment, never while one may be in flight or may have been sent", async () => {

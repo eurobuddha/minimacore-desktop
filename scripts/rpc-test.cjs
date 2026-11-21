@@ -63,8 +63,10 @@ test('identifiers are whole in main and the ETH files are written whole; the amo
   assert.ok(/<div class="mono ew-addr__v">\$\{esc\(b\.address\)\}<\/div>/.test(M('renderer/app.js')), 'the ETH wallet shows the whole address');
   assert.ok(/writeAtomic\(ETH_TOKENS_FILE\(\)/.test(ax) && /writeAtomic\(ETH_RPC_FILE\(\)/.test(ax), 'both ETH files go through temp and rename');
   assert.ok(!/Need ≈/.test(ax) && !/totalUsdt\.toFixed/.test(ax));
-  const i = ax.indexOf('function truncDp('), truncDp = new Function(ax.slice(i, ax.indexOf('\n', i)) + '\nreturn truncDp;')();
+  const i = ax.indexOf('function truncDp('), truncDp = new Function(ax.slice(i, ax.indexOf('\n}\n', i) + 3) + '\nreturn truncDp;')();
   assert.equal(truncDp(12.3456789, 6), '12.345678'); assert.equal(truncDp(1.9999999, 6), '1.999999'); assert.equal(truncDp(5, 6), '5.000000');
+  // 0.18.218: an exponent form is cut exactly too (toFixed rounded it)
+  assert.equal(truncDp(1.9999999e-5, 6), '0.000019'); assert.equal(truncDp(1e-7, 6), '0.000000'); assert.equal(truncDp(1.5e21, 2), '1500000000000000000000.00'); assert.equal(truncDp(-2.75e-3, 4), '-0.0027');
   const j = ax.indexOf('function ethCleanSymbol('), clean = new Function('lc', ax.slice(j, ax.indexOf('\n}\n', j) + 3) + '\nreturn ethCleanSymbol;')((x) => String(x).toLowerCase());
   assert.equal(clean('', '0xDAC17F958D2EE523A2206206994597C13D831EC7'), '0xdac17f958d2ee523a2206206994597c13d831ec7', 'no symbol: the whole contract address');
 });

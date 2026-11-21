@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.218] — small fixes from the review
+
+- A second buyer's copy of a reference says which order shows the payments with that reference and how much has come in. An order whose older verdict was kept but that is not paid (for example confirmed or shipped by an older version without a payment this version sees) can be checked by hand; it could never move on. The amount a swap needs is cut exactly for an exponent form too (toFixed rounded it). Tests: `scripts/shop-test.cjs`, `scripts/shop-migrate-test.cjs`, `scripts/rpc-test.cjs`.
+
 ## [0.18.217] — miniMall buyer: an uncertain payment is shown, and can be marked not sent
 
 - A payment still marked in flight (the app closed while it was being sent) blocked Retry but was not explained on the screen. Both an in-flight and a timed-out payment are now shown as "may already have gone through", with an explicit action, "I checked my History: it was not sent". Its confirmation shows the amount, the token id and the vendor's payment address whole, and only then are the marks cleared and Retry offered. Test: `scripts/shop-test.cjs`.

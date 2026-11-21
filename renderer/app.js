@@ -2859,6 +2859,7 @@ async function renderShopOrderDetail(ref) {
       <div class="view__desc" style="margin-top:6px">${esc(o.shopName || "")}</div>${items}
       <div class="row" style="justify-content:space-between;margin-top:6px;font-weight:700"><span>${isSell ? "Buyer's total" : "Total"}</span><span class="mono">${esc(o.amount)} ${esc(ShopRules.cur(o.currency))}</span></div>
       ${isSell ? shopCheckBlock(o) : ""}
+      ${isSell && d.sharedRef ? `<div class="shop-warn" style="margin-top:8px">Payments with the reference ${esc(o.wireRef)} are shown on order ${esc(d.sharedRef.ref)}, which another buyer sent first. Received so far with that reference: ${esc(d.sharedRef.received)} ${esc(ShopRules.cur(o.currency))}.</div>` : ""}
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
       ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "Your listing says nothing is due for this order, so it is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Received so far: " + esc(o.paidAmount || "0")}</div>` : ""}
@@ -2883,6 +2884,7 @@ async function renderShopOrderDetail(ref) {
   el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {
     const yes = await showConfirm("Checked by hand?", ((o.problems || []).length ? "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
+      : o.legacyVerdict && !o.legacyPaid ? "An older version of this app moved this order on (" + String(o.status).toLowerCase() + ") without a payment this version can see."
       : "An older version of this app recorded " + o.legacyPaid + " " + ShopRules.cur(o.currency) + " received for this order; the coins the node shows now come to " + (o.paidAmount || "0") + ".")
       + "\n\nThe buyer's total: " + o.amount + " " + ShopRules.cur(o.currency) + " (their own figure)\nReceived so far: " + (o.paidAmount || "0") + " " + ShopRules.cur(o.currency)
       + "\n\nConfirm only if you have checked the items and the payment yourself. It lets you confirm, ship and deliver this order.", "I checked it", true);
@@ -2895,7 +2897,12 @@ async function renderShopOrderDetail(ref) {
 // What the vendor's own listing says about an incoming order (0.18.159): due by the listing, or unchecked with the reasons.
 function shopCheckBlock(o) {
   const cur = esc(ShopRules.cur(o.currency));
-  if (o.status === "INQUIRY" || o.legacyVerdict) return "";   // an older version's verdict on a paid or shipped order is kept as it was (0.18.195)
+  if (o.status === "INQUIRY") return "";
+  if (o.legacyVerdict) {   // an older version's verdict on a paid or shipped order is kept as it was (0.18.195)
+    if (o.paid || o.handChecked) return o.handChecked ? `<div class="view__desc" style="margin-top:6px">You checked this order by hand.</div>` : "";
+    return `<div class="shop-warn" style="margin-top:8px">An older version of this app moved this order on (${esc(String(o.status).toLowerCase())}) without a payment this version can see. Check it by hand to move it on.
+      <button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button></div>`;   // 0.18.218
+  }
   const legacy = o.legacyPaid && !o.paid ? `<div class="shop-warn" style="margin-top:8px">An older version of this app recorded ${esc(o.legacyPaid)} ${cur} received for this order. It is counted again from the coins the node still shows; if that is less, check the payment yourself.
       ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : (o.problems || []).length ? "" : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>` : "";
   if (!(o.problems || []).length) return `<div class="row" style="justify-content:space-between;font-weight:700"><span>Due by your listing</span><span class="mono">${esc(o.due)} ${cur}</span></div>` + legacy;
