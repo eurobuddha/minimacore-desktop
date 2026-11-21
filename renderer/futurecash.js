@@ -211,8 +211,8 @@ function fcnWire(host) {
   on("fcnMinAuto", () => { const d = appDlg({ title: t("Unattended minimum"), cls: "adlg--fcn", body: `<p class="adlg__text">${th("The guardian collects and sweeps by itself only MINIMA coins of at least this amount.")}</p><input class="fcn-field fcn-mono" id="fcnMinIn" inputmode="decimal" autocomplete="off" aria-label="${th("Amount (MINIMA)")}" value="${esc((FCN.st && FCN.st.minAuto) || "1")}">`,
     buttons: [{ label: t("Save"), on: (root, close) => close(root.querySelector("#fcnMinIn").value.trim()) }, { label: t("Cancel"), v: null, neutral: true }] });
     d.done.then((v) => { if (v != null) fcnAct(() => api.fc("minAuto", v), null); }); });
-  on("fcnStop", () => fcnAct(() => api.fc("guardian", false), null));
-  on("fcnRevoke", async () => { if (await showConfirm(t("Take back background signing?"), t("Future Cash Next then signs nothing by itself, and the guardian stops. You can still collect and sweep by hand."), t("Take back"), true)) fcnAct(() => api.fc("revoke"), null); });
+  on("fcnStop", async () => { if (await fcnRetiredOk()) fcnAct(() => api.fc("guardian", false), null); });
+  on("fcnRevoke", async () => { if (await showConfirm(t("Take back background signing?"), t("Future Cash Next then signs nothing by itself, and the guardian stops. You can still collect and sweep by hand.") + fcnRetiredNote(), t("Take back"), true)) fcnAct(() => api.fc("revoke"), null); });
   on("fcnAutoOn", () => fcnAct(() => api.fc("autoCollect", true), null));
   on("fcnAutoOff", () => fcnAct(() => api.fc("autoCollect", false), null));
   on("fcnCollectAll", async () => { if (await showConfirm(t("Collect all now"), t("Every matured stake on a clean address is collected to its own payout address."), t("Collect"))) fcnAct(() => api.fc("collectAll"), (r) => (r.done ? t("Collection requests posted: {n}. They confirm in about a block.", { n: r.done }) : fcnSay(r.error || t("Nothing to collect.")))); });
@@ -220,7 +220,10 @@ function fcnWire(host) {
   on("fcnStopRescue", () => fcnAct(() => api.fc("stopRescue"), null));
   on("fcnRecover", async () => { if (await showConfirm(t("Recover coins"), t("The coins on retired addresses are moved to your rescue destination, one signature each, with each address's own key."), t("Recover"))) fcnAct(() => api.fc("recover"), (r) => (r.swept ? t("Recovered {n} coin(s) to {address}", { n: r.swept, address: r.dest }) : fcnSay(r.error || t("Nothing to recover.")))); });
   host.querySelectorAll("[data-fcn-sweep]").forEach(b => b.onclick = async () => { const a = b.dataset.fcnSweep; if (await showConfirm(t("Sweep"), t("Every coin on this address is moved to your rescue destination, one signature each:\n{address}", { address: a }), t("Sweep"))) fcnAct(() => api.fc("sweep", a), (r) => (r.swept ? t("Swept {n} coin(s) → {address}", { n: r.swept, address: r.dest }) : fcnSay(r.error || t("Nothing swept.")))); });
-  host.querySelectorAll("[data-fcn-retire]").forEach(b => b.onclick = async () => { const a = b.dataset.fcnRetire; if (await showConfirm(t("Retire"), t("This address is taken out of the node's change rotation for good and kept watch-only. It moves no funds:\n{address}", { address: a }), t("Retire"), true)) fcnAct(() => api.fc("retire", a), () => t("Retired: change will never land there again.")); });
+  host.querySelectorAll("[data-fcn-retire]").forEach(b => b.onclick = async () => { const a = b.dataset.fcnRetire, apps = await api.fc("handedOut", a).catch(() => []);
+    const warn = (apps && apps.length ? "\n\n" + t("This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.", { apps: apps.join(", ") }) : "")
+      + "\n\n" + t("Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.");
+    if (await showConfirm(t("Retire"), t("This address is taken out of the node's change rotation for good and kept watch-only. It moves no funds:\n{address}", { address: a }) + warn, t("Retire"), true)) fcnAct(() => api.fc("retire", a), () => t("Retired: change will never land there again.")); });
   host.querySelectorAll("[data-fcn-collect]").forEach(b => b.onclick = async () => { const id = b.dataset.fcnCollect, x = ((FCN.stakes && FCN.stakes.stakes) || []).find(s => s.coinid === id); if (!x) return;
     if (await showConfirm(t("Collect"), t("{amount} MINIMA is collected to its payout address:\n{address}\n\ncoin {coin}", { amount: fcnAmt(x.amount), address: x.payout, coin: x.coinid }), t("Collect"))) fcnAct(() => api.fc("collect", id), () => t("Collect posted: confirms in about a block.")); });
   host.querySelectorAll("[data-fcn-preset]").forEach(b => b.onclick = () => { fcnKeep(); FCN_LOCK.preset = +b.dataset.fcnPreset; paintFutureCash(); });
@@ -229,6 +232,9 @@ function fcnWire(host) {
   on("fcnRetry", () => futureCashLoad(false));
   on("fcnReset", async () => { if (await showConfirm(t("Reset history?"), t("Clears the log and completed records. Keeps in-flight rescues and your safe address. Moves no funds: your coins and locks live on the chain."), t("Reset"), true)) fcnAct(() => api.fc("resetHistory"), null); });
 }
+/** Retired addresses exist: stopping the guardian means a payment to one is no longer swept by itself (review L3). */
+function fcnRetiredNote(st) { const n = ((st || FCN.st) || {}).retired || 0; return n ? "\n\n" + t("Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.", { n }) : ""; }
+async function fcnRetiredOk(st) { const note = fcnRetiredNote(st); return !note || showConfirm(t("Stop guardian"), note.trim(), t("Stop guardian"), true); }
 function fcnKeep() { const a = el("fcnAmount"), r = el("fcnRecipient"); if (a) FCN_LOCK.amount = a.value; if (r) FCN_LOCK.recipient = r.value; }
 /** One action at a time: asked of the main process, the answer said, the screen read again. */
 async function fcnAct(call, okText) {

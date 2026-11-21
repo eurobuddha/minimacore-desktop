@@ -1137,7 +1137,7 @@ function create(o) {
       readySafe: ready(false), readyRisk: ready(true),
       pendRisk: { n: pend.length, total: sum(pend.map(p => p.amount)), soonest: pend.length ? Math.min(...pend.map(p => p.mature)) : 0 },
       atRiskKnown: atRisk.size, atRiskList: Array.isArray(flagged) ? flagged.filter(validAddr) : [],
-      guardianOn: k.is(K.GUARDIAN_ON, false), tooMany, minAuto: minAuto(), signCap: signCap(), classic: !!(o.keyMode && o.keyMode() === "classic"), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
+      guardianOn: k.is(K.GUARDIAN_ON, false), tooMany, retired: scriptsCache ? scriptsCache.retired.length : store.retired().length, minAuto: minAuto(), signCap: signCap(), classic: !!(o.keyMode && o.keyMode() === "classic"), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
       safe: k.get(K.SAFE_ADDRESS, ""), sameNode: k.get(K.SAFE_MODE, "external") === "samenode", safeReused: safeReused(),
       audit: { at: k.getLong(K.AUDIT_AT), ok: k.is(K.AUDIT_OK, false), error: k.get(K.AUDIT_LAST_ERR, "") || "", running: auditRunning, verdict: await verdict().catch(() => null), last: lastAudit },
       lastAction: k.get(K.LAST_ACTION, "") || "", contract: k.get(K.SCRIPT_ADDRESS, "") || "", granted: granted(), running: running(), vaultLocked: vaultWasLocked
@@ -1156,6 +1156,9 @@ function create(o) {
  * session; while it is failing and background signing was allowed, the user is told once (notify), and told nothing more
  * until it has started again. o = { start() -> promise, frozen() -> bool, granted() -> bool, notify(), now() }.
  */
+/** Which of the other apps have handed this address out as their own (review L3): sources = [{ app, address }]. Pure. */
+function handedOut(address, sources) { const k = canon(address); return [...new Set((sources || []).filter(x => x && x.address && canon(x.address) === k).map(x => x.app))]; }
+
 function createStarter(o) {
   const now = o.now || Date.now;
   let retryAt = 0, pause = 30000, said = false, busy = null;
@@ -1173,5 +1176,5 @@ function createStarter(o) {
   return { tick, reset };
 }
 
-module.exports = { create, createStarter, SCRIPT, KNOWN_ADDRESS, SECONDS_PER_BLOCK, K, S, CAP_POSTS, CAP_READS, SCRIPTS_EVERY, MIN_DEFAULTS_KEEP, FRESH_MS, MAX_MS,
+module.exports = { create, createStarter, handedOut, SCRIPT, KNOWN_ADDRESS, SECONDS_PER_BLOCK, K, S, CAP_POSTS, CAP_READS, SCRIPTS_EVERY, MIN_DEFAULTS_KEEP, FRESH_MS, MAX_MS,
   gateCheck, canon, mxToHex, scriptAddress, state, outAmount, sum, decEq, looksLikeFutureCash, isStake, matured, hasOwnKey, usesFingerprint, validAddr, validHexAddr, validMx };

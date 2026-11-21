@@ -5179,7 +5179,10 @@
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "Каждый перевод без вашего участия подписывается одноразовым ключом этого адреса. После такого числа за день защитник ждёт следующего дня; перевод вручную по-прежнему работает.",
   "Enter a whole number of at least 1.": "Введите целое число не меньше 1.",
   "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next не удалось запустить, поэтому его защитник не следит за вашими ставками. Попытка повторится сама.",
-  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "По адресу контракта у этого узла больше 5 000 ставок, поэтому новые ставки не обнаруживаются. Найденные раньше по-прежнему отслеживаются и переводятся."
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "По адресу контракта у этого узла больше 5 000 ставок, поэтому новые ставки не обнаруживаются. Найденные раньше по-прежнему отслеживаются и переводятся.",
+  "This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.": "Этот адрес выдавали как свой: {apps}. Платёж на него после вывода из оборота попадёт на ключ, которым обычные отправки пользоваться не могут; работающий защитник переведёт его на ваш безопасный адрес.",
+  "Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.": "Чат даёт каждому контакту тот адрес, который узел предлагает в этот момент, так что этот мог быть передан и там.",
+  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.": "Выведенных из оборота адресов: {n}. Когда защитник остановлен, платёж на любой из них больше не переводится на ваш безопасный адрес сам; он ждёт, пока вы вернёте его вручную."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5256,5 +5259,8 @@
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
   "Enter a whole number of at least 1.",
   "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.",
-  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept."
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.",
+  "This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.",
+  "Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.",
+  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand."
 ] });

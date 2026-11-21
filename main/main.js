@@ -456,7 +456,10 @@ node.on("status", (s) => {
 const FC_OPS = { status: () => futurecash.status(), stakes: () => futurecash.stakes(), audit: (force) => futurecash.audit(force === true), activity: () => futurecash.activity(),
   lock: (amount, blocks, recipient) => futurecash.lock(amount, blocks, recipient), collect: (coinid) => futurecash.collectNow(coinid), collectAll: () => futurecash.collectAll(),
   safeSameNode: () => futurecash.setSafeSameNode(), safeExternal: (addr) => futurecash.setSafeExternal(addr), stopRescue: () => futurecash.stopRescue(),
-  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), minAuto: (v) => futurecash.setMinAuto(v), signCap: (v) => futurecash.setSignCap(v), notify: (on) => futurecash.setFlag("notify", on === true),
+  autoCollect: (on) => futurecash.setFlag("auto_collect_safe", on === true), minAuto: (v) => futurecash.setMinAuto(v),
+  handedOut: (addr) => require("./futurecash").handedOut(addr, [{ app: "minimaMail", address: (() => { try { return mail.myReceivingAddress(); } catch (e) { return ""; } })() },
+    { app: "miniMall", address: (() => { try { return require("./shop-store").getMeta("vendorAddress") || ""; } catch (e) { return ""; } })() },
+    { app: "AtomiX", address: (() => { try { const pk = atomix.status().minimaPk; const a = pk && keyuses.addressOf(pk); return a ? a.hex : ""; } catch (e) { return ""; } })() }]),   // read only: what each has handed out as its own address signCap: (v) => futurecash.setSignCap(v), notify: (on) => futurecash.setFlag("notify", on === true),
   harden: () => futurecash.harden(), retire: (addr) => futurecash.retire(addr), sweep: (addr) => futurecash.sweepAddress(addr), recover: () => futurecash.recoverRetired(),
   resetHistory: () => futurecash.resetHistory(), guardian: (on) => fcGuardian(on === true), revoke: () => fcRevoke() };
 /**

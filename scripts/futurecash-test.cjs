@@ -761,3 +761,15 @@ test("L2: with sends only observed, a Send or a Consolidate still keeps off the 
   const obs = await as("wallet")("consolidate tokenid:0x00");
   assert.notEqual(obs.reserved, true, "a Dexicon hold is still only observed");
 });
+
+test("L3: Retire names the apps that handed the address out; Stop, Take back and Freeze warn while retired addresses exist", async () => {
+  const MX = "MxG081SDHCPHCMDEM4NU4GW54FSPPY9ASN55JJNKB8JYKYSE8BSPRQ985WP0KH6", HEX = "0x3C6C5998B2CD75897F1212291FCCE6A9572E52CE77A2D13AD2BC7217CCEF4941";
+  assert.deepEqual(FC.handedOut(HEX, [{ app: "minimaMail", address: MX }, { app: "miniMall", address: "" }, { app: "AtomiX", address: HEX.toLowerCase() }, { app: "x", address: PAY0 }]), ["minimaMail", "AtomiX"]);
+  const keys = [KEY0, KEY1, KEY2], { e, node } = await guardian({ keys });
+  const row = node.n.scripts.find(x => x.address === PAY2); row.default = false; row.publickey = "0x00";
+  await e._scripts(true); assert.equal((await e.status()).retired, 1);
+  const r = fs.readFileSync(path.join(__dirname, "..", "renderer", "futurecash.js"), "utf8"), app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"), main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(r.includes('api.fc("handedOut", a)') && r.includes('if (await fcnRetiredOk()) fcnAct(() => api.fc("guardian", false)') && r.includes('+ fcnRetiredNote(), t("Take back")'));
+  assert.ok(app.includes('id === "futurecash" && !FROZEN.includes(id) && !(await fcnRetiredOk('), "Freeze warns");
+  assert.ok(/handedOut: \(addr\) => require\("\.\/futurecash"\)\.handedOut\(addr, \[\{ app: "minimaMail"/.test(main) && main.includes("atomix.status().minimaPk") && main.includes('getMeta("vendorAddress")'));
+});

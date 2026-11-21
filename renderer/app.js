@@ -2896,6 +2896,7 @@ function renderApps() {
   el("appsList").querySelectorAll(".switch[data-freeze]:not([disabled])").forEach(sw => sw.onclick = async () => {
     const id = sw.dataset.freeze; sw.disabled = true;
     if (id === "entropy") entropyErased(t("Entropy was frozen."));
+    if (id === "futurecash" && !FROZEN.includes(id) && !(await fcnRetiredOk(await api.fc("status").catch(() => null)))) { sw.disabled = false; return; }   // retired addresses: freezing stops their sweeps (review L3)
     await setFrozen(id, !FROZEN.includes(id));
     if (activeView === "apps") { renderApps(); const again = el("appsList").querySelector(`.switch[data-freeze="${id}"]`); if (again && !document.querySelector(".overlay--dlg")) again.focus(); }
   });

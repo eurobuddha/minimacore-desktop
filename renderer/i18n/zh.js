@@ -5166,7 +5166,10 @@
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "每次无人值守的清扫都会使用该地址的一次性密钥签名。一天内超过此次数后，守护程序会等到第二天；手动清扫仍然可用。",
   "Enter a whole number of at least 1.": "请输入不小于 1 的整数。",
   "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next 无法启动，因此其守护程序没有在监视您的质押。它会自行重试。",
-  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "本节点在合约地址上的质押超过 5,000 笔，因此不会检测新的质押。此前找到的质押仍会被跟进和清扫。"
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "本节点在合约地址上的质押超过 5,000 笔，因此不会检测新的质押。此前找到的质押仍会被跟进和清扫。",
+  "This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.": "以下应用曾把此地址作为自己的地址给出：{apps}。停用后发往此地址的付款会落在普通发送无法使用的密钥上；运行中的守护程序会把它转移到您的安全地址。",
+  "Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.": "聊天会把节点当时提供的地址发给每个联系人，因此此地址也可能已在那里被分享过。",
+  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand.": "已停用的地址：{n}。守护程序停止后，发往其中任一地址的付款将不再自动转移到您的安全地址，而是等待您手动找回。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5243,5 +5246,8 @@
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
   "Enter a whole number of at least 1.",
   "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.",
-  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept."
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.",
+  "This address was handed out as their own by: {apps}. A payment sent to it after it is retired lands on a key ordinary sends cannot use; the running guardian moves it to your safe address.",
+  "Chat gives each contact whichever address the node offers at that moment, so this one may have been shared there too.",
+  "Retired addresses: {n}. With the guardian stopped, a payment to one of them is no longer moved to your safe address by itself; it waits for Recover by hand."
 ] });
