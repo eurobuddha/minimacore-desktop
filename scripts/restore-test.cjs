@@ -173,3 +173,17 @@ test("restore, restoresync, megammrsync file: / phrase: / action:resync and back
     assert.equal(restore.backupCommandProblem(c), "A backup password can hold letters and numbers only.", JSON.stringify(c));
   for (const c of ["backup password:abc123", 'backup password:"abc123"', '"backup" password : abc', "backup", "status;backup password:abc"]) assert.equal(restore.backupCommandProblem(c), "", JSON.stringify(c));
 });
+
+// ---- 0.19.218: every other command that replaces the keys or loads a backup is refused on the command channel ----
+test("archive / mysql with phrase:, reset seedsync / restore, vault action:resetkeys: refused however spelled; their plain chain forms are not", () => {
+  for (const c of ['archive action:resync host:h:9001 phrase:"a b c" keyuses:10', 'archive action:import file:x.raw.dat phrase:"a b"', 'archive action:importold file:x phrase:"a"', '"archive" action:resync "phrase":"a"',
+    "\u0001archive action:resync phrase:a", 'archive action : resync phrase : "a"', 'ar"chi"ve action:import file:x phrase:a', 'mysql action:resync phrase:"a b" keys:90', '"mysql"action:resync phrase:a',
+    'reset archivefile:x.gz action:seedsync keyuses:1000 phrase:"a b"', "reset action:restore file:b.bak password:x", 'reset action : restore file:b.bak', '"reset" action:seedsync archivefile:x',
+    "vault action:resetkeys phrase:a", 'vault action : resetkeys phrase:"a b"', '"vault"action:resetkeys', "status;archive action:resync phrase:a"])
+    assert.equal(restore.replacesKeysElsewhere(c), true, JSON.stringify(c));
+  for (const c of ["archive action:resync host:h:9001", "archive action:export", "archive action:inspect file:x", "mysql action:info", "reset action:chainsync archivefile:x", "vault", "vault action:seed",
+    "megammrsync action:resync phrase:a", "status", 'send amount:1 address:0xA state:{"phrase":"x"}'])
+    assert.equal(restore.replacesKeysElsewhere(c), false, JSON.stringify(c));
+  const main = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "main.js"), "utf8"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
+  assert.ok(h.indexOf("restore.replacesKeysElsewhere(command)") > 0 && h.indexOf("restore.replacesKeysElsewhere(command)") < h.indexOf("seedgate.refusal(command"), "refused before the gate asks anything");
+});

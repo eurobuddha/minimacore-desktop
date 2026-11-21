@@ -177,6 +177,25 @@ function activeWorkProblem(list) {
     + "\n\nNothing was changed. Let these finish or withdraw them, then try again. A swap that loses its wallet can be neither claimed nor refunded by this app." : "";
 }
 
+/**
+ * Does this node command (or any ;-separated part of it) replace the wallet's keys or load a backup by a path OTHER than
+ * the megammrsync one that node.runResync guards (0.19.218, read from the node's sources: core/Minima commands/backup)?
+ *   archive action:resync|import|importold|importraw … phrase:   (the seed is replaced: wallet.updateSeedRow)
+ *   mysql action:resync … phrase:                                   (the same)
+ *   reset action:seedsync … phrase:  /  reset action:restore file: password:   (seed sync from an archive, or a backup)
+ *   vault action:resetkeys phrase:                                  (wipes the databases and remakes every key)
+ * Parameters and verbs are read the way the node reads them (main/cmdverb.js); over-blocking on purpose: an archive, mysql
+ * or reset that names phrase:, file:, password: or archivefile: with a seed or backup action is refused whatever its spelling.
+ */
+function replacesKeysElsewhere(command) {
+  return V.parts(command).some(part => {
+    const action = (V.paramValue(part, "action") || "").toLowerCase(), named = (n) => V.paramValue(part, n) != null;
+    if (runsAs(part, "archive", "mysql")) return named("phrase");
+    if (runsAs(part, "reset")) return action === "seedsync" || action === "restore" || named("phrase") || named("password") || (named("file") && action !== "chainsync");
+    if (runsAs(part, "vault")) return action === "resetkeys";
+    return false;
+  });
+}
 /** Does this node command (or any ;-separated part of it) load a wallet from a backup file? */
 function loadsBackupFile(command) {
   return V.parts(command).some(part => runsAs(part, "restore", "restoresync") || (runsAs(part, "megammrsync") && hasParam(part, "file")));
@@ -200,5 +219,5 @@ async function restoreBackup(o, d) {
   return d.run(built.cmd);
 }
 
-module.exports = { isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+module.exports = { replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
   onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };

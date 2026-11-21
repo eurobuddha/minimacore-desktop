@@ -272,7 +272,7 @@ test("a send that repeats amount, tokenid, address or fromaddress is refused bef
   // the handler, run: the refusal comes before the node is asked anything
   const h = mainJs.slice(mainJs.indexOf('ipcMain.handle("mcd:cmd"'));
   const body = h.slice(h.indexOf("{") + 1, h.indexOf("\n  requireRunning();"));
-  const run = new Function("cmdverb", "command", body);
+  const run0 = new Function("cmdverb", "restore", "command", body), run = (V, c) => run0(V, require("../main/restore"), c);
   for (const c of ["send amount:1 address:0xA amount:9", '"send" address:0xA amount:1 "address":0xB', "status;send amount:1 tokenid:0x00 address:0xA tokenid:" + MXUSD])
     assert.throws(() => run(V, c), /^Error: This send names (amount|address|tokenid) more than once \(the node would use only the last\)\. Write each once\.$/, c);
   for (const c of ["send amount:1 address:0xA", "sendpoll action:list action:remove", "txnoutput id:a amount:1 amount:2"]) assert.doesNotThrow(() => run(V, c), c);

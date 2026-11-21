@@ -368,6 +368,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
     ["RPC_ONE_COMMAND", I18N.N_("This command holds \";\", which would start a second command. Nothing was sent.")],
     ["MAIN_SEND_REPEATED", I18N.N_("This send names {names} more than once (the node would use only the last). Write each once.")],
+    ["MAIN_REPLACES_KEYS", I18N.N_("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.")],
     ["MAIN_CONTROL_CHAR", I18N.N_("This command holds a control character. Type it again without one.")],
     ["SG_GATED_SEED", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows the seed phrase. Type SHOW SEED in the Terminal to run it.")],
     ["SG_GATED_KEY", I18N.N_("vault, seedrandom and keys action:genkey show a seed or a private key; this one shows a private key. Type SHOW KEY in the Terminal to run it.")],

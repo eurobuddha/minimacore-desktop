@@ -227,6 +227,8 @@ ipcMain.handle("mcd:cmd", async (_e, command) => {
     const twice = cmdverb.is(part, "send") ? cmdverb.repeated(part, ["amount", "tokenid", "address", "fromaddress"]) : [];
     if (twice.length) throw new Error("This send names " + twice.join(", ") + " more than once (the node would use only the last). Write each once.");
   }
+  // archive / mysql / reset with a phrase or a backup, vault action:resetkeys: the keys change with no engine held and no key-mode check (0.19.218)
+  if (restore.replacesKeysElsewhere(command)) throw new Error("This command replaces this wallet's keys or loads a backup outside Backup & Recovery, which checks the key mode and stops the trading engines first. Use Backup & Recovery. Nothing was run.");
   requireRunning();
   // vault / seedrandom / keys genkey read as the node reads them: only with a pass; a chain is refused. The deciding check.
   const gated = seedgate.refusal(command, secretGate.take); if (gated) throw new Error(gated);

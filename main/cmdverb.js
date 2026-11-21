@@ -38,11 +38,32 @@ function beginsAs(part, prefix) { return verbs(part).some(v => v.startsWith(pref
  *  as `txninput id:a`, as the node's fast path reads it (released: `txninputid:a`, and its id: was not seen). */
 function paramsText(part) { return jtrim(jtrim(String(part)).replace(/^"([^"]*)"/, "$1 ").replace(/"/g, "")).replace(/[ \t]*:[ \t]*/g, ":"); }
 
-/** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb, read
- *  from paramsText (quotes dropped, " : " closed up). The node keeps the LAST of a repeated name. */
+/** The parameter names of ONE command, in order, repeats kept (0.18.184): every top-level `name:` after the verb. The node
+ *  keeps the LAST of a repeated name. Read from namesText since 0.19.218 (released 0.18.189 / 0.18.197). */
 function paramNames(part) {
-  const t = paramsText(part), rest = t.replace(/^\S+/, "");
+  const rest = namesText(part).replace(/^\S+/, "");
   return [...rest.matchAll(/(?:^|\s)([A-Za-z0-9_.-]+):/g)].map(m => fold(m[1]));
+}
+/** The text the parameter NAMES are read from (released 0.18.189 / 0.18.197, ported 0.19.218): quotes become spaces (a name
+ *  glued after a closing quote, `action:"list"action:genkey`, is its own name, as the node reads it), whatever stands inside
+ *  {…} or […] is blanked (a key in a state's JSON is not a parameter), a { or [ inside a quoted value opens nothing, and
+ *  " : " is closed up. Values that need quotes are not read here. */
+function namesText(part) {
+  const s = jtrim(String(part));
+  let out = "", depth = 0, quoted = false;
+  for (const ch of s) {
+    if (ch === '"') { quoted = !quoted; out += " "; continue; }
+    if (quoted) { out += depth > 0 ? " " : ch; continue; }
+    if (ch === "{" || ch === "[") { depth++; out += ch; continue; }
+    if ((ch === "}" || ch === "]") && depth > 0) { depth--; out += ch; continue; }
+    out += depth > 0 ? " " : ch;
+  }
+  return out.replace(/[ \t]*:[ \t]*/g, ":");
+}
+/** The LAST top-level value of `name` in ONE command (as the node keeps it), or null (released 0.18.196). */
+function paramValue(part, name) {
+  const all = [...namesText(part).matchAll(new RegExp("(?:^|\\s)" + name + ":(\\S*)", "gi"))];
+  return all.length ? all[all.length - 1][1] : null;
 }
 /** The names that appear more than once in ONE command (lower-cased). */
 function repeated(part, only) {
@@ -64,4 +85,4 @@ function oneCommand(command) {
   if (String(command).includes(";")) throw new Error("This command holds \";\", which would start a second command. Nothing was sent.");
   return command;
 }
-module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, paramNames, repeated, oneCommand };
+module.exports = { jtrim, fold, parts, verbs, is, beginsAs, paramsText, namesText, paramNames, repeated, paramValue, oneCommand };
