@@ -82,9 +82,15 @@ function maskedWords(c) {
     .replace(/\s+/g, " ").trim().split(" ");
   // the words after a hidden value up to the next name:value are hidden too (0.19.282): the node drops them or joins them to the
   // value (`phrase:spray lamp` showed `lamp`, a 24-word phrase typed unquoted showed 23 words)
-  let hiding = false;
-  for (let i = 0; i < words.length; i++) { const w = words[i]; if (/•••"?$/.test(w)) { hiding = true; continue; } if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else words[i] = "•••"; } }   // a name ends it, also one spaced from its ":"
-  return words.join(" ");
+  // Said as a count, as masked() says several words (0.19.311): `phrase:"••• (4 words)"`, never one ••• a word on any surface
+  let hiding = false, start = -1; const follow = new Array(words.length).fill(0), out = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (/•••"?$/.test(w) && (w.includes(":") || words[i - 1] === ":")) { hiding = true; start = i; continue; }   // a hidden name:value starts a run; a bare ••• is one of its words
+    if (hiding) { if (w.includes(":") || /^:/.test(words[i + 1] || "")) hiding = false; else { follow[start]++; words[i] = null; } }   // a name ends it, also one spaced from its ":"
+  }
+  for (let i = 0; i < words.length; i++) if (words[i] !== null) out.push(follow[i] ? words[i].replace(/"?•••"?$/, '"••• (' + (follow[i] + 1) + ' words)"') : words[i]);
+  return out.join(" ");
 }
 /** The secret words a typed command carries (0.19.292): each secret parameter's value as the node reads it and its words, and the
  *  bare words after one that the node drops or joins (the ones masked() hides), three characters or more. */

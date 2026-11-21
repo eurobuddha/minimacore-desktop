@@ -346,7 +346,7 @@ test("the texts the review ran through the node: every check reads what the node
 test("secrets stay hidden: privatekey: is masked, so are the words after a hidden value, and the node's reply params are scrubbed before the window gets them", async () => {
   assert.equal(G.masked("sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD keyuses:5"), "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:••• keyuses:5");
   assert.equal(G.masked("vault action:restorekeys phrase:spray lamp"), "vault action:restorekeys phrase:•••", "CHANGED on purpose (0.19.293): shown as the node reads it, which drops 'lamp'");
-  assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), "megammrsync action:resync host:h:9001 phrase:••• ••• ••• ••• keyuses:5");
+  assert.equal(G.masked("megammrsync action:resync host:h:9001 phrase:w1 w2 w3 w4 keyuses:5"), 'megammrsync action:resync host:h:9001 phrase:"••• (4 words)" keyuses:5', "a count also where the node would refuse the text (0.19.311)");
   assert.equal(G.masked('vault action:passwordunlock password:"my secret" seed : 0xAB confirm:x'), 'vault action:passwordunlock password:"••• (2 words)" seed:••• confirm:•••', "a spaced name still ends it");
   const main = SRC("main/main.js"), kh = main.slice(main.indexOf('ipcMain.handle("mcd:cmdKind"'), main.indexOf('ipcMain.handle("mcd:cmd", async')), handlers = {};
   new Function("ipcMain", "seedgate", "rpc", kh)({ handle: (n, f) => { handlers[n] = f; } }, G, require("../main/rpc.js"));
@@ -404,7 +404,7 @@ test("the node's reply is scrubbed of the typed command's secrets (its 'command'
   const typed = "vault action:restorekeys phrase:spray lamp keyz:1";
   const r = G.scrubReply({ command: typed, params: { action: "restorekeys", phrase: "spray", keyz: "1" }, status: false, error: "Invalid parameter : keyz", more: ["Invalid parameters for vault @ lamp", "spraying is a word"] }, typed);
   const s = JSON.stringify(r);
-  assert.ok(!/\bspray\b|\blamp\b/.test(s), s); assert.equal(r.command, "vault action:restorekeys phrase:••• ••• keyz:1"); assert.equal(r.more[0], "Invalid parameters for vault @ •••"); assert.equal(r.more[1], "spraying is a word", "whole words only");
+  assert.ok(!/\bspray\b|\blamp\b/.test(s), s); assert.equal(r.command, 'vault action:restorekeys phrase:"••• (2 words)" keyz:1'); assert.equal(r.more[0], "Invalid parameters for vault @ •••"); assert.equal(r.more[1], "spraying is a word", "whole words only");
   const pk = "sendfrom fromaddress:0xAA address:0xBB amount:1 privatekey:0x1234ABCD9 keyuses:5 foo:1";
   assert.ok(!JSON.stringify(G.scrubReply({ command: pk, status: false, error: "Invalid parameter : foo" }, pk)).includes("0x1234ABCD9"));
   // through the real mcd:cmd handler
@@ -576,4 +576,13 @@ test("rawfrom's input script and a multisig id are not pasted and pass; a multis
     "multisig action:view file:C:" + B + "txns" + B + "a.txn", "multisigread action:view file:/Users/me/a.txn"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
   for (const c of ['multisig action:view file:"a b.txn"', "multisig action:sign file:x:y privatekey:0x01", 'rawfrom inputs:[{"coinid":"0x01 burn:5"}] outputs:[]'])
     await assert.rejects(hs["mcd:cmd"](null, c), /builds further commands/, c);
+});
+
+// ---- 0.19.311: a text the node would refuse is masked with the word count too: no surface shows one ••• a word ----
+test("masked says several hidden words as a count also for a text the node would refuse (a word with no ':')", () => {
+  const phr24 = Array.from({ length: 24 }, (_, i) => "word" + i).join(" ");
+  const m = G.masked("megammrsync action:resync host:megammr.example:9001 phrase:" + phr24 + " keyuses:1000");
+  assert.equal(m, 'megammrsync action:resync host:megammr.example:9001 phrase:"••• (24 words)" keyuses:1000'); assert.ok(!/••• •••/.test(m));
+  assert.equal(G.masked("vault seed : 0xAB extra words action:x"), 'vault seed : "••• (3 words)" action:x', "a name spaced from its ':' too");
+  assert.equal(G.masked("vault action:restorekeys phrase:one"), "vault action:restorekeys phrase:•••");
 });
