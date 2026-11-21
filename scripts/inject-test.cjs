@@ -96,3 +96,17 @@ test("0.19.196: a peer's media is fetched into a quoted file path (the data fold
   await chat.fetchMedia("keets://" + "ab".repeat(32) + "/chat/img-2.png").catch(() => {});
   assert.match(sent[0], /^keets action:fetch url:keets:\/\/[0-9a-f]{64}\/chat\/img-2\.png file:"[^";]+\.png"$/);
 });
+// ---- 0.19.198 (released 0.18.180): the Web Wallet's log line names the token id and the addresses whole ----
+test("Web Wallet: a sent payment is logged with its whole token id and addresses", async () => {
+  const ww = require("../main/webwallet");
+  const FROM = "0x" + "AA".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "BB".repeat(32), MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
+    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
+  ww.ackKeyuses(FROM, 0);
+  const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
+  assert.equal(r.ok, true);
+  const line = ww.status().log.slice(-1)[0];
+  assert.ok(line.includes("token " + MXUSD) && line.includes("from " + FROM) && line.includes("to " + TO), line);
+});

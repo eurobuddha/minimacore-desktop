@@ -430,7 +430,7 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
   assert.ok(/function wwLock\(\) \{ wwSeed = null;/.test(ww), "Logout clears the seed");
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
-  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "0f98bab58690e40001e9443dd5d77d4f37070efca8441a01c1b061aea00b0fbb", "main/webwallet.js is the file of 0.19.194 (changed on purpose: every command through rpc.oneCommand, a phrase with ; refused; before that, of 0.19.107)");
+  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "a750d13389de14effd019f98497dfcb6b2372a4ec7b5d25d3c44a1f3e1ba5a40", "main/webwallet.js is the file of 0.19.198 (changed on purpose: 0.19.194 every command through rpc.oneCommand, a phrase with ; refused; 0.19.198 ids whole in its log; before that, of 0.19.107)");
 });
 // 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
 // redirects, and an unread figure counted as 0.

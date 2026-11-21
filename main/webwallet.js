@@ -219,7 +219,7 @@ async function send(opts) {
     catch (e) { return { ok: false, ambiguous: true, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying." }; }
     const nok = nr && (nr.status === true || nr.pending === true);
     if (!nok) return { ok: false, message: (nr && (nr.error || nr.message)) || "Send failed" };
-    log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : tok.slice(0, 10)) + " (node wallet)");
+    log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : "token " + tok) + " to " + to + " (node wallet)");   // identifiers whole (0.19.198, as released 0.18.180)
     emitter.emit("update");
     const ntx = resp(nr) && (resp(nr).txpowid || (resp(nr).body && resp(nr).body.txn && resp(nr).body.txn.transactionid));
     return { ok: true, txnid: ntx || null };
@@ -253,7 +253,7 @@ async function send(opts) {
   }
   const ok = r && (r.status === true || r.pending === true);
   if (!ok) return { ok: false, keyuse: n, message: (r && (r.error || r.message)) || "Send failed" };
-  log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : tok.slice(0, 10)) + " from " + fromaddress.slice(0, 10) + " (keyuse " + n + ")");
+  log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : "token " + tok) + " from " + fromaddress + " to " + to + " (keyuse " + n + ")");   // identifiers whole (0.19.198, as released 0.18.180)
   emitter.emit("update");
   const txnid = resp(r) && (resp(r).txpowid || (resp(r).body && resp(r).body.txn && resp(r).body.txn.transactionid));
   return { ok: true, keyuse: n, txnid: txnid || null };
@@ -263,7 +263,7 @@ function status() { return { log: LOG_RING.slice(-20) }; }
 
 module.exports = {
   emitter, isMegammr, derive, read, send,
-  keyusesInfo, ackKeyuses,
+  keyusesInfo, ackKeyuses, status,
   _setRunner: (fn) => { runner0 = fn; },
   // exported for unit tests
   _validators: { looksLikeMinimaAddress, isPhrase, isAmount, isTokenid, isScript, isPrivKey }
