@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.287] — The node jars with the command-injection fix and the RPC hardening
+
+- `resources/minima.jar` is minima-core 1.1.2.3-euro8 (sha256 `fc63eb672374e7ceb7cfba17d0e098e3c2991c9a0ef124b0a14fae111c088ef9`) and the Parlons node pin moves to 0.2.162 (`parlonsNodeSha256` `65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1`, maxima release `node-v0.2.162`). Built sub-commands are never re-parsed from text (no `;` / quote injection); the RPC binds 127.0.0.1 unless `-rpcbind`, checks Host and browser Origin and reads its body by bytes with a cap; a read-mode RPC user runs as non-admin; non-admin callers only create plain `.txn` files in the base folder. The app already uses its node on 127.0.0.1 and passes no flag the jars refuse.
+- Not in these jars (owner, 21 Nov 2026): the wallet-key capacity guard; the node wallet's own keys still restart at leaf 0 past 262144 uses, as upstream.
+
 ## [0.18.286] — miniMall: the payments' own cause
 
 - When the orders read past the node's tree was whole but the payments read was cut by the reply cap, the notice names the reply cap for the payments. Test: `scripts/shop-test.cjs`.
