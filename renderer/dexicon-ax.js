@@ -21,12 +21,27 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** the engine's own sentences say mxUSDT; the token is MxUSD (DoorHost.mx) */
   const mx = (s) => String(s == null ? "" : s).replace(/mxusdt/gi, "MxUSD");
   const tok = (t) => { if (typeof t === "string" && t.indexOf("0x") === 0) { const l = t.toLowerCase(); if (l === "0x00") return "MINIMA"; if (l.indexOf("7d39745") >= 0) return "MxUSD"; } return ccyName(t); };
-  /** a price: 6 significant figures (the panel's fmtPx, AX.fmt.px) */
-  const fmtPx = (p) => { p = Number(p); if (!isFinite(p) || p <= 0) return "0"; let s = p.toPrecision(6); if (s.indexOf("e") < 0 && s.indexOf(".") > -1) s = s.replace(/0+$/, "").replace(/\.$/, ""); return s; };
+  /** A number's exact decimal text, never an exponent (1e-7 is 0.0000001), or "" when it is not a plain number. */
+  const plainNum = (x) => {
+    let t = String(typeof x === "number" ? x : x == null ? "" : x).trim(), neg = "";
+    if (t[0] === "-") { neg = "-"; t = t.slice(1); }
+    const m = /^(\d+)(?:\.(\d*))?e([+-]?\d+)$/i.exec(t);
+    if (m) { const d = m[1] + (m[2] || ""), pt = m[1].length + Number(m[3]); t = pt <= 0 ? "0." + "0".repeat(-pt) + d : pt >= d.length ? d + "0".repeat(pt - d.length) : d.slice(0, pt) + "." + d.slice(pt); }
+    return /^\d+(\.\d*)?$/.test(t) ? neg + t : "";
+  };
+  /** a price: 6 significant figures, CUT (0.19.256: toPrecision rounded, so a bid could read above what was set); a price of
+   *  a million or more keeps its whole integer part (no exponent) */
+  const fmtPx = (p) => {
+    const t = plainNum(p); if (!t || t[0] === "-" || !(Number(t) > 0)) return "0";
+    const [i0, f = ""] = t.split("."), i = i0.replace(/^0+/, "");
+    let s = i ? (i.length >= 6 ? i : i + "." + f.slice(0, 6 - i.length)) : "0." + f.slice(0, f.match(/^0*/)[0].length + 6);
+    if (s.indexOf(".") > -1) s = s.replace(/0+$/, "").replace(/\.$/, "");
+    return s || "0";
+  };
   /** a book size, cut: "k" from 1000 (the panel's fmtAbbrev) */
   const abbrev = (v) => { v = Number(v); if (!(v > 0)) return "—"; const trim = (x) => { const f = Math.pow(10, x < 10 ? 2 : 1); return (Math.floor(x * f) / f).toString(); }; return v >= 1000 ? trim(v / 1000) + "k" : trim(v); };
-  /** an amount for display, CUT to dp decimals, never rounded up (float noise below 1e-9 aside) */
-  const cut = (n, dp) => { n = Number(n); if (!isFinite(n)) return String(n); const s = n.toFixed(9), i = s.indexOf("."); return (s.slice(0, i + 1 + (dp == null ? 6 : dp))).replace(/0+$/, "").replace(/\.$/, "") || "0"; };
+  /** an amount for display, CUT to dp decimals from its exact decimal text, never rounded (0.19.256: it was rounded to nine decimals first) */
+  const cut = (n, dp) => { const t = plainNum(n); if (!t) return String(Number(n)); const i = t.indexOf("."); return (i < 0 ? t : t.slice(0, i + 1 + (dp == null ? 6 : dp))).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") || "0"; };
   /** the panel's ax6: the live estimate, floored to 6 decimals */
   const ax6 = (x) => (isFinite(x) && x > 0 ? String(Math.floor(x * 1e6) / 1e6) : "");
   /** A typed amount as a plain number text. A comma or a second point is never read as anything ("" = no amount):

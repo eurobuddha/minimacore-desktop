@@ -111,6 +111,12 @@ test("amounts are cut, never rounded; prices keep six significant figures; sizes
   assert.equal(AX.cut(118.8118819, 6), "118.811881"); assert.equal(AX.cut(4.2, 6), "4.2"); assert.equal(AX.cut(0.9999999, 6), "0.999999"); assert.equal(AX.cut(1000, 6), "1000");
   assert.equal(AX.ax6(49.9999999), "49.999999"); assert.equal(AX.ax6(0), "");
   assert.equal(AX.fmtPx(1.011583), "1.01158"); assert.equal(AX.fmtPx(0.99), "0.99"); assert.equal(AX.fmtPx(0), "0");
+  // cut, never rounded (0.19.256): toPrecision and toFixed rounded these up
+  assert.equal(AX.fmtPx(1.0115899), "1.01158"); assert.equal(AX.fmtPx(0.00332689), "0.00332689"); assert.equal(AX.fmtPx(9.9999999), "9.99999"); assert.equal(AX.fmtPx(1e-7), "0.0000001");
+  assert.equal(AX.cut(0.9999999999, 6), "0.999999"); assert.equal(AX.cut(1e-7, 9), "0.0000001"); assert.equal(AX.cut("12.3400", 2), "12.34");
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "dexicon-ax.js"), "utf8");
+  const fmt = src.slice(src.indexOf("const plainNum = "), src.indexOf("const ax6 = "));
+  assert.ok(fmt.length > 200 && !/toPrecision\(|toFixed\(/.test(fmt), "no rounding in the screens' price and amount formatters");
   assert.equal(AX.abbrev(10199.9), "10.1k"); assert.equal(AX.abbrev(9.999), "9.99"); assert.equal(AX.abbrev(0), "—");
 });
 test("the token is MxUSD wherever a user reads it; USDT names only the Ethereum leg", () => {
@@ -210,7 +216,11 @@ for (const c of FORMS) test(`Save & publish, ${c.name}: the same call and the sa
 test("the editor's prices from mid, step and skew are the old editor's, rung for rung", async () => {
   for (const [mid, step, bias, levels] of [["1", "1", "0", "3"], ["0.00332683", "0.5", "-2", "6"], ["1.0004", "2.5", "35", "2"], ["1", "1", "0", "0"], ["", "1", "0", "3"], ["1", "0", "0", "3"]]) {
     const was = old(`ladder|${[mid, step, bias, levels].join("/")}`);
-    assert.deepEqual(AX.ladderPrices(mid, step, bias, levels), was, [mid, step, bias, levels].join(" / "));
+    // CHANGED on purpose (0.19.256): a price is cut to six significant figures, never rounded: each is the old editor's, or
+    // the old one was rounded UP from it by one in the sixth figure
+    const now = AX.ladderPrices(mid, step, bias, levels), near = (a, b) => a === b || (Number(a) < Number(b) && Number(b) - Number(a) <= Math.pow(10, Math.floor(Math.log10(Number(b))) - 5) * (1 + 1e-9));
+    assert.equal(now.length, was.length, [mid, step, bias, levels].join(" / "));
+    now.forEach((r, i) => { assert.ok(near(r.bid, was[i].bid) && near(r.ask, was[i].ask), [mid, step, bias, levels].join(" / ") + ": " + JSON.stringify([r, was[i]])); });
   }
 });
 for (const confirm of [true, false]) test(`Publish and Withdraw (${confirm ? "confirmed" : "closed"}): axMakerPublish at once, axMakerWithdraw only after the old confirm`, async () => {
@@ -601,7 +611,7 @@ test("lows: a swap in ERROR whose window is open is not finished: it stays In pr
   assert.equal(require("../main/atomix")._projectRow(A, { status: "ERROR", myTimelock: 100 }, [], 0, 150).inWindow, false);
 });
 test("lows: a rung's size is the number as typed: not six significant figures, not an exponent (the old panel's fmtPx(size) did both; parity ends here on purpose)", () => {
-  assert.equal(AX.rungSize("1234567.89"), "1234567.89"); assert.equal(AX.fmtPx(1234567.89), "1.23457e+6", "what the old editor wrote");
+  assert.equal(AX.rungSize("1234567.89"), "1234567.89"); assert.equal(AX.fmtPx(1234567.89), "1234567", "a price is cut and never an exponent (CHANGED on purpose, 0.19.256; the old editor wrote 1.23457e+6)");
   assert.equal(AX.rungSize("0.000000123"), "0.000000123"); assert.equal(AX.rungSize("250"), "250"); assert.equal(AX.rungSize("abc"), ""); assert.equal(AX.rungSize("0"), "");
   const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
   assert.ok(!/fmtPx\(size\)/.test(src), "no size passes through the price format");
