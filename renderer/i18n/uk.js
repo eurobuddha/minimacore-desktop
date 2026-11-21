@@ -5178,7 +5178,8 @@
   "Daily signature limit per address": "Денний ліміт підписів на адресу",
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "Кожен переказ без вашої участі підписується одноразовим ключем цієї адреси. Після такої кількості за день захисник чекає наступного дня; переказ вручну як і раніше працює.",
   "Enter a whole number of at least 1.": "Введіть ціле число, не менше 1.",
-  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next не вдалося запустити, тому його захисник не стежить за вашими ставками. Спроба повториться сама."
+  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next не вдалося запустити, тому його захисник не стежить за вашими ставками. Спроба повториться сама.",
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "За адресою контракту в цього вузла понад 5 000 ставок, тому нові ставки не виявляються. Знайдені раніше й далі відстежуються та переказуються."
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5254,5 +5255,6 @@
   "Daily signature limit per address",
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
   "Enter a whole number of at least 1.",
-  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself."
+  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.",
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept."
 ] });

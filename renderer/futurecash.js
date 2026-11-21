@@ -187,6 +187,7 @@ function paintFutureCash() {
   if (!running) body = `<div class="fcn-banner" role="status">${th("The node is not running. Start it on the Node tab. Until then nothing can be collected or rescued.")}</div>`;
   else if (st && !st.started) body = `<div class="fcn-banner" role="alert">${esc(st.error ? fcnSay(st.error) : t("Checking…"))}</div>`;
   else body = "";
+  if (st && st.started && st.tooMany) body += `<div class="fcn-banner" role="status">${th("More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.")}</div>`;
   if (FCN.tab === "help") body += FCN_HELP.map(([h, b]) => `<div class="fcn-card"><h3 class="fcn-h">${esc(t(h))}</h3><p class="fcn-dim fcn-pre fcn-small2">${esc(t(b))}</p></div>`).join("");
   else if (st && st.started) body += FCN.tab === "stakes" ? fcnStakes() : FCN.tab === "activity" ? fcnActivity()
     : fcnHero(st) + fcnAudit(st) + fcnDaemon(st) + fcnSafe(st) + fcnRisk(st) + fcnRecover(FCN.harden) + fcnHarden(FCN.harden) + fcnKeys(st);

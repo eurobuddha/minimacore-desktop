@@ -5165,7 +5165,8 @@
   "Daily signature limit per address": "每个地址的每日签名上限",
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.": "每次无人值守的清扫都会使用该地址的一次性密钥签名。一天内超过此次数后，守护程序会等到第二天；手动清扫仍然可用。",
   "Enter a whole number of at least 1.": "请输入不小于 1 的整数。",
-  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next 无法启动，因此其守护程序没有在监视您的质押。它会自行重试。"
+  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.": "Future Cash Next 无法启动，因此其守护程序没有在监视您的质押。它会自行重试。",
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept.": "本节点在合约地址上的质押超过 5,000 笔，因此不会检测新的质押。此前找到的质押仍会被跟进和清扫。"
 }, { same: ["Future Cash Next", "Future Cash"], review: [
   "Allow background signing",
   "Let Future Cash Next sign by itself?",
@@ -5241,5 +5242,6 @@
   "Daily signature limit per address",
   "Each unattended sweep signs with that address's one-time key. Past this many in a day the guardian waits until the next day; a Sweep by hand still works.",
   "Enter a whole number of at least 1.",
-  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself."
+  "Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself.",
+  "More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept."
 ] });

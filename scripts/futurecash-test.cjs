@@ -107,7 +107,7 @@ test("the stake read is scoped to the contract address: never the whole wallet, 
 test("an incomplete or oversized stake read is said, never shown as no stakes", async () => {
   for (const bad of [{ status: false, error: "x" }, { status: true, pending: true, response: [] }, { status: true, response: {} }, { status: true, response: [null] }, { status: true, response: new Array(5001).fill(stake(9, PAY0)) }]) {
     const { e } = await engine({ answer: { "coins relevant:true address:": async () => bad } });
-    await assert.rejects(e.stakes(), /Could not read the complete stake list/);
+    await assert.rejects(e.stakes(), bad.response && bad.response.length > 5000 ? /More than 5,000 stakes/ : /Could not read the complete stake list/);
   }
 });
 
@@ -722,4 +722,17 @@ test("M3: a failed start is tried again with growing pauses for the whole node s
   t += 30000; await st.tick(); assert.equal(starts, 3); assert.equal(said.length, 1, "said once while failing");
   t += 600000; assert.equal(await st.tick(), true); assert.equal(starts, 4, "started: never given up");
   frozen = true; t += 1e7; assert.equal(await st.tick(), false); assert.equal(starts, 4, "frozen: not started");
+});
+
+test("M4: a stake list over 5,000 rows skips detection, but known rows are still settled and swept, and the screen says so", async () => {
+  const s1 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  await e.pass(150);
+  node.n.at[FC.KNOWN_ADDRESS] = new Array(5001).fill(stake(9, STRANGER)); node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  node.sent.length = 0; assert.equal(await e.pass(152), true);
+  assert.equal(node.sent.filter(c => /^txnsign/.test(c)).length, 1, "the known collect's coin is swept");
+  assert.equal((await e.status()).tooMany, true);
+  assert.equal(e.activity().filter(l => /^More than 5,000 stakes/.test(l.msg)).length, 1);
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "renderer", "futurecash.js"), "utf8").includes("st.tooMany"));
 });

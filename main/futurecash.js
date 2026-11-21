@@ -195,6 +195,7 @@ function create(o) {
   let store = null, walletKey = "", opening = null, startedAt = 0, openError = "", lastFile = "";
   let scriptsCache = null;      // { block, rows, keys } — the node's script table and keys, read when needed
   const atRisk = new Set();
+  let tooMany = false;
   const nextRead = new Map();   // coin id -> the block before which a row that did not resolve is not asked about again
   let lastTip = 0, auditRunning = false, lastAudit = null, passing = null, lockSaid = false, offSaid = false, vaultWasLocked = false;
 
@@ -292,7 +293,7 @@ function create(o) {
     for (const a of list) {
       const r = await call("coins relevant:true address:" + a);
       if (!r || r.status !== true || r.pending === true || !Array.isArray(r.response)) throw new Error("Could not read the complete stake list. Refresh and retry.");
-      if (r.response.length > STAKE_ROWS_MAX) throw new Error("Could not read the complete stake list. Refresh and retry.");
+      if (r.response.length > STAKE_ROWS_MAX) throw Object.assign(new Error("More than 5,000 stakes are at the contract address for this node, so new stakes are not detected. Stakes found before are still followed and swept."), { tooMany: true });
       for (const c of r.response) {
         if (!c || typeof c !== "object") throw new Error("Could not read the complete stake list. Refresh and retry.");
         if (isStake(c, list) && owns(sets, state(c, ST_RECIPIENT))) found.set(lc(c.coinid), c);
@@ -1067,7 +1068,10 @@ function create(o) {
         lastTip = t; kv().set(K.LAST_TIP, String(t));
         const sets = await scriptTable(false), budget = { reads: CAP_READS, sweepReads: CAP_READS, collects: CAP_POSTS, sweeps: CAP_POSTS };   // apart: collects never starve a sweep
         loadAtRisk(sets);
-        const seen = await detect(sets);
+        // a stake list too large to read whole (review M4): no detection this pass, but what is known is still settled and swept
+        let seen;
+        try { seen = await detect(sets); tooMany = false; }
+        catch (e) { if (!e.tooMany) throw e; seen = new Map(); if (!tooMany) activity("warn", e.message); tooMany = true; }
         const go = running(), rescueOn = kv().is(K.ENABLED, false), safe = kv().get(K.SAFE_ADDRESS, null);
         // rescue needs a usable destination AND an unlocked vault, both known BEFORE an at-risk stake is collected
         let canSweep = false, vault = false;
@@ -1131,7 +1135,7 @@ function create(o) {
       readySafe: ready(false), readyRisk: ready(true),
       pendRisk: { n: pend.length, total: sum(pend.map(p => p.amount)), soonest: pend.length ? Math.min(...pend.map(p => p.mature)) : 0 },
       atRiskKnown: atRisk.size, atRiskList: Array.isArray(flagged) ? flagged.filter(validAddr) : [],
-      guardianOn: k.is(K.GUARDIAN_ON, false), minAuto: minAuto(), signCap: signCap(), classic: !!(o.keyMode && o.keyMode() === "classic"), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
+      guardianOn: k.is(K.GUARDIAN_ON, false), tooMany, minAuto: minAuto(), signCap: signCap(), classic: !!(o.keyMode && o.keyMode() === "classic"), rescueOn: k.is(K.ENABLED, false), autoCollect: k.is(K.AUTO_COLLECT_SAFE, false), notify: k.is(K.NOTIFY, true),
       safe: k.get(K.SAFE_ADDRESS, ""), sameNode: k.get(K.SAFE_MODE, "external") === "samenode", safeReused: safeReused(),
       audit: { at: k.getLong(K.AUDIT_AT), ok: k.is(K.AUDIT_OK, false), error: k.get(K.AUDIT_LAST_ERR, "") || "", running: auditRunning, verdict: await verdict().catch(() => null), last: lastAudit },
       lastAction: k.get(K.LAST_ACTION, "") || "", contract: k.get(K.SCRIPT_ADDRESS, "") || "", granted: granted(), running: running(), vaultLocked: vaultWasLocked
