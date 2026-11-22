@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.351] — Vestr: the node's mempool answer decides a second collect; the session list is gone (as released 0.18.296)
+
+- 0.19.347 kept the coins collected in this session and refused them again while the node still listed them. `checkmempool:true` already leaves out a coin that a collect is really spending, so the list refused exactly the collects that had NOT gone through (an unanswered post whose coin is still listed and not in the mempool), for the rest of the session. It is removed; both coin reads keep `checkmempool:true`.
+- The phone's rule (base-vestr-2.2.76 `Contract.alreadySpending`, its `l10n_vestr_already_spending` in en / zh / ru / uk): a clean, successful, empty answer to `coins coinid:<id> checkmempool:true` refuses with "A collect of this coin is already waiting for the chain, or the coin is already spent. Nothing was sent." — but not while the node has no tip (it then lists nothing): the tip refusal comes first. A failed or malformed answer does not block: the coin is read without the flag, and `txninput` and `txncheck` judge the collect; "Contract coin not found (already collected?)" only when neither read finds it. The old sentence ("This contract coin was collected a moment ago…") is gone from main, renderer/mainsaid.js (VESTR_ALREADY_SPENDING in place of VESTR_COLLECTED_HERE) and the zh / ru / uk catalogs.
+- Tests (scripts/inject-test.cjs): the session-list tests replaced on purpose (V1: the clean empty answer, the tip first, five failed or malformed answers that do not block; the 0.19.239 test: a post that may have gone, its coin still listed, collected again); V4, the review's scenario: an unanswered post, the coin still listed and not in the mempool, three list refreshes, collected again (refused on 0.19.350). main/vestr.js pin updated.
+
 ## [0.19.350] — miniMall: one payment coin whose judging throws no longer stops every newer one (as released 0.18.295)
 
 - Since 0.19.346 a coin whose judging threw aborted the whole payments loop: every newer coin was left unjudged on every pass, the cursor never moved, and the Inbox said the node did not answer (it had). Now every coin is judged; a coin that threw is not marked seen, and the pass is a failed one for that coin (nothing advances, the same blocks are read again) with the Inbox line "Payment coin {coin} could not be judged. It is judged again on the next block." (the id whole), never as the node not answering.

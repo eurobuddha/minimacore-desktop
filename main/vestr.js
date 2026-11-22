@@ -113,7 +113,6 @@ async function list() {
   // checkmempool:true (0.19.347, as released 0.18.291): a coin a collect is spending (being mined here, or in the mempool) is not listed
   const r = await runner("coins address:" + scriptAddress + " relevant:true checkmempool:true").catch(() => null);
   const coins = (r && Array.isArray(r.response)) ? r.response : [];
-  if (r && Array.isArray(r.response)) for (const id of collectedHere) if (!coins.some(c => c && String(c.coinid).toLowerCase() === id)) collectedHere.delete(id);   // gone from the node's list
   const out = [];
   for (const c of coins) { if (!stateVar(c, 199)) continue; try { out.push(await contractFromCoin(c, tp)); } catch (e) {} }
   return out.sort((a, b) => (b.createdMs || 0) - (a.createdMs || 0));
@@ -149,8 +148,6 @@ function graceWait(coin, tp) {
   if (![created, minwait, final, tp].every(Number.isFinite)) return Infinity;
   return tp >= final ? 0 : Math.max(0, minwait - (tp - created));
 }
-// Coins this session collected (0.19.347): refused a second time while the node still lists them as unspent and not in its mempool.
-const collectedHere = new Set();
 
 // ---- balances / tokens for the Create picker ----
 async function tokens() {
@@ -202,12 +199,20 @@ async function collect(coinid, burn) {
   await init();
   if (!V.isHexId(coinid)) throw new Error("Invalid coin id");
   if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
-  // checkmempool:true (0.19.347, as released 0.18.291): a coin a collect already spends is not found, so a second collect before the first is mined is not built
+  // checkmempool:true (0.19.347, as released 0.18.291): a coin a collect already spends is not listed, so a second collect before the first is mined
+  // is not built. The phone's rule (0.19.351, as released 0.18.296; base-vestr-2.2.76 Contract.alreadySpending): only a clean, successful, empty
+  // answer refuses, and not before the tip is known (a node without one lists nothing). A failed or malformed answer does not block: the coin is
+  // read without the flag, and txninput and txncheck judge the collect. 0.19.347's list of coins collected in this session is gone: it refused a
+  // valid collect for the rest of the session exactly when the collect had NOT gone through (an unanswered post: the coin still listed, not in the mempool).
   const cr = await runner("coins coinid:" + coinid + " checkmempool:true").catch(() => null);
-  const coin = cr && Array.isArray(cr.response) && cr.response[0];
-  const key = String(coinid).toLowerCase();
-  if (!coin) { if (cr && Array.isArray(cr.response)) collectedHere.delete(key); throw new Error("Contract coin not found (already collected?)"); }
-  if (collectedHere.has(key)) throw new Error("This contract coin was collected a moment ago and the node still lists it. Wait until it is gone from the list before you collect again. Nothing was sent.");
+  const clean = !!(cr && cr.status === true && Array.isArray(cr.response));
+  let coin = clean && cr.response[0];
+  if (clean && !coin) {
+    if (!(await tip())) throw new Error("The node's block height could not be read, so nothing was built. Nothing was sent.");
+    throw new Error("A collect of this coin is already waiting for the chain, or the coin is already spent. Nothing was sent.");
+  }
+  if (!coin) { const pr = await runner("coins coinid:" + coinid).catch(() => null); coin = pr && pr.status === true && Array.isArray(pr.response) && pr.response[0]; }
+  if (!coin) throw new Error("Contract coin not found (already collected?)");
   // the order of refusals (0.19.347, as released 0.18.291): the coin's shape, the tip, nothing available, then the grace wait
   if (!stateCarried(coin)) throw new Error("This contract coin's state is not one this app can carry. Nothing was signed.");
   const tp = await tip();
@@ -243,12 +248,11 @@ async function collect(coinid, burn) {
     // 0.19.239: each step must answer status true; a txnpost with no readable answer may have gone (never "failed", never retried blind)
     for (const c of cmds) {
       const post = c.startsWith("txnpost ");
-      let r; try { r = await runner(c); } catch (e) { if (post) { collectedHere.add(key); const amb = new Error("The node did not answer the collect, so it may have gone. Check Vestr before you collect again."); amb.ambiguous = true; throw amb; } throw e; }
-      if (!r || typeof r.status !== "boolean") { if (post) { collectedHere.add(key); const amb = new Error("The node did not answer the collect, so it may have gone. Check Vestr before you collect again."); amb.ambiguous = true; throw amb; } throw new Error("collect step failed: " + c.split(" ")[0]); }
+      let r; try { r = await runner(c); } catch (e) { if (post) { const amb = new Error("The node did not answer the collect, so it may have gone. Check Vestr before you collect again."); amb.ambiguous = true; throw amb; } throw e; }
+      if (!r || typeof r.status !== "boolean") { if (post) { const amb = new Error("The node did not answer the collect, so it may have gone. Check Vestr before you collect again."); amb.ambiguous = true; throw amb; } throw new Error("collect step failed: " + c.split(" ")[0]); }
       if (r.status !== true) throw new Error("collect step failed: " + (r.error || c.split(" ")[0]));
       if (c.startsWith("txncheck ") && !(r.response && r.response.validtransaction === true)) throw new Error("The node checked this collect and judged it invalid, so it was not sent. Nothing was collected.");
     }
-    collectedHere.add(key);
     emitter.emit("update");
     return { ok: true, collected: cancollect, tokenid };
   } finally { await runner("txndelete id:" + id).catch(() => {}); }

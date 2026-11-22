@@ -165,9 +165,10 @@ test("Vestr: a contract coin with a malformed state signs nothing; an unanswered
     assert.ok(!sent.some(c => c.startsWith("txn")), "no transaction built: " + JSON.stringify(bad));
   }
   state = st({});
-  // changed on purpose (0.19.347): a collect that may have gone is refused again until the list no longer shows the coin; the list read forgets it
+  // changed on purpose (0.19.351, as released 0.18.296): no list of coins collected in this session; a post that may have gone whose coin the node still
+  // lists (not in its mempool) can be collected again; the node's checkmempool:true answer decides (V1)
   for (const m of ["throw", "garbled"]) { postMode = m; await vestr.list(); await assert.rejects(vestr.collect(COIN), (e) => e.ambiguous === true && /may have gone/.test(e.message), m);
-    await assert.rejects(vestr.collect(COIN), /collected a moment ago/, m + ": not built again"); }
+    postMode = "ok"; assert.deepEqual(await vestr.collect(COIN), { ok: true, collected: "4", tokenid: "0x00" }, m + ": the post did not take, the coin is still listed"); }
   postMode = "ok"; await vestr.list(); assert.deepEqual(await vestr.collect(COIN), { ok: true, collected: "4", tokenid: "0x00" });
   for (const g of ["1e3", "2.5", "-1", "x"]) await assert.rejects(vestr.create({ tokenid: "0x00", amount: "1", beneficiary: BEN, startMs: 1, endMs: 2, graceHours: g }), /grace period must be a whole number of hours/, g);
   await assert.rejects(vestr.create({ tokenid: "0x" + "7D".repeat(32), amount: "1", beneficiary: BEN, startMs: Date.now() + 1000, endMs: Date.now() + 9e6, graceHours: "24" }), (e) => e.ambiguous === true && /lock may have gone/.test(e.message));
@@ -411,6 +412,7 @@ const vestrRig = () => {
     R.sent.push(c);
     if (c.startsWith("newscript")) return { status: true, response: { address: vestr.CONTRACT } };
     if (c === "block") { if (R.tip === "throw") throw new Error("timed out"); return R.tip; }
+    if (R.coinRead !== undefined && c === "coins coinid:" + R.COIN + " checkmempool:true") { if (R.coinRead === "throw") throw new Error("timed out"); return R.coinRead; }   // the pre-check's answer
     if (c.startsWith("coins coinid:") || c.startsWith("coins address:")) return { status: true, response: R.listed ? [R.coin] : [] };   // a node that still lists the coin (as one without the mempool flag)
     if (c.startsWith("runscript")) return { status: true, response: { variables: R.vars } };
     if (c.startsWith("txncheck")) return R.txncheck;
@@ -420,18 +422,42 @@ const vestrRig = () => {
   R.OK = { status: true, response: { validamounts: true, validtransaction: true, valid: { basic: true, mmrproofs: true, scripts: true } } };
   R.SCRIPTS_FALSE = { status: true, response: { validamounts: true, validtransaction: false, valid: { basic: true, mmrproofs: true, scripts: false } } };
   R.reset = async (o) => { R.listed = false; await vestr.list(); R.coin = Object.assign({ coinid: COIN, tokenid: "0x00", amount: "900", created: "100", address: vestr.CONTRACT, state: st() }, o);
-    R.listed = true; R.tip = { status: true, response: { block: "600" } }; R.vars = { cancollect: "400", change: "500", mustwait: "FALSE", contractexpired: "FALSE" }; R.txncheck = R.OK; R.post = { status: true, response: {} }; R.sent = []; };
+    R.listed = true; R.coinRead = undefined; R.tip = { status: true, response: { block: "600" } }; R.vars = { cancollect: "400", change: "500", mustwait: "FALSE", contractexpired: "FALSE" }; R.txncheck = R.OK; R.post = { status: true, response: {} }; R.sent = []; };
   R.txns = () => R.sent.filter(c => /^txn/.test(c)).map(c => c.split(" ")[0]);
   R.collect = () => vestr.collect(COIN, "");
   R.done = () => vestr._setRunner(() => { throw new Error("no node in a test"); });
   return R;
 };
-test("Vestr collect (V1): both reads send checkmempool:true; a coin collected in this session is refused again, nothing built, while the node still lists it", async () => {
+// changed on purpose (0.19.351, as released 0.18.296): the session list of collected coins is gone (it refused a valid collect after a post that did not
+// take); the node's checkmempool:true answer decides, by the phone's rule (base-vestr-2.2.76 Contract.alreadySpending)
+test("Vestr collect (V1): both reads send checkmempool:true; a clean empty answer is refused with the phone's sentence, nothing built, after the tip refusal; a failed or malformed answer does not block", async () => {
   const R = vestrRig();
   await R.reset(); assert.equal((await R.collect()).ok, true);
   assert.ok(R.sent.includes("coins coinid:" + R.COIN + " checkmempool:true"), R.sent.join(" | ")); await R.vestr.list(); assert.ok(R.sent.includes("coins address:" + R.vestr.CONTRACT + " relevant:true checkmempool:true"));
-  R.sent = []; await assert.rejects(R.collect(), /^Error: This contract coin was collected a moment ago and the node still lists it\. Wait until it is gone from the list before you collect again\. Nothing was sent\.$/);
-  assert.deepEqual(R.txns(), [], "nothing built"); R.listed = false; await assert.rejects(R.collect(), /not found/, "hidden by checkmempool: not found");
+  R.sent = []; assert.equal((await R.collect()).ok, true, "collected again while the node lists it (not in its mempool): no session list");
+  await R.reset(); R.listed = false;
+  await assert.rejects(R.collect(), /^Error: A collect of this coin is already waiting for the chain, or the coin is already spent\. Nothing was sent\.$/); assert.deepEqual(R.txns(), [], "nothing built");
+  // a node with no tip lists nothing: the tip refusal comes first
+  for (const tp of ["throw", { status: true, response: { block: "0" } }]) {
+    await R.reset(); R.listed = false; R.tip = tp;
+    await assert.rejects(R.collect(), /^Error: The node's block height could not be read, so nothing was built\. Nothing was sent\.$/, JSON.stringify(tp)); assert.deepEqual(R.txns(), []);
+  }
+  // a failed or malformed answer does not block: the coin is read without the flag, and txninput and txncheck judge the collect
+  for (const bad of ["throw", null, { status: false, error: "Invalid parameter : checkmempool" }, { status: true, response: {} }, { status: false, response: [] }]) {
+    await R.reset(); R.coinRead = bad;
+    assert.equal((await R.collect()).ok, true, JSON.stringify(bad)); assert.ok(R.sent.includes("coins coinid:" + R.COIN), "read without the flag"); assert.ok(R.txns().includes("txnpost"));
+  }
+  await R.reset(); R.coinRead = null; R.listed = false; await assert.rejects(R.collect(), /^Error: Contract coin not found \(already collected\?\)$/, "neither read finds it");
+  assert.ok(!/collectedHere/.test(rd("main/vestr.js")));
+  R.done();
+});
+// the review's scenario (0.19.351, as released 0.18.296): an unanswered post, the coin still listed and not in the mempool, three list refreshes: collected again
+test("Vestr collect (V4): after a post the node did not answer, a coin still listed (not in the mempool) can be collected again", async () => {
+  const R = vestrRig();
+  await R.reset(); R.post = undefined; await assert.rejects(R.collect(), /may have been posted|may have gone/);
+  R.post = { status: true, response: {} };
+  for (let i = 0; i < 3; i++) await R.vestr.list();
+  R.sent = []; assert.deepEqual(await R.collect(), { ok: true, collected: "400", tokenid: "0x00" }); assert.ok(R.txns().includes("txnpost"));
   R.done();
 });
 test("Vestr collect (V2): txncheck after the build and before txnpost; anything but a valid verdict is refused, deleted, never posted", async () => {

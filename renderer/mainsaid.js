@@ -332,7 +332,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["VESTR_COLLECT_MAYBE", I18N.N_("The node did not answer the collect, so it may have gone. Check Vestr before you collect again.")],
     ["VESTR_STATE_BAD", I18N.N_("This contract coin's state is not one this app can carry. Nothing was signed.")],
     ["VESTR_GRACE_WAIT", I18N.N_("The grace period of this contract is still running, so nothing can be collected yet. Nothing was sent.")],
-    ["VESTR_COLLECTED_HERE", I18N.N_("This contract coin was collected a moment ago and the node still lists it. Wait until it is gone from the list before you collect again. Nothing was sent.")],
+    ["VESTR_ALREADY_SPENDING", I18N.N_("A collect of this coin is already waiting for the chain, or the coin is already spent. Nothing was sent.")],
     ["VESTR_TIP_UNREAD", I18N.N_("The node's block height could not be read, so nothing was built. Nothing was sent.")],
     ["VESTR_TXNCHECK_INVALID", I18N.N_("The node checked this collect and judged it invalid, so it was not sent. Nothing was collected.")],
     ["VESTR_OVER_COIN", I18N.N_("The node's figure to collect is more than this contract coin holds. Nothing was sent.")],
