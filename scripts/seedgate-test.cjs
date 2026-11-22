@@ -694,6 +694,12 @@ test("keyuses: one signature at most 262143; a figure given to every key at most
     assert.match(R.keyusesProblem(c.replace("2410000", "250001"), "block", null), /could not be read now, so at most 250000 is taken/, c);
   }
   assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "block", 2400000), /at most 10000:/);
+  // 0.19.346: restoresync on a block key wallet says what is true there (no 262144-use limit); the bound stays 10000, tip read or not
+  for (const tip of [2400000, null]) {
+    assert.equal(R.keyusesProblem("restoresync file:x keyuses:10001", "block", tip), "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). On this block key wallet it can be at most 10000: a key's count follows the block number, and a key counted far above the chain's tip stops signing after one signature (the funds stay, but this wallet can no longer sign). Nothing was run.");
+    assert.equal(R.keyusesProblem("restoresync file:x keyuses:10000", "block", tip), "");
+  }
+  assert.match(R.keyusesProblem("restoresync file:x keyuses:10001", "classic"), /262144/, "the classic sentence is kept");
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd", async'), main.indexOf("// Clipboard writes"));
   for (const [mode, tipReply] of [["classic", null], ["block", { status: true, response: { block: "2400000" } }], ["block", null]]) {
     const hs = {}, sent = [];

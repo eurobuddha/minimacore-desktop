@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.346] — miniMall: the released tree's behaviour where this tree differed unlisted; the shop test b5c9fbb lost is back; restoresync on a block wallet says what is true there
+
+- A payment coin whose judging threw is no longer kept as seen: the pass fails and the coin is judged on the next pass (it was caught, logged and marked seen, so it was never counted in that session). A payout address whose read threw no longer keeps the other addresses' payments from being judged in that pass (each read is caught on its own; the pass still counts as failed). A "may not have been read" notice stored with no cause says "Orders and payments older than block N may not have been read: the node keeps only its recent blocks." (it said the reply cap's sentence). All three as released (minimaCore Desktop 0.18 tree); zh / ru / uk for the new sentence.
+- Tests: the released tree's "a second gap keeps the oldest target" (dropped by b5c9fbb in 0.19.338) is back, and the stall reset when a backfill step reads below its floor, "a failed read moves nothing" past the tree, and the step's `BACKFILL_CHUNK` (512) are pinned; each fails when its line is changed. `docs/PANDAMONIUM_DESKTOP_PLAN.md` corrects its "no shop test was lost" and lists the store-shape differences kept on purpose (each order's own coin list, 500 coins per order).
+- `keyuses:` on restoresync above 10000 on a block key wallet: "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). On this block key wallet it can be at most 10000: a key's count follows the block number, and a key counted far above the chain's tip stops signing after one signature (the funds stay, but this wallet can no longer sign). Nothing was run." (the classic sentence named the 262144-use limit, which a block key does not have; the bound stays 10000). zh / ru / uk.
+
 ## [0.19.345] — miniMall: one "older than the order" problem per order; a re-sent order keeps its oldest block (as released 0.18.290)
 
 - Each old payment coin carrying an order's reference added its own "a payment with this order's reference is older than the order" problem (the coin id made each text new) and a rewrite of `shop.json`; a coin past the order's 500-coin cap, or one of another token, rewrote it too though nothing changed. Now the order gets that problem once, naming the first coin whole, and a coin that changes nothing writes nothing.

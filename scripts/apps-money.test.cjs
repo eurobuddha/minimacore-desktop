@@ -386,11 +386,13 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.330 (every read capped at the node's block tree, status chain.length; a gap below it is "no deeper history")
   // main/shop.js again in 0.19.328 (the stepped backfill: an absence longer than one pass is read back in steps; catchingUpTo; served depth)
   // main/shop.js again in 0.19.265 (no "not sent" or Retry while the payment is at the node; none once the vendor acknowledged it; unpaid cleared on a send that went)
+  // main/shop.js again in 0.19.346 (as released: a coin whose judging threw is not kept as seen and the pass fails; each payout address's read
+  // caught on its own; a notice with no cause is the tree's)
   // both again in 0.19.345 (as released 0.18.290: one "older than the order" problem per order; a re-sent order keeps its oldest block; no write
   // for a coin past the cap or of another token that changes nothing)
   // both again in 0.19.344 (as released 0.18.289: a payment judged only once the chain is past its block + 3, said while it waits; a PAID order
   // that meets a second buyer's order with its reference held again)
-  for (const [f, want, ver] of [["main/shop.js", "2c52234110a7b36c6696210e348b90008daa3f8478049ac0642a5ccd3d6b8235", "0.19.345"], ["main/shop-store.js", "7aeb85dfbabb0d3c881f17d82e53da447c10edefc75d50da86742b7381959e2c", "0.19.345"],
+  for (const [f, want, ver] of [["main/shop.js", "2ff6d55bdfd2b64d1d9fb39fde97d035cc15999486df1de05ee907b62982499a", "0.19.346"], ["main/shop-store.js", "7aeb85dfbabb0d3c881f17d82e53da447c10edefc75d50da86742b7381959e2c", "0.19.345"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

@@ -418,7 +418,9 @@ test("dust coins count together once they cover what is still due: 9.9 + 0.05 + 
 
 // ---- 0.19.249 (as released 0.18.213, this branch's one-pass scan): a failed read advances nothing, and the Inbox says what was not read ----
 test("vendor: a payout address the node does not answer for leaves the scan cursor where it was; a long absence is said on the Inbox", async () => {
-  const OTHER2 = "MxG0OTHERPAYOUT0000000000000000000000000000000000000000000000009";
+  // changed on purpose (0.19.346): a valid payout address (0x, 64 digits). A read that throws for an address whose checksum is wrong is now that
+  // address's skip, as released (each read caught per address), so the old made-up Mx no longer holds the cursor
+  const OTHER2 = "0x" + "99".repeat(32);
   store.saveShop({ shopId: "fail2", shopName: "F", currency: "Minima", tokenid: "0x00", vendorAddress: OTHER2, products: [{ id: "p1", name: "Cup", price: "4", maxUnits: "5" }], shipping: [] });
   let tip = 9000, down = true; const before = Number(store.getMeta("scanned_tip_block")) || 0;
   shop._setRunner(async (c) => {
@@ -438,7 +440,7 @@ test("vendor: a payout address the node does not answer for leaves the scan curs
   assert.equal(store.getMeta("scanned_tip_block"), 20000);
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes("scan = await api.shopScanState().catch(() => null)") && app.includes('tr("Reading orders and payments from while the app was closed (back to block {block}).", { block: esc(String(scan.catchingUpTo)) })')
-    && app.includes('scan && scan.unreadShown ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.cap, { block: esc(String(scan.unreadBelow)) })'));   // said only where a shop exists and until dismissed (0.19.341), by its cause
+    && app.includes('scan && scan.unreadShown ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.tree, { block: esc(String(scan.unreadBelow)) })'));   // changed on purpose (0.19.346): no cause stored is the tree's sentence, as released   // said only where a shop exists and until dismissed (0.19.341), by its cause
 });
 
 // ---- 0.19.273 / 0.19.284: a payout address that can never be valid (its checksum) is skipped for a while, said whole on the Inbox;
@@ -813,5 +815,68 @@ test("vendor: the same buyer's order sent again: a payment between the two copie
     const o = store.order("ORD-R"), c = store.order("ORD-R~" + ATK);
     assert.equal(o.counterparty, BUYER); assert.equal(o.orderBlock, 1010, "not moved by another sender's coin"); assert.equal(c.orderBlock, 1000, "the copier's order is a second buyer's");
     assert.equal(o.paid, false); assert.equal(store.mayAdvance(o), false); assert.equal(store.mayAdvance(c), false);
+  });
+});
+
+// ---- 0.19.346: the released tree's assertions b5c9fbb dropped (a second gap keeps the oldest target, released scripts/shop-test.cjs), and the
+// lines no test pinned: the stall reset when a step makes progress, "a failed read moves nothing" past the tree, the step's BACKFILL_CHUNK ----
+const bfState = () => ["backfill_target_block", "backfill_floor_block", "backfill_stall", "unread_below_block"].map(k => Number(store.getMeta(k)) || 0);
+test("vendor: a second gap while a backfill is pending keeps the oldest target, and the floor moves under the new window", async () => {
+  const st = await javaSetup(3000);
+  try {
+    store.setMeta("scanned_tip_block", 1803); store.setMeta("backfill_target_block", 1000); store.setMeta("backfill_floor_block", 1700);
+    let once = true; st.hook = (addr, d) => { if (addr === "M" && once) { once = false; if (d > 512) return CAPPED; } return null; };   // the window cut, so the new gap stays in the tree
+    await shop.scanOnce();
+    assert.equal(shop.scanState().catchingUpTo, 1000, "the oldest target is kept"); assert.ok(Number(store.getMeta("backfill_floor_block")) < 3000 - 512, "the floor moves under the new window");
+    assert.equal(shop.scanState().readFailed, false);
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: a backfill step that reads below its floor resets the stall count; a step reaches BACKFILL_CHUNK (512) blocks below the floor", async () => {
+  const st = await javaSetup(3000), asked = [], run = javaNode(st);
+  shop._setRunner(async (c) => { const m = / depth:(\d+)$/.exec(c); if (m && c.startsWith("coins address:" + shop.MINIMERCH)) asked.push(Number(m[1])); return run(c); });
+  try {
+    store.setMeta("scanned_tip_block", 2999); store.setMeta("backfill_target_block", 1000); store.setMeta("backfill_floor_block", 2800); store.setMeta("backfill_stall", 2);
+    await shop.scanOnce();
+    assert.ok(asked.includes(712), "the step reads 3000 - 2800 + 512 = 712 blocks: " + asked.join(","));
+    assert.deepEqual(bfState(), [1000, 3000 - 712, 0, 0], "the floor moved down and the stall count is reset");
+    assert.match(fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8"), /const WINDOW_DEPTH = 1024, GAP_MARGIN = 8, BACKFILL_CHUNK = 512;/);
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: past the tree, a failed read moves nothing: target, floor, stall and the notice stay, said as an older read that failed", async () => {
+  const st = await javaSetup(3000);
+  try {
+    store.setMeta("scanned_tip_block", 2999); store.setMeta("backfill_target_block", 1000); store.setMeta("backfill_floor_block", 1900); store.setMeta("backfill_stall", 1);
+    st.hook = (addr, d) => (addr === "M" && d >= 1123 ? "throw" : null);   // the orders read as deep as the tree may hold throws
+    await shop.scanOnce();
+    assert.deepEqual(bfState(), [1000, 1900, 1, 0], "nothing moved"); assert.deepEqual([shop.scanState().readFailed, shop.scanState().stepFailed], [false, true]);
+    st.hook = null; await shop.scanOnce(); assert.equal(Number(store.getMeta("backfill_target_block")), 0, "the next pass reads it and ends the backfill");
+  } finally { store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+test("vendor: a notice stored with no cause says the tree's sentence (the node keeps only its recent blocks), as released", async () => {
+  await javaSetup(3000); teaShop();
+  store.setMeta("unread_below_block", 1476); store.setMeta("unread_why", 0);
+  assert.equal(shop.scanState().unreadText, "Orders and payments older than block 1476 may not have been read: the node keeps only its recent blocks.");
+  assert.equal(shop.scanState().unreadWhy, "tree");
+  store.setMeta("unread_below_block", 0); store.setLog((m) => { throw new Error("no log expected: " + m); });
+});
+test("vendor: a payment coin whose judging threw is not kept as seen: the pass fails and the next one counts it", async () => {
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-T", 1009)); st.pay.push(jPay("ORD-T", 1010)); store.setLog(() => {});
+    const real = store.recordPayment; let once = true;
+    store.recordPayment = function () { if (once) { once = false; throw new Error("disk full"); } return real.apply(this, arguments); };
+    try {
+      jTip(st, 1020); await shop.scanOnce(); assert.equal(store.order("ORD-T").paid, false); assert.equal(shop.scanState().readFailed, true, "the pass failed");
+      jTip(st, 1021); await shop.scanOnce(); assert.equal(store.order("ORD-T").paid, true, "judged again, not skipped as seen");
+    } finally { store.recordPayment = real; }
+  });
+});
+test("vendor: one payout address whose read throws does not keep the other addresses' payments from being judged; the pass is still a failed one", async () => {
+  await copyRig(async (st) => {
+    const OTHER = "0x" + "77".repeat(32);
+    store.saveShop({ shopId: "two", shopName: "Two", currency: "Minima", tokenid: "0x00", vendorAddress: OTHER, products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [] });
+    st.msg.push(jOrder("ORD-P", 1009)); st.pay.push(jPay("ORD-P", 1010));
+    const run = javaNode(st); shop._setRunner(async (c) => { if (c.startsWith("coins address:" + OTHER)) throw new Error("RPC timed out"); return run(c); });
+    jTip(st, 1020); await shop.scanOnce();
+    assert.equal(store.order("ORD-P").paid, true, "the vendor address's payment is judged"); assert.equal(shop.scanState().readFailed, true, "the other address was not read: the cursor stays");
   });
 });

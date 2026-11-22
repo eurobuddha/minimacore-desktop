@@ -353,7 +353,8 @@ async function scanPayments(depth, tip) {
   let listed = [], any = false;
   let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
   for (const a of addrs) {
-    const got = await coinsAt(a, depth, " relevant:true");
+    // a read that threw is this address's failure only (0.19.346, as released: coinsAt catches per call): the other addresses' payments are still judged
+    let got = null; try { got = await coinsAt(a, depth, " relevant:true"); } catch (e) { got = null; }
     if (got) { any = true; listed = listed.concat(got); continue; }
     if (badAddress(a)) { skippedPay.set(a, Date.now() + SKIP_MS); store.log("miniMall: the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address)."); any = true; continue; }
     missed = true;
@@ -386,7 +387,11 @@ async function scanPayments(depth, tip) {
       if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.19.200)
       if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
       return outcome || "";
-    } catch (e) { store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); return ""; }
+    } catch (e) {
+      // a coin whose judging threw is not kept as seen and the pass fails (0.19.346, as released): read again on the next pass. It was
+      // swallowed here and the coin marked seen, so a payment whose count threw once was never counted in that session
+      seenPayCoins.delete(id); store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); throw e;
+    }
   };
   // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
   judgedTip = tip;
@@ -585,7 +590,8 @@ function dismissUnread() { store.setMeta("unread_dismissed", Number(store.getMet
 /** What the order scan could not read yet, for the Inbox: a failed pass, the block a backfill still reads back to (catchingUpTo), the oldest
  *  block a node that serves no deeper left unread (unreadBelow), payout addresses skipped as not valid (0.19.249, 0.19.284, 0.19.328). */
 function scanState() {
-  const below = Number(store.getMeta("unread_below_block")) || 0, why = String(store.getMeta("unread_why") || "cap");
+  // a notice stored with no cause is the tree's ("the node keeps only its recent blocks"), as the released tree says it (0.19.346; it was the reply cap's)
+  const below = Number(store.getMeta("unread_below_block")) || 0, why = String(store.getMeta("unread_why") || "tree");
   // shown only to someone with a shop, and until it is dismissed (0.19.341, as released 0.18.277): a newer one is shown again
   const shown = !!below && store.shops().length > 0 && below > (Number(store.getMeta("unread_dismissed")) || 0);
   return { readFailed: lastPassFailed, stepFailed: lastStepFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: below, unreadShown: shown,
