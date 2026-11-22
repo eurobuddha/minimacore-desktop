@@ -117,6 +117,7 @@ button.dx-pill { cursor: pointer; }
 .dx-cta[data-side="buy"] { background: var(--dx-in); } .dx-cta[data-side="sell"] { background: var(--dx-red); }
 .dx-cta small { display: block; font: 400 11px/15px var(--dx-sans); }
 .dx-cta:disabled { opacity: .45; cursor: default; }
+.dx-cta--sweep { display: block; width: 100%; margin-top: 8px; } .dx-cta--sweep[hidden] { display: none; }
 .dx-log { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--dx-border); border-radius: 8px; background: var(--dx-surface2); font: 400 10.5px/15px var(--dx-mono); color: var(--dx-text);
   user-select: text; overflow-wrap: anywhere; white-space: pre-wrap; }
 .dx-log[data-kind="error"] > div:last-child, .dx-log__error { color: var(--dx-red); }

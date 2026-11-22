@@ -121,7 +121,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     const t = dec(tick), q = div(price, t, 0), back = mul(q, t);
     return sell && cmp(back, price) < 0 ? add(back, t) : back;
   }
-  function ladder(book, groupIdx) {
+  /** fast: the FAST orders to show and count (default book.fast); a later change can pass a filtered list. */
+  function ladder(book, groupIdx, fast) {
     const tick = GROUPS[groupIdx] || null, sides = { sell: new Map(), buy: new Map() }, count = { fast: 0, book: 0, pools: ((book && book.pools) || []).length };
     const at = (side, price) => {
       const k = levelKey(price, tick, side === "sell"), id = str(k), m = sides[side];
@@ -130,7 +131,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       if (side === "sell" ? cmp(price, lv.exact) < 0 : cmp(price, lv.exact) > 0) lv.exact = price;
       return lv;
     };
-    for (const kind of ["fast", "book"]) for (const o of (book && book[kind]) || []) {
+    for (const kind of ["fast", "book"]) for (const o of (kind === "fast" && fast ? fast : (book && book[kind])) || []) {
       const price = dec(o.price), amt = dec(o.minima); if (!price || !amt || amt.v === 0n) continue;
       const lv = at(o.side === "sell" ? "sell" : "buy", price);
       lv[kind] = add(lv[kind], amt); count[kind]++;
@@ -261,6 +262,47 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     const c = buy ? down(p, 6) : up(p, 6);
     return c.v === 0n ? null : c;
   }
+  // ---- SWEEP: FAST and on-chain together (the phone's, apks/base integrated/dexicon MainActivity.java split /
+  // sweepAvg / decideBoth, owner 7 Nov), in exact decimals ----
+  /** How one click splits `amount` between on-chain BOOK / POOL and FAST, all inside the limit (MainActivity.split):
+   *  on-chain takes every MINIMA it holds at or better than the best FAST price (restingCheap) plus whatever the
+   *  crossing FAST orders cannot cover; FAST takes the middle, up to what it offers. The two parts never add up to more
+   *  than `amount`, and on-chain never more than it holds at the limit (restingAtLimit). */
+  function sweepSplit(amount, restingCheap, fastOffered, restingAtLimit) {
+    const cheap = min(amount, restingCheap);
+    const fastQ = min(fastOffered, sub(amount, cheap));
+    const over = sub(sub(amount, cheap), fastQ);
+    return { chainQ: min(add(cheap, over), restingAtLimit), fastQ };
+  }
+  /** MxUSD per MINIMA over both parts (MainActivity.sweepAvg), CUT to 8 decimals (the phone rounds half up; this app
+   *  never rounds an amount or a price it shows). null when there is nothing to average. */
+  function sweepAvg(chainMinima, chainMxusd, fastTake, fastCost) {
+    const q = add(chainMinima, fastTake);
+    return q.v === 0n ? null : div(add(chainMxusd, fastCost), q, 8);
+  }
+  const routeName = (q) => { const o = dec(q && q.orderMinima) || zero, p = dec(q && q.poolMinima) || zero; return o.v > 0n && p.v > 0n ? "BOOK+POOL" : p.v > 0n ? "POOL" : "BOOK"; };
+  /**
+   * MainActivity.decideBoth: is there a SWEEP for this ticket, and how is it split? null = no sweep (both parts must be
+   * more than zero). book.fast is the list of FAST orders the sweep may take: the caller passes it, so a later change
+   * can leave out orders this node cannot take. quote(limit, amount) resolves the PAGE's own on-chain plan
+   * (renderer/dexicon/mds.js ACTS.quote, PandaComposite.plan) as { totalMinima, totalUsdt, orderMinima, poolMinima }.
+   * The on-chain limits are on the 6-decimal grid (chainLimit): the same on-chain levels as the typed ones.
+   */
+  async function decideBoth(book, buy, priceText, amountText, quote) {
+    const price = dec(priceText), amount = dec(amountText);
+    if (!price || !amount || price.v === 0n || amount.v === 0n || price.s > 8 || amount.s > 8) return null;
+    const x = crossing(book, buy, price); if (!x.hits.length || x.offered.v === 0n) return null;
+    const lim = chainLimit(buy, priceText), cheapLim = chainLimit(buy, str(x.hits[0].price)); if (!lim || !cheapLim) return null;
+    const total = (q) => (q && dec(q.totalMinima)) || zero;
+    const cheap = await quote(str(cheapLim), str(amount)), atLimit = await quote(str(lim), str(amount));
+    const q = sweepSplit(amount, total(cheap), x.offered, total(atLimit));
+    if (q.chainQ.v === 0n || q.fastQ.v === 0n) return null;
+    const chain = await quote(str(lim), str(q.chainQ));
+    if (total(chain).v === 0n) return null;
+    const fast = plan(book, buy, priceText, str(q.fastQ), null);   // the FAST part as the page takes it (best first, minimum remainder)
+    const chainQ = total(chain), chainUsd = dec(chain.totalUsdt) || zero;
+    return { limit: lim, chainQ, chainUsd, route: routeName(chain), fastQ: q.fastQ, fastTake: fast.take, fastCost: fast.cost, avg: sweepAvg(chainQ, chainUsd, fast.take, fast.cost) };
+  }
   /** What a reviewed plan tells the page at the click (renderer/dexicon/mds.js ACTS.place): the page signs only when
    *  its own book still says the same. */
   const expectOf = (pl) => (pl.fast ? { expect: "take", take: str(pl.take), worst: str(pl.worst || zero) } : { expect: "rest" });
@@ -385,8 +427,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const COUNT_WORDS = [N_("are"), N_("block"), N_("blocks"), N_("coin"), N_("coins"), N_("is"), N_("its"), N_("maker"), N_("makers"), N_("need"), N_("needs"), N_("part"), N_("parts"), N_("swap is"), N_("swaps are"), N_("their"), N_("time."), N_("times."),
     N_("it"), N_("them"), N_("key"), N_("keys"), N_("pool"), N_("saved pool"), N_("visible pool"), N_("owner key"), N_("transaction")];
 
-  // ---- what the screens may ask for: the page's twelve actions (renderer/dexicon/mds.js ACTS) and four bridge ops ----
-  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"];
+  // ---- what the screens may ask for: the page's thirteen actions (quote: read only, 0.19.375) (renderer/dexicon/mds.js ACTS) and four bridge ops ----
+  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview", "quote"];
   const OPS = ["cmd", "sql", "comms", "net", "identity"];
   /** A request from the page's frame, or null when it is not one the shell forwards. */
   function bridgeCall(m) {
@@ -404,6 +446,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, chainWhy, chainLimit, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, chainWhy, chainLimit, sweepSplit, sweepAvg, decideBoth, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, PUT_BACK, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

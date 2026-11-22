@@ -246,7 +246,7 @@ test("a refusal is shown in the words it came in, whoever refused", () => {
 });
 
 test("nothing outside the allow-list leaves the Exchange screens", () => {
-  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview"]);
+  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview", "quote"]);
   for (const act of ["send", "consolidate", "eval", "txnsign", "__proto__", "constructor", ""]) assert.throws(() => C.driveCall(1, act, {}), /not an action of the Exchange screens/, act);
   assert.deepEqual(C.driveCall(7, "place", { buy: true }), { dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true } } });
   // from the page's frame: only the four bridge ops, each rebuilt from its named fields (nothing else rides along)
@@ -725,7 +725,9 @@ test("the native Exchange screens record the confirmed on-chain trade, edit and 
 /** The Trade screen over a stand-in engine: status, the service's book and the page's FAST book are the test's. */
 async function tradeUi(o) {
   const vm = require("node:vm"), posted = [], cmds = [];
-  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage: (m) => posted.push(m) }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+  let answerLate = null;
+  const toPage = (m) => { posted.push(m); if (m.drive && m.drive.act === "quote" && o.quote) setImmediate(() => answerLate(m.drive.id, { value: o.quote(m.drive.args) })); };
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage: toPage }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false, showModal() { o.dialogs.push(e); setImmediate(() => e.onclick({ target: { closest: () => ({ dataset: { x: o.answer === false ? "0" : "1" } }) } })); }, close() {} }; return e; };
   o.dialogs = o.dialogs || [];
   const els = {}, listeners = {}, status = Object.assign({ version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} }, o.status || {});
@@ -744,7 +746,8 @@ async function tradeUi(o) {
   const page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [], fast: o.book.fast.filter(x => !x.ours), amount: "", trading: false }, p) } });
   page({});
   const answer = (id, r) => listeners.message({ source: frame.contentWindow, data: Object.assign({ dxRoom: 1, driven: id, error: null }, r) });
-  return { win, els, posted, cmds, status, page, answer, settle, dialogs: o.dialogs, drives: () => posted.filter(m => m.drive) };
+  answerLate = answer;
+  return { win, els, posted, cmds, status, page, answer, settle, dialogs: o.dialogs, drives: () => posted.filter(m => m.drive && m.drive.act !== "quote"), quotes: () => posted.filter(m => m.drive && m.drive.act === "quote") };
 }
 const CHAIN_BOOK = { fast: [], book: [{ side: "sell", price: "0.0031", minima: "500", ours: false }], poolAsks: [], poolBids: [], pools: [] };
 
@@ -841,4 +844,87 @@ test("0.19.374: the owner's case: a POOL bid above a FAST bid, the FAST row clic
   const { say, reply } = bridge();
   say({ dxRoom: 1, drive: { id: 1, act: "place", args: { buy: false, price: "0.00441234", amount: "10", layer: "chain" } } });
   assert.equal(reply().error, "An on-chain order takes a price of at most 6 decimals. Nothing was sent.");
+});
+
+// ---------------------------------------------------------------- SWEEP across FAST and on-chain (0.19.375)
+// SweepBothSplitTest.java (apks/base integrated/dexicon, Pandamonium 2.2.109), case for case, same inputs, same splits.
+test("0.19.375: SweepBothSplitTest, ported: cheap on-chain, then FAST, then the overflow on-chain", () => {
+  const q = C.sweepSplit(d("3000"), d("500"), d("1000"), d("4000"));
+  assert.equal(C.cmp(q.chainQ, d("2000")), 0); assert.equal(C.cmp(q.fastQ, d("1000")), 0);   // 500 cheap + 1500 overflow on-chain, FAST takes all it offers
+});
+test("0.19.375: SweepBothSplitTest, ported: never more than asked or held", () => {
+  for (const c of [["100", "0", "1000", "0"], ["100", "500", "1000", "500"], ["3000", "0", "1000", "200"], ["10", "3", "4", "5"]]) {
+    const q = C.sweepSplit(d(c[0]), d(c[1]), d(c[2]), d(c[3]));
+    assert.ok(C.cmp(C.add(q.chainQ, q.fastQ), d(c[0])) <= 0, c.join());
+    assert.ok(C.cmp(q.chainQ, d(c[3])) <= 0, c.join());
+    assert.ok(C.cmp(q.fastQ, d(c[2])) <= 0, c.join());
+    assert.ok(q.chainQ.v >= 0n && q.fastQ.v >= 0n);
+  }
+  const fastCovers = C.sweepSplit(d("100"), d("0"), d("1000"), d("0"));
+  assert.equal(C.cmp(fastCovers.chainQ, d("0")), 0); assert.equal(C.cmp(fastCovers.fastQ, d("100")), 0);   // nothing on-chain: no sweep
+});
+test("0.19.375: SweepBothSplitTest, ported: the average weighs both parts (cut to 8 decimals here; the phone rounds half up to 0.00316303)", () => {
+  // 7604 on-chain for 23.96 MxUSD, then 2479 FAST @ 0.0032: (23.96 + 7.9328) / 10083 = 0.0031630268…
+  assert.equal(C.str(C.sweepAvg(d("7604"), d("23.96"), d("2479"), C.mul(d("2479"), d("0.0032")))), "0.00316302");
+  assert.equal(C.sweepAvg(d("0"), d("0"), d("0"), d("0")), null);
+});
+
+const OWNER_BOOK = { fast: [{ side: "buy", price: "0.00441234", minima: "500", ours: false }], book: [], poolAsks: [], poolBids: [{ price: "0.0045", minima: "1234.56789012" }], pools: [] };
+/** A stand-in for the page's PandaComposite.plan: one pool bid band of 1234.56789012 MINIMA at 0.0045. */
+const OWNER_QUOTE = (args) => {
+  const p = d(args.price), a = d(args.amount);
+  if (C.cmp(p, d("0.0045")) > 0) return { totalMinima: "0", totalUsdt: "0", orderMinima: "0", poolMinima: "0" };
+  const m = C.min(a, d("1234.56789012"));
+  return { totalMinima: C.str(m), totalUsdt: C.str(C.down(C.mul(m, d("0.0045")), 8)), orderMinima: "0", poolMinima: C.str(m) };
+};
+test("0.19.375: decideBoth over the page's quotes: the owner's case (POOL bid above a FAST bid) splits 500 FAST + 1234.56789012 on-chain; the quotes use the 6-decimal limit; the FAST list is an input", async () => {
+  const asked = [];
+  const quote = async (limit, amount) => { asked.push([limit, amount]); return OWNER_QUOTE({ price: limit, amount }); };
+  const r = await C.decideBoth(OWNER_BOOK, false, "0.00441234", "1734.56789012", quote);
+  assert.equal(C.str(r.fastQ), "500"); assert.equal(C.str(r.chainQ), "1234.56789012"); assert.equal(r.route, "POOL");
+  assert.equal(C.str(r.limit), "0.004413");
+  assert.deepEqual(asked, [["0.004413", "1734.56789012"], ["0.004413", "1734.56789012"], ["0.004413", "1234.56789012"]], "at the best FAST price, at the limit, then the on-chain share at the limit");
+  assert.equal(C.str(r.avg), "0.00447473", "(5.55555550 + 500 × 0.00441234) / 1734.56789012, cut");
+  // both parts must be more than zero
+  assert.equal(await C.decideBoth(OWNER_BOOK, false, "0.00441234", "400", quote), null, "FAST alone would do? no: on-chain takes the cheap part first, so 400 is all on-chain → no sweep");
+  assert.equal(await C.decideBoth(Object.assign({}, OWNER_BOOK, { poolBids: [] }), false, "0.00441234", "1734.56789012", async () => ({ totalMinima: "0", totalUsdt: "0" })), null, "nothing on-chain: no sweep");
+  assert.equal(await C.decideBoth(Object.assign({}, OWNER_BOOK, { fast: [] }), false, "0.00441234", "1734.56789012", quote), null, "the FAST list passed in is the one counted: none, no sweep");
+  assert.equal(C.ladder(OWNER_BOOK, 0, []).bids.length, 1, "the ladder counts the FAST list it is given (a later change can filter it)");
+  assert.equal(C.str(C.rows(C.ladder(OWNER_BOOK, 0).bids)[1].cum), "1734.56789012");
+});
+
+test("0.19.375: the page's quote action is read only: the page's own plan as totals, no dialog, nothing placed, refused while not ready", () => {
+  const { win, calls, say, reply } = bridge();
+  win.PandaComposite = { plan: (book, pools, buy, amount, price, block) => (calls.push("plan:" + [buy, amount, price, block].join(",")), { totalMinima: "1234.56789012", totalUsdt: "5.5555555", orderMinima: "0", poolMinima: "1234.56789012" }), isEmpty: () => false, poolCount: () => 1 };
+  let confirmed = 0; const realConfirm = win.confirm; win.confirm = (m) => { confirmed++; return realConfirm(m); };
+  say({ dxRoom: 1, drive: { id: 1, act: "quote", args: { buy: false, price: "0.004413", amount: "1734.56789012" } } });
+  assert.equal(reply().error, null); assert.deepEqual(JSON.parse(JSON.stringify(reply().value)), { totalMinima: "1234.56789012", totalUsdt: "5.5555555", orderMinima: "0", poolMinima: "1234.56789012" });
+  assert.deepEqual(calls, ["plan:false,1734.56789012,0.004413,100"], "only the page's planner ran: no side chosen, no field written, no place()");
+  assert.equal(confirmed, 0);
+  say({ dxRoom: 1, drive: { id: 2, act: "quote", args: { buy: false, price: "0.00441234", amount: "1" } } }); assert.match(reply().error, /at most 6 decimals/);
+  win.state = { ready: false, block: 100, book: [], pools: [] };
+  say({ dxRoom: 1, drive: { id: 3, act: "quote", args: { buy: false, price: "0.004413", amount: "1" } } }); assert.equal(reply().error, "The on-chain order book is not ready."); assert.equal(reply().value, null);
+  say({ dxRoom: 1, drive: { id: 4, act: "refresh", args: {} } }); assert.equal(reply().value, null, "only a quote carries a value");
+});
+
+test("0.19.375: the investigator's repro on the Trade screen: the FAST row under a POOL row → SWEEP offered (FAST 500 + on-chain 1234.56789012, average cut), not sendable and said why; BOOK / POOL alone sends the 6-decimal limit", async () => {
+  const u = await tradeUi({ book: OWNER_BOOK, quote: OWNER_QUOTE });
+  const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));
+  u.els.dxBids.onclick({ target: { closest: () => ({ dataset: rows[1] }) } }); await u.settle(); await u.settle();
+  assert.deepEqual([u.els.dxPrice.value, u.els.dxAmount.value], ["0.00441234", "1734.56789012"]);
+  assert.equal(u.quotes().length, 3, "the page was asked three quotes, nothing else"); assert.equal(u.drives().length, 0);
+  const sw = u.els.dxCtaSweep;
+  assert.equal(sw.hidden, false); assert.equal(sw.disabled, true);
+  assert.equal(sw.innerHTML, "SWEEP SELL 1734.56789012 · POOL + FAST · avg 0.00447473<small>up to 500 instant, then 1234.56789012 on-chain</small>");
+  assert.match(u.els.dxReview.innerHTML, /SWEEP cannot be sent from this app yet: the on-chain engine cannot be told to take only what crosses/);
+  assert.match(u.els.dxCta.innerHTML, /SELL 500 NOW · FAST/, "the single-source buttons stay below");
+  assert.equal(u.els.dxCta2.hidden, false);
+  // no second round of quotes while nothing changes
+  u.els.dxPrice.oninput(); await u.settle(); assert.equal(u.quotes().length, 3);
+  u.els.dxCta2.onclick(); await u.settle();
+  assert.equal(u.drives()[0].drive.args.price, "0.004413", "BOOK / POOL alone: the 6-decimal limit");
+  u.answer(u.drives()[0].drive.id, { error: "stop here" }); await u.settle();
+  // an amount FAST covers alone after the cheap on-chain part: no sweep
+  u.els.dxAmount.value = "1000"; u.els.dxAmount.oninput(); await u.settle(); await u.settle();
+  assert.equal(sw.hidden, true);
 });

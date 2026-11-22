@@ -134,7 +134,7 @@ const DexUI = (() => {
       Page.frame.hidden = !m.page.dialog; Page.frame.classList.toggle("dx-frame", !!m.page.dialog);   // only the page's market maker dialogs are ever shown
       if (shown()) draw(); return;
     }
-    if (m.driven != null) { const w = Page.waiting[m.driven]; if (w) { delete Page.waiting[m.driven]; w({ error: m.error || "", asked: m.asked || "" }); } return; }
+    if (m.driven != null) { const w = Page.waiting[m.driven]; if (w) { delete Page.waiting[m.driven]; w({ error: m.error || "", asked: m.asked || "", value: m.value == null ? null : m.value }); } return; }
     const call = C.bridgeCall(m); if (!call) return;
     const back = (value, error) => { if (Page.frame) Page.frame.contentWindow.postMessage(error == null ? { dxRoom: 1, id: m.id, value } : { dxRoom: 1, id: m.id, error }, "*"); };
     // the frame speaks for the engine it was made for (Page.epoch): a call from a frame that outlived its engine is refused in main
@@ -189,9 +189,12 @@ const DexUI = (() => {
   /** One money action at a time in the whole of Dexicon (H2): a second click, a held Enter or another button, in any
    *  room, does nothing while one is being reviewed, signed or sent. */
   const money = (fn) => C.money(fn, draw);   // the gate is DexCore's: rooms 1 and 2 pass through the same one
-  const book = () => C.tradeBook(X.book, Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
+  /** The FAST orders the book, the row click's cumulative amount and the sweep may count. All of them for now; the one
+   *  place where a later change leaves out orders this node cannot take (designed separately). */
+  const takeable = (fast) => fast;
+  const book = () => C.tradeBook(X.book, Array.isArray(Page.state.fast) ? takeable(Page.state.fast) : Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
   const fundsNow = () => C.funds(X.bal && X.bal.minima, X.bal && X.bal.mxusd, X.orders, X.fills);
-  const lad = () => C.ladder(X.book, X.group);
+  const lad = () => C.ladder(X.book, X.group, takeable((X.book && X.book.fast) || []));
 
   /** What stops trading right now: { text, soft } in plain words, or null when nothing does. soft: the FAST layer may be
    *  deaf but on-chain orders and pools still work, so the buttons stay live. Decided here, never from the (translated) text. */
@@ -269,6 +272,7 @@ const DexUI = (() => {
           <div class="dx-total" id="dxTotal">${th("Total: …")}</div>
           <div class="dx-warn" id="dxWarn" role="alert"></div>
           <div class="dx-review" id="dxReview"></div>
+          <button class="dx-cta dx-cta--sweep" id="dxCtaSweep" hidden disabled></button>
           <div class="dx-ctas"><button class="dx-cta" id="dxCta"></button><button class="dx-cta" id="dxCta2" hidden></button></div>
           <div class="dx-log" id="dxLog" role="log" hidden></div>
         </div>
@@ -351,10 +355,15 @@ const DexUI = (() => {
     const typo = C.entryProblem($("dxPrice").value) || C.entryProblem($("dxAmount").value);
     $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? I18N.t("Exceeds your free {buy} by {short} (free {free})", { buy: (buy ? "MxUSD" : "MINIMA"), short: C.fmt(pl.short), free: C.fmtBal(pl.free) }) : "";
     const chainNo = C.chainWhy(st);   // 0.19.373: the on-chain engine is not ready: said, and BOOK / POOL is off
-    $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).concat(pl.ok && pl.chain && chainNo ? [chainNo] : []).map(l => `<p>${esc(l)}</p>`).join("")
+    const sw = sweepFor(pl, chainNo);   // 0.19.375: FAST and on-chain both cross: the SWEEP (shown, not sendable yet)
+    $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).concat(pl.ok && pl.chain && chainNo ? [chainNo] : []).concat(sw ? [String(SWEEP_NOT_YET)] : []).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>${th("Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.")}</p>`;
     const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !why.soft;
-    for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
+    const cta3 = $("dxCtaSweep");
+    for (const b of [cta, cta2, cta3]) b.dataset.side = buy ? "buy" : "sell";
+    cta3.hidden = !sw || trading; cta3.disabled = true;   // SWEEP_NOT_YET: the page cannot be told to take on-chain without resting a remainder
+    cta3.innerHTML = sw ? esc(I18N.t("SWEEP {side} {total} · {route} + FAST · avg {avg}", { side: side.trim(), total: C.fmt(C.add(sw.chainQ, sw.fastQ)), route: sw.route, avg: sw.avg ? C.fmtPrice(sw.avg) : "—" }))
+      + "<small>" + esc(I18N.t("up to {fast} instant, then {chain} on-chain", { fast: C.fmt(sw.fastQ), chain: C.fmt(sw.chainQ) })) + "</small>" : "";
     cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(I18N.t("{take} NOW · FAST", { take: side + C.fmt(pl.take) })) + "<small>" + th("instant ·") + " " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? th("BUY MINIMA") : th("SELL MINIMA");
     cta.disabled = trading || dead || short || !f.known || !!typo || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
     cta2.hidden = !(pl.ok && pl.chain) || trading;
@@ -366,6 +375,26 @@ const DexUI = (() => {
     log.hidden = !lines.length && !mine;
     log.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join("") + (mine ? `<div class="dx-log__${mine.kind}">${esc(mine.text)}</div>` : "");
     log.dataset.kind = says.error ? "error" : "";   // "Only your own orders are at this price…" is plan feedback
+  }
+  // ---- SWEEP (0.19.375): the phone's split (C.decideBoth) over the PAGE's own on-chain quotes (ACTS.quote) ----
+  /** Why the button cannot be pressed. The phone runs part 2 as an on-chain trade of exactly the re-quoted amount that
+   *  rests nothing. This page's only on-chain message is a LIMIT, and the engine (resting/pd_service.js) rests whatever
+   *  of a LIMIT does not cross when it plans (after re-reading the pools), or all of it when nothing crosses then. So a
+   *  book that moved between the quote and the send would leave an order resting, signed by the engine with no review.
+   *  Until the engine can be told "take only", SWEEP is shown with its split and average and is not sendable. */
+  const SWEEP_NOT_YET = L_("SWEEP cannot be sent from this app yet: the on-chain engine cannot be told to take only what crosses, so if the book moved before the on-chain part was sent, part of it could be left resting as an order, and a sweep must leave nothing resting. Take the FAST part with the first button, then the rest with BOOK / POOL.");
+  const Sweep = { key: "", res: null };
+  /** The sweep for this ticket, or null. Asked of the page once per change of the ticket or the book; drawn when it answers. */
+  function sweepFor(pl, chainNo) {
+    if (!(pl.ok && pl.fast && !pl.stuck && pl.chain) || chainNo || !Page.state.ready || Page.stub) { Sweep.key = ""; Sweep.res = null; return null; }
+    const b = book(), buy = X.buy, price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim();
+    const key = JSON.stringify([buy, price, amount, b && b.fast, b && b.book, b && (buy ? b.poolAsks : b.poolBids), st && st.block]);
+    if (key !== Sweep.key) {
+      Sweep.key = key; Sweep.res = null;
+      const quote = async (limit, amt) => { const r = await drive("quote", { buy, price: limit, amount: amt }); if (r.error) throw new Error(r.error); return r.value; };
+      C.decideBoth(b, buy, price, amount, quote).then(res => res, () => null).then(res => { if (Sweep.key === key) { Sweep.res = res; paintTicket(); } });
+    }
+    return Sweep.res;
   }
   async function submit(layer) {
     const price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim();

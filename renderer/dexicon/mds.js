@@ -243,6 +243,18 @@
       need((a.price.split(".")[1] || "").length <= 6, "An on-chain order takes a price of at most 6 decimals. Nothing was changed.");
       editOrder(a.coinid, a.price);
     },
+    /** 0.19.375, READ ONLY: the page's own on-chain plan (PandaComposite.plan over its STATE: orders and pools) for a
+     *  side, a 6-decimal limit and an amount, as totals. Nothing is set, asked, signed or sent. The native SWEEP button
+     *  (renderer/dexicon-core.js decideBoth) is worked out from it, so routing and pool maths are never re-implemented. */
+    quote: function (a) {
+      need(NUM.test(a.price) && NUM.test(a.amount), "Enter a valid price and amount.");
+      need((a.price.split(".")[1] || "").length <= 6 && (a.amount.split(".")[1] || "").length <= 8, "An on-chain quote takes a price of at most 6 decimals and an amount of at most 8.");
+      need(state.ready === true, "The on-chain order book is not ready.");
+      var c = PandaComposite.plan(state.book || [], state.pools || [], !!a.buy, a.amount, a.price, Number(state.block || 0));
+      var s = function (v) { return v == null ? "0" : new Decimal(v).toFixed(); };
+      if (PandaComposite.isEmpty(c)) return { totalMinima: "0", totalUsdt: "0", orderMinima: "0", poolMinima: "0" };
+      return { totalMinima: s(c.totalMinima), totalUsdt: s(c.totalUsdt), orderMinima: s(c.orderMinima), poolMinima: s(c.poolMinima) };
+    },
     addRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.addRelay(a.url); },
     removeRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.removeRelay(a.url); },
     discover: function () { DexiconFast.discover(); },
@@ -275,16 +287,17 @@
     return !!(plan && plan.takes && plan.takes.length);
   }
   function drive(d) {
-    var err = null;
+    var err = null, value = null;
     try {
       need(Object.prototype.hasOwnProperty.call(ACTS, d.act), "not an action of the Exchange screens: " + d.act);
       need(!(MONEY[d.act] && running()), "A trade is still running. Wait for it to finish. Nothing was signed.");
       asked = null;
-      answer = { any: d.act !== "place", reviewed: d.args && d.args.reviewed, prompt: d.args && d.args.price };
-      ACTS[d.act](d.args || {});
-    } catch (e) { err = (e && e.message) || String(e); }
+      answer = d.act === "quote" ? null : { any: d.act !== "place", reviewed: d.args && d.args.reviewed, prompt: d.args && d.args.price };   // a quote answers no dialog
+      value = ACTS[d.act](d.args || {});
+      if (d.act !== "quote") value = null;
+    } catch (e) { err = (e && e.message) || String(e); value = null; }
     answer = null;
-    parent.postMessage({ dxRoom: 1, driven: d.id, error: err, asked: asked }, "*");
+    parent.postMessage({ dxRoom: 1, driven: d.id, error: err, asked: asked, value: value }, "*");
     report();
   }
 
