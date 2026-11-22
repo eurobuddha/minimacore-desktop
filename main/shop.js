@@ -375,8 +375,8 @@ async function scanPayments(depth, tip) {
       // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
       const o = store.order(ref); if (!o) return "";
       const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
-      // not judged, not marked seen, until the chain is past the allowance (0.19.344, as released 0.18.289): read again on a later pass
-      if (o.role === "sell" && !o.paid && known && !(tip > pb + PAY_BEFORE_ORDER)) { const w = waitingPay.get(ref); if (!w || tip > w.block + PAY_BEFORE_ORDER) waitingPay.set(ref, { coin: String(id), block: pb }); return ""; }
+      // not judged, not marked seen, until the tip reaches the allowance (0.19.344, as released 0.18.289; pb + 3 itself since 0.19.348): read again on a later pass
+      if (o.role === "sell" && !o.paid && known && tip < pb + PAY_BEFORE_ORDER) { const w = waitingPay.get(ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(ref, { coin: String(id), block: pb }); return ""; }
       seenPayCoins.add(id);
       if (o.role !== "sell" || o.paid) return "";
       // a payment older than its order never pays it automatically (0.19.339, as released 0.18.285): held for a check by hand, the coin id whole
@@ -394,7 +394,7 @@ async function scanPayments(depth, tip) {
     }
   };
   // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
-  judgedTip = tip;
+  if (!missed) judgedTip = tip;   // the "waiting" line stays until a read that covered the coin judged it (0.19.348, as released 0.18.293)
   const dust = coins.filter(c => judge(c) === "DUST");
   if (changed && dust.length) for (const c of dust) judge(c);
   return missed ? null : changed;
@@ -421,16 +421,20 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // (a sealed message of up to 90000 bytes) may land a few blocks after the payment. A payment older than that is held for a check by hand, never
 // refused outright: the reference is plain text on chain, so anyone could copy a payment's reference into an order of their own while the real
 // order is not held here (older than the node's tree, or not read yet).
-// A payment is judged only once the chain is past that allowance (0.19.344, as released 0.18.289): a payment coin created at block pb waits, not
-// judged and not marked seen, until the tip is above pb + PAY_BEFORE_ORDER. Orders are read before payments in every pass, so a real order mined
-// within the allowance is held by then, and a copier's order with the same reference meets it as a second buyer's (both held for a check by
-// hand). Judged at once, a copier's order mined in the block after the payment was paid before the real order arrived. A waiting coin is read
-// again: the payments read never skips what an earlier pass read, and every window reaches 64 blocks or more below the tip, so a coin within 3
-// blocks of the last tip is inside the next one, after a restart too (the cursor is on disk).
+// A payment is judged only once the chain has reached that allowance (0.19.344, as released 0.18.289; at the tip pb + PAY_BEFORE_ORDER since
+// 0.19.348, as released 0.18.293): a payment coin created at block pb waits, not judged and not marked seen, while the tip is below
+// pb + PAY_BEFORE_ORDER. Orders are read before payments in every pass, so a real order mined within the allowance (up to block pb + 3) is held
+// by the pass at tip pb + 3, and a copier's order with the same reference meets it as a second buyer's (both held for a check by hand). Judged
+// at once, a copier's order mined in the block after the payment was paid before the real order arrived. Not later than pb + 3 (0.19.348): the
+// node's `send` may spend a coin from tip pb + 3 (coin age MINIMA_CONFIRM_DEPTH = 3), and `coins` lists unspent coins only, so the vendor's own
+// wallet could spend the payment in block pb + 4 before it was counted (0.19.344 judged from tip pb + 4). A spend posted at tip pb + 3 is mined
+// in block pb + 4 at the earliest, so the pass at tip pb + 3 still lists the coin. A waiting coin is read again: the payments read never skips
+// what an earlier pass read, and every window reaches 64 blocks or more below the tip, so a coin within 3 blocks of the last tip is inside the
+// next one, after a restart too (the cursor is on disk).
 const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
 const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
-let judgedTip = 0;              // the tip the last payments read judged against
+let judgedTip = 0;              // the tip the last payments read judged against, every payout address read (0.19.348, as released 0.18.293)
 // What may not have been read below block N, and why (as released 0.18.283 / 0.18.286, the same words): "cap" (the node's answer was too
 // large) or the tree, + "Root" when the payments read reached the tree's root, where every unspent payment coin is kept whatever its age;
 // "treePayCap": the orders read was whole and only the payments read was cut by the reply cap. "May not have been": a tree longer than
@@ -569,7 +573,7 @@ function orderDetail(ref) {
   const sharedRef = first ? { ref: first.ref, received: first.paidAmount || "0" } : null;
   // a payment with this order's reference that waits for the allowance (0.19.344, as released 0.18.289): said, never as "not paid"
   const w = o.role === "sell" && !o.paid ? waitingPay.get(ref) : null;
-  const waiting = w && judgedTip <= w.block + PAY_BEFORE_ORDER ? { coin: w.coin, block: w.block, after: w.block + PAY_BEFORE_ORDER } : null;
+  const waiting = w && judgedTip < w.block + PAY_BEFORE_ORDER ? { coin: w.coin, block: w.block, after: w.block + PAY_BEFORE_ORDER - 1 } : null;   // counted at tip block + 3 (0.19.348)
   return Object.assign({ order: o, chat: store.chat(ref), sharedRef, waiting }, payState(o));
 }
 /** The buyer checked their History and the uncertain payment was not sent (0.19.241, as released 0.18.217): Retry is offered again. */

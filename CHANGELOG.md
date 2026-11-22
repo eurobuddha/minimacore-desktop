@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.348] — miniMall: a payment is judged at tip block + 3, before the wallet can spend it (as released 0.18.293)
+
+- 0.19.344 judged a payment coin created at block pb only from tip pb + 4. The node's `send` may spend a coin from tip pb + 3 (coin age `MINIMA_CONFIRM_DEPTH` = 3), and `coins` lists unspent coins only, so any send of the vendor's own wallet (a miniMall reply, chat, Web Wallet, a Vestr lock, an AtomiX publish) could spend the fresh payment in block pb + 4 before it was ever counted: the honest order stayed unpaid, with no problem recorded and nothing to check by hand, and the "a payment has arrived" line vanished. A payment now waits only while the tip is below pb + 3 and is judged by the pass at tip pb + 3; orders are still read first, so a real order mined up to block pb + 3 is held by then, and a spend posted at tip pb + 3 is mined in block pb + 4 at the earliest. The waiting line says "It is counted after block pb + 2" (the same sentence in every language, the figure one lower).
+- The waiting line is cleared only by a payments read that read every payout address; one address's failed read cleared it one pass early.
+- Tests (scripts/shop-store-test.cjs): the two boundary tests changed on purpose (tip pb + 2 waits, pb + 3 judged); new: order 1009, payment 1010, the wallet's send at tip 1013 mined in 1014, counted by the pass at 1013 (never paid on 0.19.347); the waiting line kept when the coin's payout address read fails at the judging tip. main/shop.js pin updated.
+- Test only (scripts/dexicon-host.test.cjs): the lanes test asserted exactly 34 requests waiting and failed now and then with 35, when the engine's own periodic read queued behind the two held posts; it now asserts at least 34 waiting and still exactly 6 dropped (the order and the take wait, nothing more is dropped). test:dexicon passed 10 runs in a row.
+
 ## [0.19.347] — Vestr: no second collect of a coin being collected; the node judges every collect before it is posted (as released 0.18.291 / 0.18.292)
 
 - Both reads of contract coins send `checkmempool:true` (the node then leaves out a coin it is mining a transaction for or that a mempool transaction spends), and a coin collected in this session is refused again while the node still lists it: "This contract coin was collected a moment ago and the node still lists it. Wait until it is gone from the list before you collect again. Nothing was sent."
