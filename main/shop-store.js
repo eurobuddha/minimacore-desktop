@@ -244,7 +244,7 @@ function settleDust(o, ref) {
   o.paidTokenid = o.tokenid; o.paidAt = Date.now();
   return judge(o);
 }
-function recordPayment(ref, coinid, paidAmount, paidTokenid) {
+function recordPayment(ref, coinid, paidAmount, paidTokenid, block) {
   ensureLoaded(); const o = order(ref); if (!o) return null;
   if (o.paid) return "ALREADY";
   const id = String(coinid == null ? "" : coinid).toLowerCase();
@@ -252,6 +252,8 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   o.coins = Array.isArray(o.coins) ? o.coins : [];
   if (o.coins.includes(id)) return null;
   ensureChecked(o);
+  // the newest block of a coin that may pay it (0.19.354): an order without a secret settles from there (settleBlock); counted dust included
+  if (String(paidTokenid).toLowerCase() === String(o.tokenid).toLowerCase() && Number.isSafeInteger(block) && block > (o.coinBlock || 0)) o.coinBlock = block;
   if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {   // never counted, so never kept: a wrong coin seen again changes nothing
     const was = o.paidTokenid + "/" + o.status;   // no write for a coin that changes nothing (0.19.345)
     if (!o.paidAmount) o.paidTokenid = paidTokenid;   // shown only while no coin of the right token has come
@@ -304,11 +306,26 @@ function handCheck(ref) {
   ensureLoaded(); const o = order(ref);
   if (!o || o.role !== "sell") return false;
   // also an order an older version counted money for, and one whose older verdict was kept but that is not paid (0.19.247)
-  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid)) return false;
+  // and a paid order that is still settling (0.19.354)
+  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid) && !settleBlock(o)) return false;
   o.handChecked = true; flush(); return true;
 }
-/** May the vendor confirm / ship / deliver this order? Paid by the listing's figure, or checked by hand. */
-function mayAdvance(o) { return !!(o && (o.paid || o.handChecked)); }
+/** Settling (0.19.354, as released 0.18.300). A payment is counted the first time it is read (as released 0.18.286), but an order paid without a
+ *  proof of its secret (no secret, or stored before 0.19.352) may be a copier's, paid by another buyer's coin whose real order is mined up to 3
+ *  blocks after it. Such an order, paid, is held until a pass whose orders read succeeded has reached the block of the newest coin counted for
+ *  it + 3 with every order from that coin's block up known read: by then a second order with its reference would have been read and held
+ *  both (flagDuplicate). The block it is held until, or 0 when it is not held (not paid, paid by its proof, checked by hand, a coin of unknown
+ *  block, or settled). `ordersRead` is the last pass's, in memory only: after a restart a paid order settles on the first good pass. */
+const PAY_SETTLE = 3;
+let ordersRead = null;   // { tip, from }: the last pass's orders read reached `tip`, every order from block `from` up is known; null: it failed
+function setOrdersRead(r) { ordersRead = r && Number.isSafeInteger(r.tip) ? { tip: r.tip, from: Number(r.from) || 0 } : null; }
+function settleBlock(o) {
+  if (!o || o.role !== "sell" || !o.paid || o.commit || o.handChecked || !Number.isSafeInteger(o.coinBlock) || o.coinBlock <= 0) return 0;
+  const n = o.coinBlock + PAY_SETTLE;
+  return ordersRead && ordersRead.tip >= n && ordersRead.from <= o.coinBlock ? 0 : n;
+}
+/** May the vendor confirm / ship / deliver this order? Paid by the listing's figure and settled, or checked by hand. */
+function mayAdvance(o) { return !!(o && (o.handChecked || (o.paid && !settleBlock(o)))); }
 function markOrderRead(ref) { ensureLoaded(); const o = order(ref); if (o && o.unread) { o.unread = false; persistSoon(); return true; } return false; }
 function setMeta(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 function setMetaSync(k, v) { ensureLoaded(); mem.meta[k] = v; flush(); }   // fund-relevant flags (unpaid/ambiguous) must survive a crash
@@ -323,7 +340,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, ensureChecked,
+  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, settleBlock, setOrdersRead, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, setLog, log,
   _money: { decCmp, decGte, decAdd, decSub, payableTotal, isDust }, MAX_PAY_COINS, PENDING_MAX,
   _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }
