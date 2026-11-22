@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.288] — Vestr: a collect at or just after the end block is no longer dropped by the chain
+
+- The node's contract maths (`runscript` on CHECK_MATHS) works out its `change` before an expired contract's `cancollect` is raised to the whole coin, so at and just after the final block it reported a full payout AND a change (a sample contract coin, coin `0x23456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01`, 100 MINIMA, final block 1000004: collect 100, change 1). The collect paid out 100 and returned 1 from a 100 coin: `txnpost` took it, the chain dropped it, and the app said it was collected. The change is now the coin less the payout in exact decimals, never the script's `change`: an expired contract collects the whole coin with no change output, a partly vested one returns the exact rest to the contract with its state as before. Nothing is built while the grace wait is in force (the node's `mustwait`, or the coin younger than the contract's minimum wait) or when the node's figure is more than the coin holds. Test: `scripts/inject-test.cjs`.
+
 ## [0.18.287] — The node jars with the command-injection fix and the RPC hardening
 
 - `resources/minima.jar` is minima-core 1.1.2.3-euro8 (sha256 `fc63eb672374e7ceb7cfba17d0e098e3c2991c9a0ef124b0a14fae111c088ef9`) and the Parlons node pin moves to 0.2.162 (`parlonsNodeSha256` `65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1`, maxima release `node-v0.2.162`). Built sub-commands are never re-parsed from text (no `;` / quote injection); the RPC binds 127.0.0.1 unless `-rpcbind`, checks Host and browser Origin and reads its body by bytes with a cap; a read-mode RPC user runs as non-admin; non-admin callers only create plain `.txn` files in the base folder. The app already uses its node on 127.0.0.1 and passes no flag the jars refuse.
