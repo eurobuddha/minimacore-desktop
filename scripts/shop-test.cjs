@@ -573,7 +573,8 @@ test("a failed read moves nothing and is said as recent; a failed backfill step 
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "shop.js"), "utf8").replace(/\r\n/g, "\n");
   // CHANGED on purpose (0.18.282): orders skip what an earlier pass read; payments never do (a payment seen before its order was not counted);
   // CHANGED on purpose (0.18.289): the payments read is given the tip it judges against
-  assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep, tip\)/.test(src) && /scanOrders\(NODE_TREE_MOST, floor\)/.test(src) && /scanPayments\(ROOT_DEPTH, tip\)/.test(src) && !/scanPayments\([^)]*floor/.test(src), "orders skip what an earlier pass read, payments do not");
+  // CHANGED on purpose (0.18.293): and the block from which its orders are known read (payFrom: a coin below it waits; never a skip of what was read)
+  assert.ok(/scanOrders\(deep, floor\)/.test(src) && /scanPayments\(deep, tip, payFrom\)/.test(src) && /scanOrders\(NODE_TREE_MOST, floor\)/.test(src) && /scanPayments\(ROOT_DEPTH, tip, payFrom\)/.test(src) && !/scanPayments\([^)]*floor/.test(src), "orders skip what an earlier pass read, payments do not");
   // CHANGED on purpose (0.18.281): a resync or a lower branch: the cursor follows the chain down, no failure is said, a pending backfill waits
   m.store.setMeta("bfTarget", 1900); m.store.setMeta("bfFloor", 1950); t.st.hook = null; const cur = Number(m.store.getMeta("scanTip")); t.st.tip = 300; t.st.depths.length = 0; await m.shop.scanOnce();
   assert.ok(cur > 300); assert.equal(Number(m.store.getMeta("scanTip")), 300, "the cursor follows the chain down"); assert.equal(m.shop.scanState().readFailed, false, "not a failure"); assert.equal(Number(m.store.getMeta("bfTarget")), 1900, "the backfill waits");
@@ -757,6 +758,73 @@ test("a payment said as waiting stays said when the payout address read fails at
   assert.deepEqual(t.m.shop.orderDetail("ORD-WF").waiting, { coin: "0xFA" + Buffer.from("ORD-WF").toString("hex"), block: 1010, after: 1012 }, "still said as waiting");
   t.m.shop._setRunner(base); t.st.tip = 1014; await t.m.shop.scanOnce();
   assert.equal(t.m.store.order("ORD-WF").paid, true); assert.equal(t.m.shop.orderDetail("ORD-WF").waiting, null);
+});
+// 0.18.293: orders are read before payments, and a payment is judged only when the orders that may go with it are known read: a pass whose
+// orders read failed judges no payment, and a coin below what a cut orders read reached waits for the read of that range
+test("the orders read fails on the pass that would judge a payment: no payment is judged in that pass; the next good pass holds both orders", async () => {
+  const t = await javaSetup("ofail"); t.shopId = "ofail"; const atk = await t.m.sc.deriveIdentity("copier ofail"), buyer = await t.m.sc.deriveIdentity("ofail buyer");
+  t.st.pay = [t.pay("ORD-V", 1010)];
+  t.st.msg = [await sealFrom(t, atk, "ORD-V", 1011, "COPIER"), await sealFrom(t, buyer, "ORD-V", 1013, "VICTIM")];
+  await walk(t, 1010, 1012);
+  t.st.mode = "throw"; t.st.tip = 1013; await t.m.shop.scanOnce();   // the real order is in block 1013, and the read of it fails
+  const o = t.m.store.order("ORD-V");
+  assert.equal(o.delivery, "COPIER"); assert.equal(o.paid, false, "not judged while the orders up to the tip are not read"); assert.equal(o.status, "PENDING");
+  assert.equal(t.m.store.mayAdvance(o), false); assert.match(t.m.shop.scanState().text, /Recent orders could not be read: the node did not answer/);
+  t.st.mode = "ok"; t.st.tip = 1014; await t.m.shop.scanOnce();
+  const [copier, victim] = both(t, buyer);
+  for (const x of [copier, victim]) { assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); assert.equal(x.problems[0], DUPV); assert.equal(t.m.store.mayAdvance(x), false); }
+  assert.equal(copier.paidAmount, "1", "counted once, on the order held under the reference");
+  // past the tree: the orders read as deep as the tree may hold fails, so the root read's payments wait for the next pass
+  { const t = await javaSetup("ofailroot"); t.shopId = "ofailroot"; const atk = await t.m.sc.deriveIdentity("copier ofailroot"), buyer = await t.m.sc.deriveIdentity("ofailroot buyer");
+    t.st.pay = [t.pay("ORD-V", 1474)]; t.st.msg = [await sealFrom(t, buyer, "ORD-V", 1475, "VICTIM"), await sealFrom(t, atk, "ORD-V", 1477, "COPIER")];
+    const m = await t.reopen(); t.st.tip = 2500; t.st.hook = (d) => { if (d > 1024) throw new Error("RPC timed out"); return null; };
+    await m.shop.scanOnce(); assert.equal(m.store.order("ORD-V").delivery, "COPIER"); assert.equal(m.store.order("ORD-V").paid, false, "no payment judged after a failed orders read");
+    t.st.hook = null; t.st.tip = 2501; await m.shop.scanOnce();
+    for (const x of [m.store.order("ORD-V"), m.store.order("ORD-V~" + buyer.publicId)]) { assert.ok(x); assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); } }
+});
+test("a cut orders read (window or past the tree): a payment below what it reached waits until the orders of its range are read; neither order is paid", async () => {
+  // the recent window cut by the reply cap opens a gap; the payment's real order is in the gap, the copier's above the cut; the step fails once
+  { const t = await javaSetup("ocut"); t.shopId = "ocut"; const atk = await t.m.sc.deriveIdentity("copier ocut"), buyer = await t.m.sc.deriveIdentity("ocut buyer");
+    // the window (608 blocks) is cut to 304, so it reaches block 1296: the copier's order in it, the payment and the real order just under it
+    t.st.pay = [t.pay("ORD-V", 1294)]; t.st.msg = [await sealFrom(t, atk, "ORD-V", 1296, "COPIER"), await sealFrom(t, buyer, "ORD-V", 1293, "VICTIM")];
+    const m = await t.reopen(); t.st.tip = 1600; let n = 0;
+    t.st.hook = () => { n++; if (n === 1) return { status: true, response: { tooBig: true } }; if (n === 2) return null; throw new Error("RPC timed out"); };   // window cut, the step fails
+    await m.shop.scanOnce();
+    const o = m.store.order("ORD-V"); assert.equal(o.delivery, "COPIER"); assert.equal(Number(m.store.getMeta("bfFloor")), 1296);
+    assert.equal(o.paid, false, "the payment waits: the orders of its range are not read"); assert.equal(o.status, "PENDING");
+    t.st.hook = null; t.st.tip = 1601; await m.shop.scanOnce();
+    const c = m.store.order("ORD-V"), v = m.store.order("ORD-V~" + buyer.publicId);
+    assert.ok(v && v.delivery === "VICTIM", "the step read the real order"); for (const x of [c, v]) { assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); assert.equal(x.problems[0], DUPV); }
+    assert.equal(c.paidAmount, "1"); }
+  // a backfill step whose orders read is cut above the gap's target: the payment it lists below what that read reached waits for the next step
+  { const t = await javaSetup("ocutstep"); t.shopId = "ocutstep"; const atk = await t.m.sc.deriveIdentity("copier ocutstep"), buyer = await t.m.sc.deriveIdentity("ocutstep buyer");
+    t.st.pay = [t.pay("ORD-V", 1616)]; t.st.msg = [await sealFrom(t, atk, "ORD-V", 1618, "COPIER"), await sealFrom(t, buyer, "ORD-V", 1615, "VICTIM")];
+    const m = await t.reopen(); t.st.tip = 2000; let n = 0;   // the window (1008) cut to 252 (floor 1748), the step (764) cut to 382: it reaches 1618
+    t.st.hook = (d) => { n++; return (n <= 3 && d > 256) || (n > 3 && d > 384) ? { status: true, response: { tooBig: true } } : null; };
+    await m.shop.scanOnce();
+    assert.equal(Number(m.store.getMeta("bfFloor")), 1618, "the step reached 1618"); assert.equal(m.store.order("ORD-V").delivery, "COPIER");
+    assert.equal(m.store.order("ORD-V").paid, false, "the payment at 1616 waits: the orders below 1618 are not read");
+    t.st.hook = null; t.st.tip = 2001; await m.shop.scanOnce();
+    const c = m.store.order("ORD-V"), v = m.store.order("ORD-V~" + buyer.publicId);
+    assert.ok(v && v.delivery === "VICTIM"); for (const x of [c, v]) { assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); } }
+  // a step that reaches the gap's target judges what it lists below it: those blocks' orders were read before the gap
+  { const t = await javaSetup("ocutend"); t.st.msg = [await t.seal("ORD-E", 997)]; t.st.tip = 997; await t.m.shop.scanOnce(); assert.ok(t.m.store.order("ORD-E"));
+    t.st.pay = [t.pay("ORD-E", 998)]; const m = await t.reopen();
+    m.store.setMeta("scanTip", 1005); m.store.setMeta("bfTarget", 1000); m.store.setMeta("bfFloor", 1004); t.st.tip = 1006;
+    t.st.hook = (d) => (d > 7 ? { status: true, response: { tooBig: true } } : null);   // the window served 4 blocks, the step (14) 7: it reaches 999
+    await m.shop.scanOnce();
+    assert.equal(Number(m.store.getMeta("bfTarget")), 0, "the backfill reached its target"); assert.equal(m.store.order("ORD-E").paid, true, "the payment at 998 is judged"); }
+  // past the tree: the orders read as deep as the tree may hold is cut on the first try and whole on the second
+  { const t = await javaSetup("ocutroot"); t.shopId = "ocutroot"; const atk = await t.m.sc.deriveIdentity("copier ocutroot"), buyer = await t.m.sc.deriveIdentity("ocutroot buyer");
+    t.st.pay = [t.pay("ORD-V", 1474)]; t.st.msg = [await sealFrom(t, buyer, "ORD-V", 1475, "VICTIM"), await sealFrom(t, atk, "ORD-V", 1477, "COPIER")];
+    const m = await t.reopen(); t.st.tip = 2500; t.st.hook = (d) => (d > 1024 ? { status: true, response: { tooBig: true } } : null);
+    await m.shop.scanOnce();
+    assert.equal(m.store.order("ORD-V").delivery, "COPIER"); assert.equal(m.store.order("ORD-V").paid, false, "the root read's coin waits while the cut read is tried again");
+    assert.equal(Number(m.store.getMeta("bfStall")), 1);
+    t.st.hook = null; t.st.tip = 2501; await m.shop.scanOnce();
+    const c = m.store.order("ORD-V"), v = m.store.order("ORD-V~" + buyer.publicId);
+    assert.ok(v && v.delivery === "VICTIM", "the real order is read"); for (const x of [c, v]) { assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); assert.equal(x.problems[0], DUPV); }
+    assert.equal(c.paidAmount, "1"); }
 });
 test("a payment coin whose judging threw is read again on the next pass, and the pass that threw is a failed one", async () => {
   const t = await javaSetup("threw"); t.st.msg = [await t.seal("ORD-T", 1009)]; t.st.pay = [t.pay("ORD-T", 1010)];
