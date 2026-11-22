@@ -762,3 +762,63 @@ test("token label: the mark first, the name capped, invisible and filler charact
   for (let n = 1; n <= opt.length; n++) { const cut = opt.slice(0, n).replace(/[\u2068\u2069]/g, "").trim(); assert.notEqual(cut, real, "cut at " + n); assert.ok(n < 13 || cut.startsWith("MINIMA / (not"), "from the 13th character on the mark is in view: " + cut); }
   assert.equal(PP.tokLabel(MXUSD, "\u202eanything"), "MxUSD", "the real token is labelled by its id alone");
 });
+
+// ---- 0.19.380 (owner: "minima and mxusd do not render the correct icons for the coin nor do they get the webvalidation ... works
+// fine in the node wallet BUT broken and different in pandapools wallet tab"): the Wallet tab draws each row's icon with the
+// Wallet's own tokIconHtml and enhances it with the Wallet's own enhanceTokenIcons (renderer/app.js), over one ICON_CACHE.
+// The functions are lifted out of app.js and run here over a stand-in of the few DOM calls they make.
+function walletIcons(answers) {
+  const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "app.js"), "utf8"));
+  const lift = (name) => { const m = app.match(new RegExp("\\n((?:async )?function " + name + "\\b[^\\n]*)")); assert.ok(m, name + " in app.js"); return app.slice(m.index + 1, app.indexOf("\n}", m.index) + 2); };
+  const win = { btoa: (s) => Buffer.from(s, "binary").toString("base64"), unescape };
+  vm.runInNewContext(fs.readFileSync(path.join(R, "tokenicons.js"), "utf8"), Object.assign(win, { window: win }));
+  const calls = [];
+  const env = { TOK: win.TOK, MINIMA: "0x00", ICON_CACHE: new Map(), esc: (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
+    validTok: (t) => /^0x[0-9A-F]{2,64}$/i.test(t),
+    api: { tokenIcon: async (url) => { calls.push("icon " + url); if (answers.icon instanceof Error) throw answers.icon; return answers.icon; } },
+    cmd: async (c) => { calls.push(c); const a = answers.validate(c.replace(/^tokenvalidate tokenid:/, "")); if (a instanceof Error) throw a; return a; } };
+  const f = new Function(...Object.keys(env), ["tokIconHtml", "enhanceTokenIcons", "applyIcon"].map(lift).join("\n") + "; return { tokIconHtml, enhanceTokenIcons };")(...Object.values(env));
+  /** one row's icon cell as drawn, then enhanced: what the screen ends with */
+  async function row(tid, token) {
+    const html = f.tokIconHtml(tid, token), attr = (n) => { const m = new RegExp(" " + n + '="([^"]*)"').exec(html.slice(0, html.indexOf(">"))); return m ? m[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"') : undefined; };
+    const img = { src: /<img [^>]*src="([^"]*)"/.exec(html)[1].replace(/&amp;/g, "&") }, badge = { hidden: / class="tok-badge" hidden>/.test(html) };
+    const w = { dataset: { tokenid: attr("data-tokenid"), identicon: attr("data-identicon"), iconData: attr("data-icon-data"), iconRemote: attr("data-icon-remote"), webv: attr("data-webv") },
+      querySelector: (s) => (s === "img" ? img : badge) };
+    await f.enhanceTokenIcons({ querySelectorAll: () => (w.dataset.tokenid ? [w] : []) });
+    return { src: img.src, ticked: !badge.hidden, identicon: w.dataset.identicon };
+  }
+  return { row, calls, cache: env.ICON_CACHE, TOK: win.TOK };
+}
+test("the PandaPools Wallet tab draws each token as the Wallet does: Minima, MxUSD, an impostor, validated, not validated, not checkable", async () => {
+  const MX_ICON = "https://mxusd.example/icon.png", MX_VALID = "https://mxusd.example/validate.txt", ICON_DATA = "data:image/png;base64,AAAA";
+  const IMPOSTOR = PK("1D"), PLAIN = PK("2E"), DOWN = PK("3F");
+  const w = walletIcons({ icon: ICON_DATA, validate: (tid) => (tid === DOWN ? new Error("the validation page did not answer") : { status: true, web: { valid: tid === MXUSD } }) });
+  const minima = await w.row("0x00", "Minima");
+  assert.deepEqual(minima, { src: "icons/minima.svg", ticked: true, identicon: undefined }, "Minima: the bundled mark, ticked, nothing fetched");
+  const mx = await w.row(MXUSD, { name: { name: "MxUSD", url: MX_ICON, webvalidate: MX_VALID }, decimals: 8 });
+  assert.equal(mx.src, ICON_DATA, "MxUSD: the icon of its own on-chain description, fetched through the main process"); assert.equal(mx.ticked, true, "validated: the node said so");
+  // a token that merely calls itself MxUSD (its own id), pointing at MxUSD's icon and validation page
+  const fake = await w.row(IMPOSTOR, { name: { name: "MxUSD", webvalidate: MX_VALID } });
+  assert.equal(fake.ticked, false, "the node's tokenvalidate is asked for the IMPOSTOR's id: not valid, no tick");
+  assert.equal(fake.src, w.TOK.identiconDataUri(IMPOSTOR), "its own identicon, never MxUSD's icon");
+  assert.notEqual(fake.src, mx.src); assert.equal(w.TOK.label({ name: { name: "MxUSD" } }, IMPOSTOR), IMPOSTOR, "and its name is not shown as MxUSD");
+  const plain = await w.row(PLAIN, { name: { name: "Gold" } });
+  assert.deepEqual([plain.src, plain.ticked], [w.TOK.identiconDataUri(PLAIN), false], "no validation URL in its description: no tick, nothing asked");
+  const down = await w.row(DOWN, { name: { name: "Silver", webvalidate: "https://silver.example/v" } });
+  assert.equal(down.ticked, false, "could not be checked: no tick (as the Wallet: never \"validated\" unless the node said so)");
+  assert.deepEqual(w.calls, ["icon " + MX_ICON, "tokenvalidate tokenid:" + MXUSD, "tokenvalidate tokenid:" + IMPOSTOR, "tokenvalidate tokenid:" + DOWN], "the only requests: one icon fetch and one tokenvalidate per token that names them");
+  // the Wallet has already drawn these tokens: the PandaPools tab, over the same cache, asks nothing again
+  const n = w.calls.length;
+  for (const [tid, tok] of [[MXUSD, { name: { name: "MxUSD", url: MX_ICON, webvalidate: MX_VALID } }], [IMPOSTOR, { name: { name: "MxUSD", webvalidate: MX_VALID } }], [DOWN, { name: { name: "Silver", webvalidate: "https://silver.example/v" } }]]) await w.row(tid, tok);
+  assert.equal(w.calls.length, n, "no request the Wallet did not already make");
+  assert.equal((await w.row(MXUSD, {})).ticked, true, "drawn from the cache: the tick is there at once");
+});
+test("the PandaPools Wallet tab uses the Wallet's own functions, passed by app.js; no icon of its own", () => {
+  const pp = fs.readFileSync(path.join(R, "dexicon-pp.js"), "utf8"), app = fs.readFileSync(path.join(R, "app.js"), "utf8");
+  assert.ok(/<span class="pp-bal__h">\$\{D\.tokIconHtml\(b\.tokenid \|\| MINIMA, b\.token\)\}/.test(pp), "each balance row's icon is the Wallet's tile, by token id");
+  assert.ok(/D\.enhanceTokenIcons\(\$\("ppWal"\)\);/.test(pp), "then enhanced as the Wallet's");
+  assert.ok(!/identiconDataUri|minima-mark\.svg|pp-bal__ic|<img/.test(pp), "no icon drawn any other way in room ②");
+  assert.ok(/DexPools\.init\(\{ api, copy, tryCmd, TOK, tokIconHtml, enhanceTokenIcons,/.test(app));
+  assert.ok(/const iconCell = tokIconHtml\(tid, b\.token\);/.test(app) && /const heroIcon = tokIconHtml\(tid, b\.token, true\);/.test(app), "the Wallet's rows and its token dialog draw with the same function");
+  for (const f of ["dexicon-ax.js", "dexicon-ui.js", "dexicon-core.js"]) assert.ok(!/<img|identiconDataUri/.test(fs.readFileSync(path.join(R, f), "utf8")), f + " draws no token image (names only, by id)");
+});

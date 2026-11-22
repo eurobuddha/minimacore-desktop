@@ -1524,23 +1524,30 @@ function isNftBal(b) {
 
 // One token row, as the phone's view_balance_row: icon tile with the validated badge, name, amount, and one
 // faint line with whatever the amount leaves out ("4 coins", "locked 20 · 20 coins"). Nothing else.
-function balCardHtml(b) {
-  const tid = b.tokenid || MINIMA, isNative = tid === MINIMA;
+/**
+ * A token's icon tile with its web-validation tick, by its TOKEN ID (never its name): Minima (0x00) is the bundled mark,
+ * ticked; any other token (MxUSD included) starts as its identicon, or the inline image of its own on-chain description,
+ * and enhanceTokenIcons() then fetches a remote icon through the main process's guarded fetch (api.tokenIcon) and asks the
+ * node's `tokenvalidate`; the tick shows only when the node says valid. One function for the Wallet's rows, its token
+ * dialog (lg) and PandaPools' Wallet tab (0.19.380, renderer/dexicon-pp.js through DexPools.init), one ICON_CACHE.
+ */
+function tokIconHtml(tid, token, lg) {
+  const wrap = lg ? "tok-wrap tok-wrap--lg" : "tok-wrap", img = lg ? "tok-icon tok-icon--lg" : "tok-icon";
+  if (tid === MINIMA) return `<span class="${wrap}"><img class="${img} tok-icon--native" src="${lg ? "minima-mark.svg" : "icons/minima.svg"}" alt=""><span class="tok-badge">✓</span></span>`;
   const cached = ICON_CACHE.get(tid);
-  let iconCell;
-  if (isNative) {
-    iconCell = `<span class="tok-wrap"><img class="tok-icon tok-icon--native" src="icons/minima.svg" alt=""><span class="tok-badge">✓</span></span>`;
-  } else {
-    const identicon = TOK.identiconDataUri(tid);
-    const res = TOK.resolveIcon(TOK.pickIconField(b.token));
-    const src = (cached && cached.icon) || res.data || identicon;
-    const showBadge = cached && cached.valid;
-    iconCell = `<span class="tok-wrap" data-tokenid="${esc(tid)}" data-identicon="${esc(identicon)}"`
-      + (res.data ? ` data-icon-data="${esc(res.data)}"` : "")
-      + (res.remote ? ` data-icon-remote="${esc(res.remote)}"` : "")
-      + (TOK.webvalidateUrl(b.token) ? ` data-webv="1"` : "")
-      + `><img class="tok-icon" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
-  }
+  const identicon = TOK.identiconDataUri(tid);
+  const res = TOK.resolveIcon(TOK.pickIconField(token));
+  const src = (cached && cached.icon) || res.data || identicon;
+  const showBadge = cached && cached.valid;
+  return `<span class="${wrap}" data-tokenid="${esc(tid)}" data-identicon="${esc(identicon)}"`
+    + (res.data ? ` data-icon-data="${esc(res.data)}"` : "")
+    + (res.remote ? ` data-icon-remote="${esc(res.remote)}"` : "")
+    + (TOK.webvalidateUrl(token) ? ` data-webv="1"` : "")
+    + `><img class="${img}" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
+}
+function balCardHtml(b) {
+  const tid = b.tokenid || MINIMA;
+  const iconCell = tokIconHtml(tid, b.token);
   // The amount is SENDABLE: what can be spent. `confirmed` also counts coins locked in scripts and pools.
   const sendable = b.sendable || "0", confirmed = b.confirmed || "0";   // balance.java always emits both; guard so a malformed row can't blank the whole list
   const positive = (v) => /[1-9]/.test(String(v || "")) && !String(v).startsWith("-");
@@ -1638,21 +1645,7 @@ async function showTokenDetail(b) {
   const coins = parseInt(b.coins, 10) || 0;
 
   // Large icon reuses the exact resolve/cache/validate path as the balance list.
-  const cached = ICON_CACHE.get(tid);
-  let heroIcon;
-  if (isNative) {
-    heroIcon = `<span class="tok-wrap tok-wrap--lg"><img class="tok-icon tok-icon--lg tok-icon--native" src="minima-mark.svg" alt=""><span class="tok-badge">✓</span></span>`;
-  } else {
-    const identicon = TOK.identiconDataUri(tid);
-    const res = TOK.resolveIcon(TOK.pickIconField(b.token));
-    const src = (cached && cached.icon) || res.data || identicon;
-    const showBadge = cached && cached.valid;
-    heroIcon = `<span class="tok-wrap tok-wrap--lg" data-tokenid="${esc(tid)}" data-identicon="${esc(identicon)}"`
-      + (res.data ? ` data-icon-data="${esc(res.data)}"` : "")
-      + (res.remote ? ` data-icon-remote="${esc(res.remote)}"` : "")
-      + (webv ? ` data-webv="1"` : "")
-      + `><img class="tok-icon tok-icon--lg" src="${esc(src)}" alt=""><span class="tok-badge"${showBadge ? "" : " hidden"}>✓</span></span>`;
-  }
+  const heroIcon = tokIconHtml(tid, b.token, true);
 
   // extraMetadata: every custom key on the token (or its nested name-object) that isn't one of the known
   // fields — mirrors the official wallet, so arbitrary token attributes are still surfaced.
@@ -3426,7 +3419,7 @@ initLogs();
 
 // ---- AtomiX: room ① of Dexicon (renderer/dexicon-ax.js) over the window.mcd ax* calls. The panel it replaced
 // (renderer/atomix-ui.js) was removed in 0.18.141 after the parity audit (docs/DEXICON_PARITY_AUDIT.md).
-DexPools.init({ api, copy, tryCmd, TOK, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
+DexPools.init({ api, copy, tryCmd, TOK, tokIconHtml, enhanceTokenIcons, redraw: DexUI.redraw, consolidateToken, showCoins, PoolCalc, running: () => running, dialog: DexUI.dialog, money: DexUI.money, go: DexUI.pickTab, where: DexUI.where, start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
 DexAx.init({ api, copy, relTime, exportKey: ewExportKey, consolidateToken, money: DexUI.money, running: () => running, dialog: DexUI.dialog, repaintStrip: DexUI.paintStrip, go: DexUI.pickTab, say: DexUI.say, redraw: DexUI.redraw, where: DexUI.where, start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
 function onAtomixUpdate() { DexAx.onUpdate(); }
 function resetAxState() { DexAx.reset(); }

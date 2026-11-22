@@ -399,4 +399,7 @@ input.pp-amt::placeholder { color: var(--dx-dim2); } input.pp-amt:focus { outlin
 .pp-act .dx-row { align-items: flex-start; } .pp-act .dx-chip { max-width: 60%; white-space: normal; text-align: right; font-size: 11px; }
 .pp-act__s { padding: 2px 0 4px; font: 400 14px/20px var(--dx-sans); overflow-wrap: anywhere; } .pp-act__l { font: 400 12px/17px var(--dx-sans); color: var(--dx-dim); overflow-wrap: anywhere; }
 .pp-act .pp-ids { margin: 2px 0; }
-.pp-bal__h { display: flex; align-items: center; gap: 12px; min-width: 0; } .pp-bal__ic { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 10px; background: #fff; object-fit: contain; padding: 4px; }
+.pp-bal__h { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* the Wallet's token tile (app.js tokIconHtml, 0.19.380) at the card's 36 px */
+.pp-bal__h .tok-wrap { flex: 0 0 36px; margin-right: 0; } .pp-bal__h .tok-icon { width: 36px; height: 36px; border-radius: 10px; }
+.pp-bal__h .tok-icon--native { background: #fff; object-fit: contain; padding: 4px; } .pp-bal__h .tok-badge { border-color: var(--dx-surface); background: var(--blue); }   /* as the Wallet's rows (#balList) */

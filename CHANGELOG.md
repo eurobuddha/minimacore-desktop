@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.380] — PandaPools' Wallet tab draws coins as the Wallet does: their icons and the web-validation tick
+
+- Dexicon ② Pools › Wallet drew its own icons: the black Minima mark for Minima and an identicon for every other token (MxUSD included), with no web-validation tick, where the Wallet shows Minima's tile ticked and each token's own icon and tick. Each balance row now draws the Wallet's own tile (renderer/app.js `tokIconHtml`, lifted out of the Wallet's row and its token dialog, which now use it too) and enhances it with the Wallet's own `enhanceTokenIcons`, passed to DexPools.init: by TOKEN ID; the icon of the token's own on-chain description (inline data at once, a remote one only through the main process's guarded `api.tokenIcon`, never an <img> to the URL); the tick only when the node's `tokenvalidate` says valid; "could not be checked" shows no tick, as the Wallet; one shared ICON_CACHE, so the tab asks nothing the Wallet has not already asked for the same token.
+- Every other place of the desktop-authored Dexicon / PandaPools / AtomiX screens draws tokens by name only (Swap's YOU PAY / YOU RECEIVE, pool cards, My LP, Activity, Trade, room ①), named by token id (`tokLabel`, `TOK.label`), as the phone draws them; no icon there. The vendored Dexicon page draws no token image.
+- Tests (scripts/dexicon-pp.test.cjs): the Wallet's functions, lifted from app.js and run over a DOM stand-in, for Minima, the real MxUSD id with an icon and a validation page, a token named "MxUSD" with another id pointing at MxUSD's page (its own identicon, no tick, its label the id), a token with no validation URL (nothing asked), a validation that cannot be checked (no tick), and no second request from the cache; the room's wiring pinned. Both fail on 0.19.379.
+
 ## [0.19.379] — History, Dexicon, Future Cash Next and the Explorer follow the app's theme
 
 - History was dark with the app light: it wore the phone's HistoryDesign palette (dark and orange) in both themes, as the phone does. The owner asked for it to follow the app: in light it now takes the shell's own tokens and accent (received / sent / self in the shell's green / red / dim); in dark it keeps HistoryDesign exactly (renderer/shell.css, under `@media (prefers-color-scheme: dark)`, which follows Settings › Appearance).
