@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.358] — miniMall: a settled order stays settled; a confirmed order is never held (as released 0.18.304)
+
+- 0.19.354 settled an order without a proof of its secret by the last pass's orders read alone, kept in memory and with nothing kept on the order, and the hold did not look at the order's status. So a paid, settled order went back to settling after one failed orders read, a CONFIRMED order could not be shipped after a restart until the first good pass, and a catch-up whose orders read was cut put a settled order back to settling (review-desktop-r4 S1a, S1b, S1c, R4; released 0.18.286 confirmed and shipped them). Now the first pass with a good orders read that finds a paid order settled marks it settled on the order (`settled`, kept on disk), and no failed or cut read, and no restart, takes that away. An order CONFIRMED or later is never held. An order paid before this version (no `settled` on it) is settled, as released.
+- Kept: a fresh order without a secret still settles until a good orders read is 3 blocks past its newest coin; a PAID order not moved on that meets a second buyer's order with its reference is still unpaid and held for a check by hand, and that takes its settled mark away with the payment.
+- main/shop.js and main/shop-store.js change: their pins in scripts/apps-money.test.cjs are updated on purpose.
+- Tests (scripts/shop-store-test.cjs): S1a, S1b, S1c and R4 settled before the gap: confirmable, shippable and deliverable throughout; a CONFIRMED or SHIPPED order with the mark unset is not held; an order paid before this version is settled; a latched order met by a second buyer's order is unpaid and held (fails on 0.19.357: "S1a: not held again by a failed read").
+
 ## [0.19.357] — Dexicon lanes test: the queue behind two held posts is bounded above too
 
 - The lanes test asked only that at least 34 requests wait behind the two held WORK places (32 refusals, the order and the take; 0.19.348 allowed the engine's one periodic read as a 35th). Nothing bounded it above, so a queue that grew past what is expected passed unseen. It now asks for 34 or 35, with 6 dropped. A test change only.

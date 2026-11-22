@@ -456,6 +456,8 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // (store.settleBlock). A copier's order mined after the payment and the real order mined up to 3 blocks after it then meet as two orders with
 // one reference before either can be confirmed, and the paid one is held again (flagDuplicate). A payment that proves the order's secret
 // settles at once: only that order's buyer could have made it. A coin of unknown block settles at once, as before.
+// Settled is for good (0.19.358, as released 0.18.304; store.latchSettled): a later failed or cut orders read, or a restart, does not hold a settled
+// order again, and an order confirmed or moved on is never held; only a second order with its reference that unpays it (flagDuplicate) takes it back.
 const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
 // The order's secret and its proof (0.19.352, as released 0.18.297), as the phone Shop and Inbox make and check them (base-vestr-2.2.76,
@@ -504,6 +506,7 @@ async function scanOnce() {
     const reach = tip - served, f0 = meta("backfill_floor_block"), t0 = meta("backfill_target_block");
     store.setOrdersRead(a !== null && tip ? { tip, from: !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0 } : null);
     const b = await scanPayments(depth).catch(() => null);
+    store.latchSettled();   // what this pass's good orders read settled stays settled (0.19.358, as released 0.18.304)
     backfilled = true;
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
