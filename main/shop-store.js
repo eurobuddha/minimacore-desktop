@@ -278,6 +278,14 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid, block) {
     if (o.status + "/" + o.problems.length !== was) flush();
     return "UNCHECKED";
   }
+  // a coin given up on (main/shop.js JUDGE_TRIES) and counted after all, e.g. after a restart (0.19.367, as Minima Core Desktop 0.18.310; review-desktop-r5
+  // R6): its problem on this order goes; with no problem left the order is checked against the listing again exactly as a fresh order is (what is
+  // due, and any mismatch, which still holds it), so it can be paid as the released app paid it. Any other problem still holds it.
+  const gave = "payment coin " + id + " could not be judged: check by hand";
+  if (o.problems.some(p => String(p).toLowerCase() === gave)) {
+    o.problems = o.problems.filter(p => String(p).toLowerCase() !== gave);
+    if (!o.problems.length) { delete o.problems; ensureChecked(o); if (!o.problems.length && o.status === "UNCHECKED") o.status = "PENDING"; }
+  }
   pendDelete(ref, id); o.coins.push(id);
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
   let outcome = judge(o);

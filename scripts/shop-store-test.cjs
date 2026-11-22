@@ -1411,3 +1411,25 @@ test("N1: the real order with a secret, after a copier's order without one was p
     assert.equal(c.paid, false); assert.equal(c.problems[0], DUPV, "the copier's unpaid order is held as before");
     assert.equal(v.paid, true, "paid by its own proved coin"); assert.deepEqual(v.coins, ["0xfe01"]); assert.deepEqual(v.problems, []); assert.equal(v.notes, undefined, "no note: no paid order without a secret was left as it is"); });
 });
+
+// ---- 0.19.367 (as Minima Core Desktop 0.18.310): a coin given up on and counted after all (review-desktop-r5 R6): after 3 passes that threw, its
+// problem held the order; after a restart the coin was judged and counted, and the problem still held it (UNCHECKED, never PAID). Released 0.18.286
+// paid it ----
+test("R6: a coin given up on that is counted after a restart takes its own problem away: the order is paid; a second problem, or a listing that no longer matches, still holds it", async () => {
+  const run = (between, fn) => copyRig(async (st) => { store.setLog(() => {}); st.msg.push(sOrder(VICTIM, "ORD-V", 1001, "VICTIM")); st.pay.push(sPay("ORD-V", 1002, undefined, "0xFEab06"));
+    const real = store.recordPayment; let bad = true; store.recordPayment = function () { if (bad) throw new Error("transient"); return real.apply(this, arguments); };
+    try { await walkTo(st, 1005, 1007); bad = false; await walkTo(st, 1008, 1010); } finally { store.recordPayment = real; }
+    const o = store.order("ORD-V"); assert.deepEqual(o.problems, ["payment coin 0xFEab06 could not be judged: check by hand"]); assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED");
+    if (between) await between(st);
+    delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop"); shop._setRunner(javaNode(st)); await shop.init(); store.setOrdersRead(null);   // a restart: the seen sets are gone
+    await walkTo(st, 1011, 1016); await fn(store.order("ORD-V")); });
+  await run(null, async (o) => {
+    assert.equal(o.paid, true, JSON.stringify(o.problems)); assert.equal(o.status, "PAID"); assert.deepEqual(o.problems, []); assert.equal(o.due, "1.5", "what is due, from the listing as for a fresh order"); assert.equal(o.paidAmount, "1.5");
+    assert.deepEqual(o.coins, ["0xfeab06"]); assert.equal(store.mayAdvance(o), true); });
+  await run(async (st) => { st.msg.push(sOrder(ATK, "ORD-V", 1010, "COPIER")); await walkTo(st, 1010, 1010); }, async (o) => {
+    assert.equal(o.paid, false, "a second, unrelated problem still holds it"); assert.equal(o.status, "UNCHECKED"); assert.deepEqual(o.problems, [DUPV]); assert.equal(o.paidAmount, "1.5", "the coin is counted");
+    assert.equal(store.mayAdvance(o), false); });
+  await run(async () => { const s = store.shop("tea"); s.products[0].price = "2"; store.saveShop(s); }, async (o) => {
+    assert.equal(o.paid, false, "checked again against the listing as it is now: it no longer matches"); assert.equal(o.status, "UNCHECKED"); assert.equal(o.due, "");
+    assert.equal(o.problems.length, 1); assert.match(o.problems[0], /the order's price 1\.5 is not your price 2$/); assert.equal(store.mayAdvance(o), false); });
+});
