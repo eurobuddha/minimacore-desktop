@@ -307,6 +307,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SHOP_DUP_REF", I18N.N_("another buyer sent an order with the same reference {ref}: a payment with it cannot be told apart, so check both orders by hand")],
     ["SHOP_JUDGE_GAVE_UP", I18N.N_("payment coin {coin} could not be judged: check by hand")],
     ["SHOP_NO_PROOF", I18N.N_("a payment with this order's reference does not carry this order's proof (payment coin {coin}): check by hand")],   // 0.19.352
+    ["SHOP_BAD_PROOF", I18N.N_("Invalid order proof.")],   // 0.19.353: a buyer's stored proof that is not 0x and 64 capital hexadecimal digits
     ["SHOP_BAD_SECRET", I18N.N_("this order's secret cannot be read, so no payment can be proved to be its buyer's: check by hand")],
 
     // ---- miniMall: how an incoming order departs from the vendor's own listing (main/shop-listing.js, 0.19.166) ----

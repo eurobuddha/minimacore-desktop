@@ -106,6 +106,7 @@ function toWire(m) {
   if (m.type === T.ORDER || m.type === T.INQUIRY) {
     o.items = m.items || []; o.amount = m.amount || "0"; o.currency = m.currency || "Minima"; o.tokenid = m.tokenid || MINIMA_TOKEN;
     o.shipping = m.shipping || ""; o.delivery = m.delivery || ""; o.buyerPayaddr = m.buyerPayaddr || ""; o.message = m.message || "";
+    if (m.type === T.ORDER && m.nonce) o.nonce = m.nonce;   // the order's secret (0.19.353, as released 0.18.298), as the phone's toWire: only when there is one
   } else if (m.type === T.STATUS_UPDATE) { o.status = m.status || "";
   } else { o.message = m.message || ""; }
   return Buffer.from(JSON.stringify(o), "utf8");
@@ -125,14 +126,16 @@ async function sendMerchMessage(toPublicId, msg) {
 /** Ref-stamped value payment to the vendor's own address (NOT the MINIMERCH channel). Mirrors mail.pay() safety:
  *  STRICT-validate amount + tokenid so nothing can be injected into the space-tokenised `send` (last-wins parser
  *  redirect class), node-verify the address before funds move, and flag an ambiguous (timed-out) send so a retry
- *  can't double-pay. */
-async function sendPayment(vendorAddr, amount, tokenid, ref) {
+ *  can't double-pay. `proof` (0.19.353, as released 0.18.298): the proof of the order's secret, written in state port 2 as the phone Shop's
+ *  PaymentFlow.stamp does, or "" for an order placed without one. */
+async function sendPayment(vendorAddr, amount, tokenid, ref, proof) {
   if (!looksLikeMinimaAddress(vendorAddr)) throw new Error("Invalid vendor address.");
   if (!(String(tokenid) === MINIMA_TOKEN || /^0x[0-9A-Fa-f]{64}$/.test(String(tokenid)))) throw new Error("Invalid token.");
   if (!/^\d+(\.\d+)?$/.test(String(amount)) || !/[1-9]/.test(String(amount))) throw new Error("Invalid amount.");   // a plain decimal above zero: no sign, no exponent
+  if (proof && !/^0x[0-9A-F]{64}$/.test(proof)) throw new Error("Invalid order proof.");   // never anything else in the send's text
   let chk; try { chk = await nodeCmd(`checkaddress address:${vendorAddr}`); } catch (e) { chk = null; }
   if (!chk || chk.status === false) throw new Error("Couldn't validate the vendor address — not sending.");
-  const state = ref ? ` state:${JSON.stringify({ "1": "0x" + Buffer.from(ref, "utf8").toString("hex") })}` : "";
+  const state = ref ? ` state:${JSON.stringify(Object.assign({ "1": "0x" + Buffer.from(ref, "utf8").toString("hex") }, proof ? { "2": proof } : {}))}` : "";
   const cmd = `send amount:${amount} address:${vendorAddr} tokenid:${tokenid}${state}`;
   let r;
   try { r = await nodeCmd(await pinMinimaSend(nodeCmd, cmd, { minCoinage: 3 })); }
@@ -152,9 +155,12 @@ async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
   if (!sc.isValidPublicId(shopCfg.vendorPublicId)) throw new Error("This shop's vendor id is invalid.");
   if (!looksLikeMinimaAddress(shopCfg.vendorAddress)) throw new Error("This shop's payout address is invalid.");
   const ref = "ORD-" + randomId().slice(0, 8).toUpperCase();
+  // the order's secret (0.19.353, as released 0.18.298; the phone Shop's MerchMessage.newNonce: 32 random bytes, 0x and capital hexadecimal digits):
+  // it goes only into the sealed order; the buyer's order keeps its proof, which every payment of it (a Retry too) carries in port 2
+  const secret = "0x" + crypto.randomBytes(32).toString("hex").toUpperCase(), proof = proofOf(secret);
   const msg = { type: T.ORDER, ref, randomid: randomId(), from: identity.publicId, to: shopCfg.vendorPublicId,
     date: Date.now(), shopId: shopCfg.shopId, shopName: shopCfg.shopName, items, amount: String(total),
-    currency: shopCfg.currency, tokenid, shipping: shipping || "", delivery: delivery || "", buyerPayaddr: vendorAddress, message: note || "" };
+    currency: shopCfg.currency, tokenid, shipping: shipping || "", delivery: delivery || "", buyerPayaddr: vendorAddress, message: note || "", nonce: secret };
   // local order first (role=buy) so a failed payment still shows with a retry.
   // The vendor address goes in HERE, in the object upsertOrder persists — stashing it afterwards with
   // `store.order(ref).vendorAddress = …` only mutated the in-memory row and never flushed, so a crash before
@@ -162,14 +168,14 @@ async function placeOrder(shopCfg, items, total, shipping, delivery, note) {
   // this stash exists to avoid trusting. The ambiguity flags either side of it already use setMetaSync.
   store.upsertOrder({ ref, role: "buy", counterparty: shopCfg.vendorPublicId, shopId: shopCfg.shopId, shopName: shopCfg.shopName,
     items, amount: String(total), currency: shopCfg.currency, tokenid, shipping: shipping || "", delivery: delivery || "",
-    vendorAddress: shopCfg.vendorAddress,
+    vendorAddress: shopCfg.vendorAddress, commit: proof,
     status: "PENDING", paid: false, date: msg.date, unread: false });
   await sendMerchMessage(shopCfg.vendorPublicId, msg);
   let payTxpow = null, payError = null;
   // In flight, on disk, until the node answers (0.19.241, as released 0.18.208): a quit or crash during the send leaves it set,
   // and a retry is then refused as "may already have been sent" instead of paying a second time.
   store.setMetaSync("inflight:" + ref, true); sending.add(ref);
-  try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; store.setMetaSync("unpaid:" + ref, false); store.setMetaSync("inflight:" + ref, false); }
+  try { const pr = await sendPayment(shopCfg.vendorAddress, String(total), tokenid, ref, proof); payTxpow = (pr && pr.response && (pr.response.txpowid || pr.response.txpow)) || null; store.setMetaSync("unpaid:" + ref, false); store.setMetaSync("inflight:" + ref, false); }
   catch (e) {
     if (!e.ambiguous) store.setMetaSync("inflight:" + ref, false);
     payError = e.message || "payment failed";
@@ -193,7 +199,7 @@ async function retryPayment(ref) {
   if (!vendorAddr) throw new Error("Missing vendor address for retry.");
   let r;
   store.setMetaSync("inflight:" + ref, true); sending.add(ref);
-  try { r = await sendPayment(vendorAddr, String(o.amount), o.tokenid, ref); }
+  try { r = await sendPayment(vendorAddr, String(o.amount), o.tokenid, ref, o.commit || ""); }   // the same proof as the first send (an order placed before 0.19.353: none)
   catch (e) { if (e.ambiguous) store.setMetaSync("ambiguous:" + ref, true); else store.setMetaSync("inflight:" + ref, false); throw e; }   // a retry that itself times out → now ambiguous, block further retries
   finally { sending.delete(ref); }
   store.setMetaSync("unpaid:" + ref, false); store.setMetaSync("inflight:" + ref, false); emitter.emit("update");

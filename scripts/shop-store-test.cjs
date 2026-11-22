@@ -1144,3 +1144,40 @@ test("two orders with one reference: different secrets are paid each by its own 
   const MS = require("../renderer/mainsaid.js");
   assert.equal(MS.read(NOPROOF("0xFE51")).code, "SHOP_NO_PROOF"); assert.equal(MS.read(BADSECRET).code, "SHOP_BAD_SECRET");
 });
+
+// ---- 0.19.353 (as released 0.18.298): the desktop buyer sends the order's secret and proves it on every payment, as the phone Shop ----
+test("buyer: the sealed order carries a fresh secret, both the payment and its Retry carry its proof in port 2, the secret is kept nowhere; a desktop vendor pays the order by that coin", async () => {
+  const scx = require.cache[require.resolve("../main/shopcrypto.js")].exports, seal0 = scx.seal, logs = [];
+  scx.seal = async (_id, _to, pt) => Buffer.from(pt).toString("hex");   // what was sealed, readable by the stand-in open
+  try { await copyRig(async (st) => {
+    store.setLog((m) => logs.push(m));
+    const PAYTO = "0x" + "5A".repeat(32), VID = "0x" + "33".repeat(32), sends = []; let refuse = true; const run = javaNode(st);
+    shop._setRunner(async (c) => { if (c.startsWith("send ")) { sends.push(c); if (refuse && c.includes("address:" + PAYTO)) return { status: false, error: "refused" }; } return run(c); });
+    const cfg = { shopName: "Tea", shopId: "tea", vendorPublicId: VID, vendorAddress: PAYTO, currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5" }], shipping: [] };
+    const r = await shop.placeOrder(cfg, [{ product: "Tea", quantity: 1, unitPrice: "1.5", lineTotal: "1.5" }], "1.5", "Digital", "home", "");
+    assert.equal(r.payError, "refused"); refuse = false; await shop.retryPayment(r.ref);
+    const stateOf = (c) => JSON.parse(/ state:(\{[^ ]*\})/.exec(c)[1]);
+    const orderSend = sends.find(c => c.includes("address:" + shop.MINIMERCH)), pays = sends.filter(c => c.includes("address:" + PAYTO));
+    const w = JSON.parse(Buffer.from(stateOf(orderSend)["99"].slice(2), "hex").toString("utf8"));
+    assert.match(w.nonce, /^0x[0-9A-F]{64}$/, "0x and 64 capital hexadecimal digits, as the phone's newNonce");
+    assert.equal(pays.length, 2, "the refused payment and its Retry");
+    for (const p of pays) assert.deepEqual(stateOf(p), { "1": hex(r.ref), "2": proofT(w.nonce) }, "port 1 the reference, port 2 the proof: " + p);
+    const buy = store.order(r.ref); assert.equal(buy.commit, proofT(w.nonce)); store.flush();
+    const disk = fs.readFileSync(path.join(DIR, "shop.json"), "utf8");
+    for (const v of [w.nonce, w.nonce.slice(2), w.nonce.slice(2).toLowerCase()]) { assert.ok(!disk.includes(v), "the secret is not stored"); assert.ok(!logs.join("\n").includes(v), "nor logged"); assert.ok(!JSON.stringify(shop.orderDetail(r.ref)).includes(v), "nor given to the screen"); }
+    await shop.placeOrder(cfg, [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], "1.5", "Digital", "home", "");
+    const w2 = JSON.parse(Buffer.from(stateOf(sends.filter(c => c.includes("address:" + shop.MINIMERCH))[1])["99"].slice(2), "hex").toString("utf8"));
+    assert.notEqual(w2.nonce, w.nonce, "a second order: another secret");
+    // an order placed before 0.19.353 (no proof kept): its Retry carries none, as its order carried no secret; a tampered proof sends nothing
+    delete buy.commit; store.setMetaSync("unpaid:" + r.ref, true); sends.length = 0; await shop.retryPayment(r.ref);
+    assert.deepEqual(stateOf(sends.find(c => c.includes("address:" + PAYTO))), { "1": hex(r.ref) });
+    buy.commit = "0x12 tokenid:0xFF"; store.setMetaSync("unpaid:" + r.ref, true); sends.length = 0;
+    await assert.rejects(shop.retryPayment(r.ref), /Invalid order proof/); assert.equal(sends.filter(c => c.includes("address:" + PAYTO)).length, 0, "nothing sent");
+    // the same coins at a desktop vendor
+    store.clear(); teaShop(); shop._setRunner(run);
+    st.msg.push({ coinid: "0xAD01", created: 1009, state: stateOf(orderSend) }); st.pay.push({ coinid: "0xAD02", tokenid: "0x00", amount: "1.5", created: 1010, state: stateOf(pays[1]) });
+    await walkTo(st, 1009, 1014);
+    const o = store.order(r.ref); assert.ok(o, "the vendor holds the order"); assert.equal(o.commit, proofT(w.nonce)); assert.equal(o.paid, true, o.problems.join(" | ")); assert.equal(o.status, "PAID");
+  }); } finally { scx.seal = seal0; }
+  assert.equal(require("../renderer/mainsaid.js").read("Invalid order proof.").code, "SHOP_BAD_PROOF");
+});
