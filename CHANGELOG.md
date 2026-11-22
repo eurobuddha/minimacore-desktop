@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.364] — Dexicon lanes test: "not before the limit" is timed by when the requests reached the network
+
+- A second race in the same test, which 0.19.363 made more frequent: the limit part took its start time when the test's 15 ms poll saw the two stuck posts at the network, and asked that the next post go out at least 300 ms later. On a busy machine the poll saw them late (and 0.19.363 runs that part on a freshly booted host, whose engine is busiest then), so the next post seemed to follow in less than 300 ms although the host's 400 ms limit had run in full: "after the limit, not before" failed in 10 of 30 runs with two copies of the suite at once. The stand-in network now stamps each post when it arrives, and the test asks that the next post arrive at least 300 ms after the first stuck one did. The same bound, now measured where it happens; with the main thread held busy for 250 ms right after the poll sees them, 0.19.362's and 0.19.363's test fail and this one passes. Nothing in the app changes.
+
 ## [0.19.363] — Dexicon lanes test: the lanes' order no longer races the host's own 400 ms limit
 
 - The intermittent `test:dexicon` failure ("Expected values to be strictly equal", review-desktop-r4 G6) is this test's `assert.equal(net.most(), 2)` (scripts/dexicon-host.test.cjs, the lanes test), with 4 !== 2: caught 3 times in 30 runs of the whole suite with two copies running at once. The test booted its host with a 400 ms request limit (`netLimitMs`) for all of it, and holds low0 and low1 at the network from the first posts until it lets them go after its order, take and long-poll checks. On a busy machine that took longer than 400 ms: the host's limit then ended both requests and freed their places, as it is meant to (main/dexicon.js makeLane), the order and the take went out, and the stand-in network, which still held the two abandoned posts, counted 4 at once. A 450 ms pause at that point gives the same failure every time. The lanes themselves never had more than 2 of their own requests out.

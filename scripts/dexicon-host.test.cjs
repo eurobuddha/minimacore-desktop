@@ -832,10 +832,10 @@ test("a signing command still queued when the engine is stopped or its wallet re
 // AtomiX Ethereum RPC uses for a claim or a refund.
 /** A network whose POSTs wait until the test lets them through. held: the POSTs at the network now. */
 function slowNet() {
-  const base = M.mockNet(), held = [], sent = [], opts = []; let most = 0;
-  return { calls: base.calls, held, sent, opts, most: () => most,
+  const base = M.mockNet(), held = [], sent = [], sentAt = [], opts = []; let most = 0;   // sentAt: when each POST reached the network (0.19.364)
+  return { calls: base.calls, held, sent, sentAt, opts, most: () => most,
     fetchJson: (url, o) => { opts.push(o); return base.fetchJson(url, o); },
-    postText: (url, body, o) => { opts.push(o); sent.push(body); return new Promise(res => { const h = { url, body, done: () => { held.splice(held.indexOf(h), 1); res('{"ok":true}'); } }; held.push(h); most = Math.max(most, held.length); }); },
+    postText: (url, body, o) => { opts.push(o); sent.push(body); sentAt.push(Date.now()); return new Promise(res => { const h = { url, body, done: () => { held.splice(held.indexOf(h), 1); res('{"ok":true}'); } }; held.push(h); most = Math.max(most, held.length); }); },
     drain: async function (until) { while (!until()) { while (held.length) held[0].done(); await new Promise(r => setTimeout(r, 5)); } } };
 }
 
@@ -907,9 +907,11 @@ test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an 
   net = slowNet(); ({ host, ctx } = await boot({ net, netLimitMs: 400 })); vm.runInContext("globalThis.__done = []", ctx);
   post("stuck1", false); post("stuck2", false); post("after", false);
   await M.until(() => net.held.length === 2);
-  const t0 = Date.now();
   await M.until(() => net.sent.includes("after"));
-  assert.ok(Date.now() - t0 >= 300, "after the limit, not before");
+  // 0.19.364: timed by when each reached the network, not by when this test's 15 ms poll saw it (on a busy machine the poll saw the two held
+  // ones late, and "after" seemed to follow them in less than 300 ms although the host's limit had run its full 400 ms)
+  const at = (b) => net.sentAt[net.sent.indexOf(b)];
+  assert.ok(at("after") - Math.min(at("stuck1"), at("stuck2")) >= 300, "after the limit, not before (" + (at("after") - at("stuck1")) + " ms)");
   assert.ok(done().some(d => d[0] === "stuck1" && d[1] === false), "and its caller is told it failed");
   net.held.slice().forEach(h => h.done());
 });
