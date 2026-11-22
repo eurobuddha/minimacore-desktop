@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.303] — Vestr: main/vestr.js names the covenant's address whole
+
+- Its header wrote the shared covenant's address shortened ("0x3C43…C8BE"), which cannot be copied or looked up. It now reads 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE, the file's own CONTRACT. A comment only: nothing Vestr does changes.
+- Tests (scripts/inject-test.cjs): the header names CONTRACT whole and no hexadecimal id in the file is shortened (fails on 0.18.302).
+
 ## [0.18.302] — miniMall: a payment coin given up on is no longer said once its order is checked by hand
 
 - A coin whose judging threw three times is left for a check by hand (0.18.295): a problem on its order and "Payment coin <id> could not be judged: check by hand." on the status line. The line stayed for the rest of the session even after the vendor checked that order by hand. The coin is now kept with the order it flagged, and checking that order by hand takes it off the line.

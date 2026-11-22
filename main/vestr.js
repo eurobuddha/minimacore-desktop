@@ -6,7 +6,7 @@
  * off-chain secrets, no DB. All manual (no auto-collect).
  *
  * FUND-CRITICAL, copied VERBATIM from the 1.8.1 donor (consensus-load-bearing — do not "tidy"):
- *  - CLEAN_SCRIPT (the covenant) → deploys to 0x3C43…C8BE (the shared network: web MDS ↔ native Android ↔ desktop).
+ *  - CLEAN_SCRIPT (the covenant) → deploys to 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE (the shared network: web MDS ↔ native Android ↔ desktop).
  *  - CHECK_MATHS → run on the NODE (runscript) to get the exact SIGDIG(2) collectable/change; the client never
  *    computes the posted amount (BigDecimal rounding would differ from SIGDIG(2) and fail the covenant).
  *  - the collect txn ORDER: payout output @INPUT (no state) then change @INPUT+1 (keep state), state ports carried.

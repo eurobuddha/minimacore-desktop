@@ -522,3 +522,10 @@ test("Vestr collect (V5): a pending reply to txnpost is not 'collected'", async 
   await R.reset(); R.txncheck = R.OK; R.post = { pending: true, status: false }; await assert.rejects(R.collect(), /collect step failed/);
   R.done();
 });
+
+// 0.18.303: the covenant's address is written whole where main/vestr.js names it (it was "0x3C43…C8BE"): an id is for copying
+test("main/vestr.js names the covenant's address whole, and no hexadecimal id in it is shortened", () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "vestr.js"), "utf8");
+  assert.ok(src.includes("deploys to " + require("../main/vestr.js").CONTRACT + " "), "the comment names CONTRACT whole");
+  assert.ok(!/0x[0-9A-Fa-f]+(…|\.\.\.)[0-9A-Fa-f]*/.test(src), "no shortened id");
+});
