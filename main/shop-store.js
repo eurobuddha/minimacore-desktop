@@ -212,6 +212,7 @@ function pendDelete(ref, id) {   // a gathered coin counted on its own after all
   p.sum = decSub(p.sum, p.coins.get(id)); p.coins.delete(id);
   if (p.min && p.min[0] === id) p.min = smallest(p.coins);
 }
+const NO_PROOF_NOTE = "a payment with this order's reference does not carry this order's proof";   // main/shop.js NO_PROOF: how its note begins
 function remainingOf(o) {
   const d = decParse(o.due), p = decParse(o.paidAmount || "0") || [0n, 0];
   if (!d || d[0] <= 0n || o.problems.length) return null;
@@ -227,9 +228,10 @@ function countCoins(o, ref, coins, paidTokenid) {
   o.paidTokenid = paidTokenid; o.paidAt = Date.now();
   const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") { o.paid = true; o.settled = false; PENDING_DUST.delete(ref); }   // settles from here (0.18.304: settleBlock, latchSettled)
-  // paid in full by its proved coins (0.18.311, review-desktop-r5): its note (a coin without its proof, or another order with its reference) is dropped,
-  // since a note says "check by hand" and a paid order has nothing left to check. Notes are only ever on orders with a secret, which only proved coins pay.
-  if (outcome === "PAID" && o.commit) delete o.notes;
+  // paid in full by its proved coins (0.18.311, review-desktop-r5): its note of a coin without its proof is dropped, since that coin is answered: the
+  // order is paid by its own. Notes are only ever on orders with a secret, which only proved coins pay. The note that another buyer's order without a
+  // secret has its reference and was paid stays (0.18.315, review-desktop-r6 H4N1): that clash is not answered by this order's own payment.
+  if (outcome === "PAID" && o.commit && Array.isArray(o.notes)) { o.notes = o.notes.filter(n => !String(n).startsWith(NO_PROOF_NOTE)); if (!o.notes.length) delete o.notes; }
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+; a right-token coin replaces WRONG_TOKEN (0.18.314)
   return outcome;
 }

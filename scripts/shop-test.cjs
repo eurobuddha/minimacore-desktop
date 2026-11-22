@@ -1572,7 +1572,7 @@ test("the order list says a settling order is held; a stale waiting list of the 
 // ---- 0.18.309: a newcomer with a secret that leaves a PAID order without one as it is says so in one note (review-desktop-r5 N1). It was kept
 // silent: PENDING, nothing said, and a check by hand refused, so when its buyer paid outside the app without the proof (that coin paid the other
 // order) the vendor could neither see the clash nor act on the real order ----
-test("N1: the real order with a secret, after a copier's order without one was paid by a coin without a proof, carries the duplicate sentence as a note and can be checked by hand; N1b: paid by its own proved coin, nothing changes", async () => {
+test("N1: the real order with a secret, after a copier's order without one was paid by a coin without a proof, carries the duplicate sentence as a note and can be checked by hand, and keeps it once its proved coin pays it (H4N1); N1b: paid by its own proved coin, nothing changes", async () => {
   { const S = newSecret(), t = await setupS("n1"); t.st.pay = [payS("ORD-V", 1010, undefined, "0xFE01")]; t.st.msg = [await sealS(t, t.atk, "ORD-V", 1011, "COPIER")];
     await walk(t, 1001, 1011); t.st.msg.push(await sealS(t, t.victim, "ORD-V", 1012, "VICTIM", S)); await walk(t, 1012, 1016);
     const c = t.m.store.order("ORD-V"), v = copyOf(t, t.victim);
@@ -1581,7 +1581,8 @@ test("N1: the real order with a secret, after a copier's order without one was p
     assert.equal(t.m.store.mayAdvance(v), false); assert.deepEqual(t.m.shop.vendorCheck(v.ref), { ok: true }, "and it can be checked by hand"); assert.equal(t.m.store.mayAdvance(t.m.store.order(v.ref)), true);
     t.st.pay.push(payS("ORD-V", 1017, proofT(S), "0xFE02")); await walk(t, 1017, 1018);
     assert.equal(copyOf(t, t.victim).paid, true, "its own proved coin still pays it"); assert.deepEqual(copyOf(t, t.victim).coins, ["0xfe02"]);
-    assert.equal(copyOf(t, t.victim).notes, undefined, "paid in full by its proved coin: the note goes (0.18.311)"); }
+    assert.deepEqual(copyOf(t, t.victim).notes, [DUPV], "paid in full by its proved coin: the duplicate sentence stays (0.18.315, review-desktop-r6 H4N1; only a no-proof note goes)");
+    assert.equal(t.m.store.order("ORD-V").paid, true, "the copier's order stays paid: the note is all that says the two clash"); }
   { const S = newSecret(), t = await setupS("n1b"); t.st.pay = [payS("ORD-V", 1010, proofT(S), "0xFE01")]; t.st.msg = [await sealS(t, t.atk, "ORD-V", 1011, "COPIER")];
     await walk(t, 1001, 1011); t.st.msg.push(await sealS(t, t.victim, "ORD-V", 1012, "VICTIM", S)); await walk(t, 1012, 1016);
     const c = t.m.store.order("ORD-V"), v = copyOf(t, t.victim);
