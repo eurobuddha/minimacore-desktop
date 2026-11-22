@@ -266,11 +266,15 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid, block) {
     return "DUST";
   }
   if ((o.coins || []).length >= ORDER_COINS_MAX) return null;
+  // A coin of another token is never counted, so never kept (0.18.312, as Pandamonium Desktop's recordPayment; review-desktop-r5 N2c2): it went into the
+  // order's coin list, so on an order without a secret 1000 worthless-token coins with its reference filled ORDER_COINS_MAX and the real payment
+  // was never counted. What the vendor sees is as before (WRONG_TOKEN, the token paid); a wrong coin seen again changes nothing and writes nothing.
   if (!rightToken) {
-    o.coins = (o.coins || []).concat(cid); mem.counted[cid] = ref;
+    const was = o.paidTokenid + "/" + o.status;
     o.paidTokenid = paidTokenid;
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
-    flush(); return "WRONG_TOKEN";
+    if (o.paidTokenid + "/" + o.status !== was) flush();
+    return "WRONG_TOKEN";
   }
   // a coin given up on (main/shop.js JUDGE_TRIES) and counted after all, e.g. after a restart (0.18.309, review-desktop-r5 R6): its problem on this
   // order goes; with no problem left the order is checked against the listing again exactly as a fresh order is (what is due, and any mismatch,

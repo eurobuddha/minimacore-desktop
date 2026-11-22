@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.312] — miniMall: coins of another token never fill an order's coin list
+
+- A coin of another token with an order's reference went into the order's coin list (as a WRONG_TOKEN coin), and that list holds at most 1000 coins (ORDER_COINS_MAX). On an order without a secret, 2000 worthless-token coins with its reference in the block of the real payment filled it, and the real payment was never counted (review-desktop-r5 N2c2; not new in this series). As Pandamonium Desktop has it, a coin of another token is now never counted and never kept: the order still says WRONG_TOKEN with the token paid, as before, and a wrong coin seen again changes nothing and writes nothing (it wrote shop.json once per coin).
+- Tests (scripts/shop-test.cjs): N2c2 (the order is paid, only the real coin on its list); only wrong coins: WRONG_TOKEN with the token, nothing counted, nothing written when one is seen again after a restart, and the right token still pays it. N2c2 fails on 0.18.311.
+
 ## [0.18.311] — miniMall: the no-proof note names the coin's amount and token; a paid order drops its note
 
 - The note left on an order with a secret by a coin with its reference and without its proof named only the coin's id, so a vendor could not tell a stranger's dust or worthless token from a buyer's real payment made without the proof (review-desktop-r5). It now names the coin's amount exactly as the node gave it (never rounded) and its token id whole, or Minima: "a payment with this order's reference does not carry this order's proof (payment coin <id>, amount <amount>, token <token id or Minima>): check by hand". A note may now be 600 characters long (it was cut at 300), so no id in it is cut.

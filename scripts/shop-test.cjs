@@ -1629,3 +1629,23 @@ test("the no-proof note names the coin's amount exactly and its token id whole (
     t.st.pay.push(payS("ORD-V", 1013, proofT(S), "0xFE01", "0.4")); await walk(t, 1013, 1016);
     assert.equal(t.m.store.order("ORD-V").status, "UNDERPAID"); assert.deepEqual(t.m.store.order("ORD-V").notes, [NOPROOF("0xBAD7", "0.00000010", "Minima")], "part paid: the note stays"); }
 });
+
+// ---- 0.18.312: coins of another token never fill an order's coin list (review-desktop-r5 N2c2, as Pandamonium Desktop). On an order without a
+// secret, 2000 worthless-token coins with its reference in the block of the real payment filled ORDER_COINS_MAX (1000), and the real payment
+// was never counted ----
+test("N2c2: 2000 worthless-token coins with the reference in the real payment's block do not stop it: the order is paid; WRONG_TOKEN is said once, and nothing is written for a wrong coin seen again", async () => {
+  const TOK = "0x" + "AB".repeat(32), id = (s) => "0x" + nodeCrypto.createHash("sha256").update(s).digest("hex").toUpperCase();
+  const junk = (i) => Object.assign(payS("ORD-V", 1010, undefined, id("junk " + i), "0.000000001"), { tokenid: TOK, tokenamount: "1000000" });
+  { const t = await setupS("n2c2"); t.st.msg = [await sealS(t, t.victim, "ORD-V", 1009, "VICTIM")];
+    t.st.pay = [payS("ORD-V", 1010, undefined, id("real"))].concat(Array.from({ length: 2000 }, (_, i) => junk(i)));
+    await walk(t, 1001, 1016); const o = t.m.store.order("ORD-V");
+    assert.equal(o.paid, true, o.status); assert.equal(o.status, "PAID"); assert.deepEqual(o.coins, [id("real").toLowerCase()], "only the real payment is on the order's list"); }
+  // only wrong coins: WRONG_TOKEN with the token paid, as before; seen again (a restart) nothing changes and nothing is written
+  { const t = await setupS("n2wt"); t.st.msg = [await sealS(t, t.victim, "ORD-V", 1009, "VICTIM")]; t.st.pay = [junk(1), junk(2)];
+    await walk(t, 1001, 1012); const o = t.m.store.order("ORD-V");
+    assert.equal(o.status, "WRONG_TOKEN"); assert.equal(o.paidTokenid, TOK); assert.deepEqual(o.coins || [], [], "never counted");
+    const m = await t.reopen(); const f = m.store.flush; let writes = 0; m.store.flush = function () { writes++; return f.apply(this, arguments); };
+    assert.equal(m.store.recordPayment("ORD-V", "1000000", TOK, id("junk 1"), 1010), "WRONG_TOKEN"); assert.equal(writes, 0, "a wrong coin seen again writes nothing");
+    t.st.pay.push(payS("ORD-V", 1013, undefined, id("real"))); for (let x = 1013; x <= 1017; x++) { t.st.tip = x; await m.shop.scanOnce(); }
+    assert.equal(m.store.order("ORD-V").status, "PAID", "the right token still pays it"); }
+});
