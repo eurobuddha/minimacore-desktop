@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.299] — miniMall: a waiting payment coin that is spent before it was counted is said on its order, which can then be checked by hand
+
+- A payment coin waits, not judged, for 3 blocks (0.18.293) or until its orders are read (0.18.294); the wait was kept in memory only, and a coin spent in that time (the vendor's own wallet after a missed pass, or a reorganisation) was never counted and never said: its order just stayed unpaid with nothing to check by hand. Now each waiting coin is kept with the store (`payWait`: coin id whole, block, the order it would pay) until it is judged. A later pass at tip >= its block + 3 that read every payout address (none failed, none skipped as not valid) to a depth covering its block, and no longer lists it, puts one problem on that order: "payment coin <id> seen at block <N> is no longer listed (spent before it was counted): check by hand", once per order. The order is then Unchecked and can be checked by hand.
+- The list is bounded: at most 256 entries; past that the oldest goes first with one problem on its order ("payment coin <id> seen at block <N> could not be kept until it was counted (too many payments waiting): check by hand"), never in silence. Entries leave when judged, when their order is paid, or when it is gone.
+- Tests (scripts/shop-test.cjs): a waiting coin spent after a restart (with and without a proof): nothing said after a failed read, then one problem, the order hand-checkable, said once; a payout address skipped as not valid or a read too shallow for the coin's block says nothing; a coin still listed is paid and leaves the list; 300 waiting coins keep 256 and say one problem. Both fail on 0.18.298.
+
 ## [0.18.298] — miniMall: the desktop buyer's order carries a secret and every payment of it carries the secret's proof
 
 - Orders placed here carried no secret and their payments only the reference (state port 1), so a desktop buyer had none of the protection 0.18.297 gives an order with a secret, at a phone vendor or at a desktop one. Now placeOrder makes the secret as the phone Shop's `MerchMessage.newNonce` does (32 random bytes from `crypto.randomBytes`, `0x` and capital hexadecimal digits), sends it inside the sealed order (`nonce`, ORDER only, as the phone's `toWire`), and the payment carries its proof in state port 2: `0x` + the SHA-256 of the 32 bytes in capital hexadecimal digits, exactly what the phone Inbox (`DeliveryRules.settle`, `MerchDb.recordPaymentIn`) and this vendor check.

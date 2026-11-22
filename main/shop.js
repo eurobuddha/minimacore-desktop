@@ -69,6 +69,13 @@ function proofOf(secret) {
   if (typeof secret !== "string" || secret.length !== 66 || !/^0x[0-9a-fA-F]{64}$/.test(secret)) return "";
   return "0x" + crypto.createHash("sha256").update(Buffer.from(secret.slice(2), "hex")).digest("hex").toUpperCase();
 }
+// Waiting payment coins kept with the store (0.18.299): a coin seen and not judged yet (the 3-block wait, or its orders not read yet) is kept on
+// disk ("payWait": coin id whole, block, the order it would pay) until it is judged. A later pass at tip >= its block + 3 whose payments read
+// covered its block and read every payout address, and that no longer lists it, puts one check-by-hand problem on that order (it was spent,
+// by the vendor's own wallet or a reorganisation, before it was counted); it was forgotten without a word. At most PAY_WAIT_MAX are kept: the
+// oldest goes first, with a check-by-hand problem on its order, never in silence. An order already paid, or gone, drops its entries.
+const PAY_WAIT_MAX = 256;
+const GONE_PAY = "is no longer listed (spent before it was counted): check by hand", LOST_PAY = "could not be kept until it was counted (too many payments waiting): check by hand";
 const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
 let judgedTip = 0;              // the tip the last payments read judged against, every payout address read (0.18.293)
 // A payment coin whose judging throws (0.18.295): every other coin is still judged; the pass fails for that coin (nothing advances, said with
@@ -98,6 +105,7 @@ const ACKED = new Set(["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"]);
 const acked = (o) => !!(o && (o.paid || ACKED.has(o.status)));
 // A read the node did not answer (refused at every depth, timed out, threw) in this pass (0.18.213): it was taken as covered,
 // so the newest part of a gap was never read. Any failure now advances nothing; the same blocks are read on the next pass.
+let lastServed = 0;   // the depth the last coinsAt that answered was served (0.18.299)
 let readFailed = false, lastPassFailed = false, lastStepFailed = false;   // the recent window failed / only a backfill step failed (0.18.277)
 
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
@@ -415,7 +423,7 @@ async function coinsAt(address, depth, extra) {
   let d = depth;
   while (d >= 4) {
     let r; try { r = await nodeCmd(`coins address:${address} simplestate:true${extra || ""} order:desc depth:${d}`); } catch (e) { readFailed = true; return null; }
-    if (r && Array.isArray(r.response)) { passServed = Math.min(passServed, d); return r.response; }   // the depth the node really served
+    if (r && Array.isArray(r.response)) { passServed = Math.min(passServed, d); lastServed = d; return r.response; }   // the depth the node really served
     d = Math.floor(d / 2);
   }
   readFailed = true;
@@ -443,17 +451,20 @@ async function scanOrders(depth, floor) {
 // read. `ordersFrom`: the oldest block from which every order up to the tip has been read, this pass or earlier; a coin from below it
 // waits, not judged and not marked seen (a later read of that range judges it). A pass whose orders read failed judges no payment.
 async function scanPayments(depth, tip, ordersFrom) {
-  const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
+  const every = payAddresses(), addrs = every.filter(a => !skipping(a)); if (!addrs.length) return false;
+  let partial = addrs.length < every.length;   // a payout address not read this pass (skipped as not valid): no waiting coin is said as gone (0.18.299)
   const listed = [], have = new Set();
   let missed = false;   // a payout address the node did not answer for: what was read is judged, but no coin is said as judged (0.18.293)
+  let reach = depth;    // the shallowest depth a payout address was served: blocks from tip - reach up are read whole (0.18.299)
   for (const a of addrs) {   // every published payout address (0.18.205), one coin once
     const before = readFailed, got = await coinsAt(a, depth, " relevant:true");
     if (!got && badAddress(a)) {   // not a node error: this address can never be read (0.18.227)
-      readFailed = before; skippedPay.set(a, Date.now() + SKIP_MS);
+      readFailed = before; skippedPay.set(a, Date.now() + SKIP_MS); partial = true;
       console.error("[miniMall] the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address).");
       continue;
     }
     if (!got) { missed = true; continue; }
+    reach = Math.min(reach, lastServed);
     for (const c of got) if (c && c.coinid && !have.has(c.coinid)) { have.add(c.coinid); listed.push(c); }
   }
   capSeen();
@@ -462,6 +473,16 @@ async function scanPayments(depth, tip, ordersFrom) {
   const coins = listed.map((c, i) => ({ c, i })).sort((a, b) => (Number(a.c.created) || 0) - (Number(b.c.created) || 0)
     || (b.c.amount != null && a.c.amount != null ? (Number(coinAmount(b.c)) - Number(coinAmount(a.c))) : 0) || (b.i - a.i)).map(x => x.c);
   let changed = false;
+  const kept = store.getMeta("payWait"), waits = new Map((Array.isArray(kept) ? kept : []).filter(e => e && typeof e.coin === "string" && typeof e.ref === "string").map(e => [e.coin, e]));
+  let waitsChanged = false;
+  // one problem of each kind per order (as OLDER_PAYMENT, 0.18.290); an order already paid is left as it is
+  const flagPay = (e, kind) => { const o = store.order(e.ref); if (o && !o.paid && !(o.problems || []).some(p => String(p).endsWith(kind))) store.flagDuplicate(e.ref, "payment coin " + e.coin + " seen at block " + e.block + " " + kind); };
+  const hold = (id, pb, o) => {
+    if (waits.has(id)) return;
+    waits.set(id, { coin: id, block: pb, ref: o.ref }); waitsChanged = true;
+    if (waits.size > PAY_WAIT_MAX) { const e = waits.values().next().value; waits.delete(e.coin); flagPay(e, LOST_PAY); }
+  };
+  const judged = (id) => { if (waits.delete(String(id))) waitsChanged = true; };
   const judge = (c) => {
     const id = c.coinid; if (!id || seenPayCoins.has(id)) return "";
     let ref = "";
@@ -470,7 +491,7 @@ async function scanPayments(depth, tip, ordersFrom) {
       seenPayCoins.delete(id);
       const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
       if (n < JUDGE_TRIES) { console.error("[miniMall] payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
-      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id));
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id)); judged(id);
       console.error("[miniMall] payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
       try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { console.error("[miniMall] the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
       return "";
@@ -484,15 +505,15 @@ async function scanPayments(depth, tip, ordersFrom) {
     const pay = store.payee(ref, statePort(c, 2)), o = pay.order && !pay.order.paid ? pay.order : null;
     if (!o && !pay.unproven.length) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
-    if (known && pb < (ordersFrom || 0)) return "";   // its orders are not read yet (0.18.294)
+    if (known && pb < (ordersFrom || 0)) { if (o) hold(String(id), pb, o); return ""; }   // its orders are not read yet (0.18.294)
     // not judged, not marked seen, until the tip reaches the allowance (0.18.289; pb + 3 itself since 0.18.293): read again on a later pass
-    if (known && tip < pb + PAY_BEFORE_ORDER) { if (o) { const w = waitingPay.get(o.ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(o.ref, { coin: String(id), block: pb }); } return ""; }
+    if (known && tip < pb + PAY_BEFORE_ORDER) { if (o) { const w = waitingPay.get(o.ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(o.ref, { coin: String(id), block: pb }); hold(String(id), pb, o); } return ""; }
     // an order with a secret is paid only by coins proving it (0.18.297): a coin that pays no order at all is one problem on each such order
     // with its reference, once per order, never on one already paid by its proof (a coin counted for another order is that order's)
     if (!pay.order) for (const u of pay.unproven) if (!u.paid && !(u.problems || []).some(p => String(p).startsWith(NO_PROOF)))
       store.flagDuplicate(u.ref, NO_PROOF + " (payment coin " + String(id) + "): check by hand");
     if (!o) return "";   // counted for no order, and not marked seen: the order it proves may still be read
-    seenPayCoins.add(id);
+    seenPayCoins.add(id); judged(id);
     // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
     // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
     // one such problem per order (0.18.290): each old coin added a line (its id made the text new) and a write of shop.json
@@ -508,6 +529,13 @@ async function scanPayments(depth, tip, ordersFrom) {
   if (!missed) judgedTip = tip;   // the "waiting" line stays until a read that covered the coin judged it (0.18.293)
   const dust = coins.filter(c => judge(c) === "DUST");
   if (changed && dust.length) for (const c of dust) judge(c);
+  // a waiting coin this read should list and does not (0.18.299): only after a read of every payout address that covered its block
+  for (const e of [...waits.values()]) {
+    const o = store.order(e.ref);
+    if (!o || o.paid) { waits.delete(e.coin); waitsChanged = true; continue; }
+    if (!missed && !partial && tip >= e.block + PAY_BEFORE_ORDER && tip - e.block <= reach && !have.has(e.coin)) { flagPay(e, GONE_PAY); waits.delete(e.coin); waitsChanged = true; changed = true; }
+  }
+  if (waitsChanged) store.setMeta("payWait", [...waits.values()]);
   return changed;
 }
 async function scanOnce() {
