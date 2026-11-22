@@ -826,14 +826,40 @@ test("a cut orders read (window or past the tree): a payment below what it reach
     assert.ok(v && v.delivery === "VICTIM", "the real order is read"); for (const x of [c, v]) { assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); assert.equal(x.problems[0], DUPV); }
     assert.equal(c.paidAmount, "1"); }
 });
+// CHANGED on purpose (0.18.295): the pass fails for that coin (the cursor stays) and says so with its id whole, not as the node not answering
 test("a payment coin whose judging threw is read again on the next pass, and the pass that threw is a failed one", async () => {
   const t = await javaSetup("threw"); t.st.msg = [await t.seal("ORD-T", 1009)]; t.st.pay = [t.pay("ORD-T", 1010)];
-  const real = t.m.store.recordPayment; let once = true;
+  const real = t.m.store.recordPayment; let once = true, errs = []; const err = console.error; console.error = (...a) => errs.push(a.join(" "));
   t.m.store.recordPayment = function () { if (once) { once = false; throw new Error("disk full"); } return real.apply(this, arguments); };
+  const id = "0xFA" + Buffer.from("ORD-T").toString("hex");
   try {
-    t.st.tip = 1020; await t.m.shop.scanOnce(); assert.equal(t.m.store.order("ORD-T").paid, false); assert.equal(t.m.shop.scanState().readFailed, true, "the pass failed");
+    t.st.tip = 1020; await t.m.shop.scanOnce(); assert.equal(t.m.store.order("ORD-T").paid, false); assert.deepEqual(t.m.shop.scanState().judgeFailed, [id], "the pass failed for that coin");
+    assert.equal(Number(t.m.store.getMeta("scanTip")), 1000, "the cursor stays"); assert.equal(t.m.shop.scanState().text, "Payment coin " + id + " could not be judged. It is judged again on the next block.");
     t.st.tip = 1021; await t.m.shop.scanOnce(); assert.equal(t.m.store.order("ORD-T").paid, true, "judged again, not skipped as seen");
-  } finally { t.m.store.recordPayment = real; }
+    assert.equal(t.m.shop.scanState().text, ""); assert.equal(Number(t.m.store.getMeta("scanTip")), 1021);
+  } finally { t.m.store.recordPayment = real; console.error = err; }
+  assert.ok(errs.some(e => e.includes(id) && e.includes("disk full")), errs.join(" | "));
+});
+// 0.18.295: one coin whose judging always throws stopped every newer coin for good (the loop rethrew, the cursor never moved, and the line
+// said the node did not answer); every coin is judged, and the coin is given up on after three passes that threw
+test("a payment coin whose judging always throws: an unrelated payment is still paid in the same pass; after three passes the coin is left for a check by hand and the cursor moves", async () => {
+  const t = await javaSetup("pois"); t.st.msg = [await t.seal("ORD-P1", 1001), await t.seal("ORD-P2", 1005)]; t.st.pay = [t.pay("ORD-P1", 1002), t.pay("ORD-P2", 1006)];
+  const P1 = "0xFA" + Buffer.from("ORD-P1").toString("hex"), real = t.m.store.recordPayment; let calls = 0;
+  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
+  t.m.store.recordPayment = function (ref) { if (ref === "ORD-P1") { calls++; throw new Error("poison"); } return real.apply(this, arguments); };
+  try {
+    t.st.tip = 1010; await t.m.shop.scanOnce();
+    assert.equal(t.m.store.order("ORD-P2").paid, true, "the newer coin is judged in the same pass"); assert.equal(t.m.store.order("ORD-P1").paid, false);
+    const st = t.m.shop.scanState(); assert.equal(st.readFailed, false, "not the node"); assert.ok(!/did not answer/.test(st.text), st.text);
+    assert.equal(st.text, "Payment coin " + P1 + " could not be judged. It is judged again on the next block."); assert.equal(Number(t.m.store.getMeta("scanTip")), 1000, "the cursor stays");
+    t.st.tip = 1011; await t.m.shop.scanOnce(); assert.equal(Number(t.m.store.getMeta("scanTip")), 1000);
+    t.st.tip = 1012; await t.m.shop.scanOnce();
+    assert.equal(Number(t.m.store.getMeta("scanTip")), 1012, "given up on after three passes: the cursor moves"); assert.equal(calls, 3);
+    const o = t.m.store.order("ORD-P1"); assert.ok(o.problems.includes("payment coin " + P1 + " could not be judged: check by hand"), o.problems.join(" | ")); assert.equal(o.status, "UNCHECKED");
+    assert.equal(t.m.shop.scanState().text, "Payment coin " + P1 + " could not be judged: check by hand."); assert.deepEqual(t.m.shop.scanState().gaveUp, [P1]);
+    assert.ok(errs.some(e => e.includes(P1) && e.includes("poison") && /after 3 tries/.test(e)), errs.join(" | "));
+    t.st.tip = 1013; await t.m.shop.scanOnce(); assert.equal(calls, 3, "not judged again this session"); assert.equal(Number(t.m.store.getMeta("scanTip")), 1013);
+  } finally { t.m.store.recordPayment = real; console.error = err; }
 });
 // 0.18.290: one "older than the order" problem per order, and no write of shop.json for a coin that changes nothing (2000 coins made
 // 2001 problems and 3001 rewrites); the same buyer's order sent again: the order's block is its oldest coin's, never a copier's

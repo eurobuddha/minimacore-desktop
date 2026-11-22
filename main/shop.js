@@ -59,6 +59,13 @@ const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
 const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
 let judgedTip = 0;              // the tip the last payments read judged against, every payout address read (0.18.293)
+// A payment coin whose judging throws (0.18.295): every other coin is still judged; the pass fails for that coin (nothing advances, said with
+// its id whole, never as the node not answering); after JUDGE_TRIES passes that threw, it is marked seen, logged with its error, and left
+// for a check by hand (a problem on its order, and the status line). It stopped every newer coin for good: the loop rethrew and the cursor
+// never moved. The count is kept in memory, for this session: after a restart a coin gets JUDGE_TRIES passes again.
+// One try per pass: a coin that threw moves nothing, so no backfill read of the same pass judges it again.
+const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Set();   // coin id -> passes that threw; coin ids given up on
+let judgeFailed = [], lastJudgeFailed = [];
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
 
@@ -405,7 +412,7 @@ async function scanOrders(depth, floor) {
   }
   return changed;
 }
-// Orders before payments (0.18.293): a payment is judged only when the orders that may go with it (mined up to its block + 3) are known
+// Orders before payments (0.18.294): a payment is judged only when the orders that may go with it (mined up to its block + 3) are known
 // read. `ordersFrom`: the oldest block from which every order up to the tip has been read, this pass or earlier; a coin from below it
 // waits, not judged and not marked seen (a later read of that range judges it). A pass whose orders read failed judges no payment.
 async function scanPayments(depth, tip, ordersFrom) {
@@ -430,23 +437,34 @@ async function scanPayments(depth, tip, ordersFrom) {
   let changed = false;
   const judge = (c) => {
     const id = c.coinid; if (!id || seenPayCoins.has(id)) return "";
+    let ref = "";
+    try { return judgeOne(c, id, (r) => { ref = r; }); }
+    catch (e) {   // 0.18.295: this coin only (see JUDGE_TRIES)
+      seenPayCoins.delete(id);
+      const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
+      if (n < JUDGE_TRIES) { console.error("[miniMall] payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id));
+      console.error("[miniMall] payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
+      try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { console.error("[miniMall] the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
+      return "";
+    }
+  };
+  const judgeOne = (c, id, setRef) => {
     const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); return ""; }
     const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
+    setRef(ref);
     const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
-    if (known && pb < (ordersFrom || 0)) return "";   // its orders are not read yet (0.18.293)
+    if (known && pb < (ordersFrom || 0)) return "";   // its orders are not read yet (0.18.294)
     // not judged, not marked seen, until the tip reaches the allowance (0.18.289; pb + 3 itself since 0.18.293): read again on a later pass
     if (known && tip < pb + PAY_BEFORE_ORDER) { const w = waitingPay.get(ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(ref, { coin: String(id), block: pb }); return ""; }
     seenPayCoins.add(id);
-    let outcome;
-    try {
-      // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
-      // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
-      // one such problem per order (0.18.290): each old coin added a line (its id made the text new) and a write of shop.json
-      if (o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
-        store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
-      outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
-    } catch (e) { seenPayCoins.delete(id); throw e; }   // a coin whose judging threw is read again (0.18.289); the pass fails, as before
+    // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
+    // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
+    // one such problem per order (0.18.290): each old coin added a line (its id made the text new) and a write of shop.json
+    if (o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
+      store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
+    const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
     if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
     return outcome || "";
@@ -467,20 +485,21 @@ async function scanOnce() {
     const want = prev && tip > prev ? tip - prev + GAP_MARGIN : prev && tip ? POLL_DEPTH : BACKFILL_MAX_DEPTH;
     const depth = Math.max(POLL_DEPTH, Math.min(WINDOW_DEPTH, want));
     const failed = () => { readFailed = true; return false; };
-    passServed = depth; readFailed = false;
+    passServed = depth; readFailed = false; judgeFailed = [];
+    const stuck = () => readFailed || judgeFailed.length > 0;   // a coin that could not be judged moves nothing either (0.18.295)
     const a = await scanOrders(depth).catch(failed);
-    // complete enough (0.18.293): the orders read reached the last pass's tip, so with what earlier passes read (down to a pending
+    // complete enough (0.18.294): the orders read reached the last pass's tip, so with what earlier passes read (down to a pending
     // backfill's floor) every order up to the tip is known; cut above it, only what this read reached. A failed one: no payment judged.
     const reach = tip - passServed, f0 = Number(store.getMeta("bfFloor")) || 0, t0 = Number(store.getMeta("bfTarget")) || 0;
     const fromRecent = !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0;
     const b = readFailed ? false : await scanPayments(depth, tip, fromRecent).catch(failed);
     let changed = a || b;
     const recentFailed = readFailed;   // a backfill step's failure below is said as such, not as the recent window's (0.18.277)
-    if (tip && !readFailed && prev && tip < prev) {
+    if (tip && !stuck() && prev && tip < prev) {
       // the chain is BELOW what was read before (a resync, or a reorganisation onto a lower branch, 0.18.276): the backfill waits and it is
       // no failure; the cursor follows the chain down (0.18.281: it stayed, so a catch-up faster than the window skipped the new branch's blocks)
       store.setMeta("scanTip", tip);
-    } else if (tip && !readFailed) {
+    } else if (tip && !stuck()) {
       const covered = tip - passServed;   // the oldest block this pass read
       // A new gap below this pass: the backfill reaches down to the oldest unread block and starts again just under this
       // pass (0.18.213: a gap that opened while an older backfill was pending was never registered).
@@ -497,12 +516,12 @@ async function scanOnce() {
         // a read the reply cap cut is tried on two more passes, as a backfill step is
         const ordersCut = ordersServed < NODE_TREE_MOST, stallNext = (Number(store.getMeta("bfStall")) || 0) + 1;
         // the root read judges what it lists (orders past the tree cannot be read); while a cut orders read is still tried again, the coins
-        // below what it reached wait (0.18.293), and the try that ends the backfill judges them
+        // below what it reached wait (0.18.294), and the try that ends the backfill judges them
         const payFrom = ordersCut && stallNext < 3 ? tip - ordersServed : 0;
         passServed = ROOT_DEPTH; const d = readFailed ? false : await scanPayments(ROOT_DEPTH, tip, payFrom).catch(failed); const root = passServed >= ROOT_DEPTH;
         changed = changed || c || d;
         const stall = ordersCut || !root ? stallNext : 0;
-        if (readFailed) { /* a failed read moves nothing: the same reads are tried on the next pass */ }
+        if (stuck()) { /* a failed read moves nothing: the same reads are tried on the next pass */ }
         else if (stall && stall < 3) store.setMeta("bfStall", stall);
         else {
           const why = ordersCut ? (root ? "capRoot" : "cap") : root ? "treeRoot" : "treePayCap";   // treePayCap: orders read whole, payments cut (0.18.286)
@@ -514,12 +533,12 @@ async function scanOnce() {
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, NODE_TREE_DEPTH);   // never past what the tree surely holds (0.18.277)
         passServed = deep;
         const c = await scanOrders(deep, floor).catch(failed), stepReach = tip - passServed;
-        // payments: no floor (0.18.282); judged down to what the orders read reached, with what was read above the floor (0.18.293)
+        // payments: no floor (0.18.282); judged down to what the orders read reached, with what was read above the floor (0.18.294)
         const payFrom = stepReach <= target ? 0 : Math.min(stepReach, floor);
         const d = readFailed ? false : await scanPayments(deep, tip, payFrom).catch(failed);
         changed = changed || c || d;
         const reached = tip - passServed;
-        if (readFailed) { /* nothing moves: the same step is tried on the next pass */ }
+        if (stuck()) { /* nothing moves: the same step is tried on the next pass */ }
         else if (reached <= target) { store.setMeta("bfTarget", 0); store.setMeta("bfFloor", 0); store.setMeta("bfStall", 0); }
         else if (reached < floor) { store.setMeta("bfFloor", reached); store.setMeta("bfStall", 0); }
         else {
@@ -533,8 +552,8 @@ async function scanOnce() {
     }
     if (!tip) readFailed = true;
     const nowRecent = recentFailed || !tip, nowStep = readFailed && !nowRecent;
-    if (lastPassFailed !== nowRecent || lastStepFailed !== nowStep) changed = true;   // the status line changes
-    lastPassFailed = nowRecent; lastStepFailed = nowStep;
+    if (lastPassFailed !== nowRecent || lastStepFailed !== nowStep || lastJudgeFailed.join() !== judgeFailed.join()) changed = true;   // the status line changes
+    lastPassFailed = nowRecent; lastStepFailed = nowStep; lastJudgeFailed = judgeFailed;
     if (changed) emitter.emit("update");
   } finally { scanning = false; }
 }
@@ -619,11 +638,14 @@ function scanState() {
   // the unread notice is shown only to someone with a shop, and until it is dismissed (0.18.277: it stayed for everyone, for good)
   const shown = below && store.shops().length > 0 && below > (Number(store.getMeta("unreadDismissed")) || 0);
   const belowText = shown ? unreadText(below, store.getMeta("unreadWhy")) : "";
-  return { readFailed: lastPassFailed || lastStepFailed, catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
+  // a payment coin that could not be judged (0.18.295), its id whole: tried again, or left for a check by hand
+  const judgeText = lastJudgeFailed.map(id => "Payment coin " + id + " could not be judged. It is judged again on the next block.")
+    .concat([...gaveUpPay].map(id => "Payment coin " + id + " could not be judged: check by hand.")).join(" ");
+  return { readFailed: lastPassFailed || lastStepFailed, judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay], catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
     // the recent window is what fails when a pass fails (a backfill step reads only inside the node's tree), so it is said as recent
     text: [lastPassFailed ? "Recent orders could not be read: the node did not answer. They are read again on the next block."
       : lastStepFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."
-      : target ? "Reading orders and payments from while the app was closed (back to block " + target + ")." : belowText, skippedText].filter(Boolean).join(" ") };   // a payout address skipped as not valid, whole (0.18.227)
+      : target ? "Reading orders and payments from while the app was closed (back to block " + target + ")." : belowText, judgeText, skippedText].filter(Boolean).join(" ") };   // a payout address skipped as not valid, whole (0.18.227)
 }
 /** The unread notice was seen (0.18.277): hidden until a new one; the fact stays in the log. */
 function dismissUnread() { store.setMeta("unreadDismissed", Number(store.getMeta("unreadBelow")) || 0); emitter.emit("update"); return { ok: true }; }
