@@ -412,7 +412,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.366 (review-desktop-r5 N1: the newcomer's note)
   // main/shop-store.js again in 0.19.367 (review-desktop-r5 R6: a coin given up on and counted after all)
   // both again in 0.19.368 (review-desktop-r5: the no-proof note's amount and token; a paid order drops its note)
-  for (const [f, want, ver] of [["main/shop.js", "fecf903566044fb2fddb079ee706f5920489112f0ef88ff905d8a24af5f842b3", "0.19.368"], ["main/shop-store.js", "27cb8df36d6adf475670a14f0a933fb7c58ad7512add9142e4a21bf6f4e60f9f", "0.19.368"],
+  // both again in 0.19.369 (comments: as Minima Core Desktop 0.18.30x, not as released)
+  for (const [f, want, ver] of [["main/shop.js", "b7bc940ec16aed78eeadf8bda8a9bb2d2df1f9c1abd3959c653e126094aa370a", "0.19.369"], ["main/shop-store.js", "920de6bbf667270d4beea16db40ec5a550126d802c59a0a0ad74ed73e41e0854", "0.19.369"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

@@ -129,7 +129,7 @@ test("an order that does not match is UNCHECKED, never paid by any amount, and c
   assert.equal(Act.shop.nextStatus({ status: "UNCHECKED", paid: false }), null); assert.equal(Act.shop.nextStatus({ status: "UNCHECKED", paid: false, handChecked: true }), "CONFIRMED");
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes('th("Unchecked: the items or total do not match your shop; check by hand.")') && app.includes("!o.paid && !o.handChecked ? ((o.problems || []).length ? th(\"Check this order by hand before you can confirm it.\")")
-    && /const yes = await showConfirm\(t\("Checked by hand\?"\)[\s\S]{0,1800}if \(!yes\) return;\s*try \{ await api\.shopVendorCheck\(ref\);/.test(app), "the screen says so and asks before it");
+    && /const yes = await showConfirm\(t\("Checked by hand\?"\)[\s\S]{0,2000}if \(!yes\) return;\s*try \{ await api\.shopVendorCheck\(ref\);/.test(app), "the screen says so and asks before it");
   assert.ok(app.includes("${shopKv(t(\"Buyer's total\"), o.amount + \" \" + cur)}${shopCheckBlock(o, cur)}") && app.includes('shopKv(t("Due by your listing"), o.due + " " + cur)'), "the buyer's figure is named as theirs; what is due is the listing's");
   assert.ok(/ipcMain\.handle\("mcd:shopVendorCheck", \(_e, ref\) => shop\.vendorCheck\(ref\)\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
 });
@@ -1041,7 +1041,7 @@ test("a copier's order with a copied reference is never paid by the real buyer's
       await walkTo(st, 1010, 1016);
       const c = store.order("ORD-V"); neverPaid(c); paidByItsCoin(store.order("ORD-V~" + VICTIM));
       // an order with a secret is not held by another's order; this one is held by the real payment, read before the real order (0.19.354: at sight)
-      // CHANGED on purpose (0.19.359, as released 0.18.305): the coin that does not prove it is a note on it, never a problem
+      // CHANGED on purpose (0.19.359, as Minima Core Desktop 0.18.305): the coin that does not prove it is a note on it, never a problem
       if (atkSecret) { assert.deepEqual(c.problems, [], tag); assert.deepEqual(c.notes, [NOPROOF(V)], tag); } else assert.equal(c.problems[0], DUPV, tag + ": an order without one is held as before");
       assert.equal(shop.orderDetail("ORD-V~" + VICTIM).sharedRef, null, "its payments are counted on it"); });
     // real first: the order, its payment, then the copier's order
@@ -1131,7 +1131,7 @@ test("two orders with one reference: different secrets are paid each by its own 
     assert.deepEqual(store.order("ORD-V").problems, []); assert.deepEqual(store.order("ORD-V~" + ATK).problems, [], "neither is held by the other");
     assert.equal(store.order("ORD-V~" + ATK).paid, true, "B paid by its own coin"); assert.equal(store.mayAdvance(store.order("ORD-V~" + ATK)), true, "and confirmable at once: its payment proves its secret");
     await walkTo(st, 1012, 1012);
-    // CHANGED on purpose (0.19.359, as released 0.18.305): a note, never a problem (it held the order, so its own proved coin then could not pay it)
+    // CHANGED on purpose (0.19.359, as Minima Core Desktop 0.18.305): a note, never a problem (it held the order, so its own proved coin then could not pay it)
     assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xFE51", "0.0002")], "one note on the unpaid order, the first coin's id whole, not one per coin"); assert.deepEqual(store.order("ORD-V").problems, []);
     assert.deepEqual(store.order("ORD-V~" + ATK).problems, [], "an order already paid by its proof is not disturbed"); assert.equal(store.order("ORD-V~" + ATK).notes, undefined); assert.equal(store.order("ORD-V~" + ATK).paid, true);
     await walkTo(st, 1013, 1016);
@@ -1248,7 +1248,7 @@ test("vendor: the poll: a new tip seen while a pass is running is not taken as s
   });
 });
 
-// ---- 0.19.358 (as released 0.18.304): settled is latched on the order (review-desktop-r4 S1a, S1b, S1c, R4). The settling of 0.19.354 looked only
+// ---- 0.19.358 (as Minima Core Desktop 0.18.304): settled is latched on the order (review-desktop-r4 S1a, S1b, S1c, R4). The settling of 0.19.354 looked only
 // at the last pass's orders read, kept in memory: a paid, settled order went back to settling after one failed orders read, after a restart, or
 // after a cut catch-up, and a CONFIRMED order could not be shipped. Released 0.18.286 (no settling) confirmed, shipped and delivered in every one ----
 test("S1a, S1b, S1c, R4: a settled order stays settled through a failed orders read, a restart and a cut catch-up; a confirmed one is never held; an order paid before 0.19.358 is settled", async () => {
@@ -1288,7 +1288,7 @@ test("S1a, S1b, S1c, R4: a settled order stays settled through a failed orders r
     assert.equal(store.mayAdvance(c), false); assert.equal(store.mayAdvance(store.order("ORD-V~" + VICTIM)), false); });
 });
 
-// ---- 0.19.359 (as released 0.18.305): a coin without an order's proof is a note on it, never a hold (review-desktop-r4 S2a, S2b, S2c, S2d, S4). It
+// ---- 0.19.359 (as Minima Core Desktop 0.18.305): a coin without an order's proof is a note on it, never a hold (review-desktop-r4 S2a, S2b, S2c, S2d, S4). It
 // went through flagDuplicate (due cleared, UNCHECKED), so a stranger's coin with the reference stopped the proved payment from paying the order;
 // released 0.18.286 paid all three. Within one block coins are judged by coin id, never by Number() of amounts (of different tokens, rounded) ----
 test("S2a, S2b, S2c, S2d: a coin with the reference and without the order's proof is a note, never a hold: the proved payment pays the order; S4: a copier's order is never paid", async () => {
@@ -1333,7 +1333,7 @@ test("S2a, S2b, S2c, S2d: a coin with the reference and without the order's proo
     try { await walkTo(st, 1010, 1010); } finally { store.recordPayment = real; } assert.deepEqual(seen.slice(0, 3), ["0xC1", "0xC2", "0xC3"]); });
 });
 
-// ---- 0.19.360 (as released 0.18.306): an order arriving WITH a secret does not unpay a PAID order without one (review-desktop-r4 S5): the paid
+// ---- 0.19.360 (as Minima Core Desktop 0.18.306): an order arriving WITH a secret does not unpay a PAID order without one (review-desktop-r4 S5): the paid
 // order is paid by a coin without a proof, which an honest buyer with a secret never sends. Released 0.18.286 kept the paid order PAID ----
 test("S5: a PAID order without a secret stays paid when another buyer's order with a secret and its reference comes; one without a secret, or with one that cannot be read, still holds it", async () => {
   const run = (nonce, legacy, fn) => copyRig(async (st) => { st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM")); st.pay.push(sPay("ORD-V", 1010, undefined, "0xFE01"));
@@ -1351,7 +1351,7 @@ test("S5: a PAID order without a secret stays paid when another buyer's order wi
     assert.equal(c.paid, false, tag); assert.equal(store.mayAdvance(c), false, tag); });
 });
 
-// ---- 0.19.361 (as released 0.18.307): a check by hand made while an order settles (only to move it on early) does not make it immune to a second
+// ---- 0.19.361 (as Minima Core Desktop 0.18.307): a check by hand made while an order settles (only to move it on early) does not make it immune to a second
 // order with its reference mined before its hold would have run out (review-desktop-r4 S3: the vendor checked the copier's settling order, the real
 // order came 2 blocks later, and the copier's order stayed PAID and confirmable) ----
 test("S3: an order checked by hand while settling is still held by a second order without a secret mined up to the block its hold ran to; not after it, nor once confirmed", async () => {
@@ -1367,10 +1367,11 @@ test("S3: an order checked by hand while settling is still held by a second orde
   await run(1014, false, async (c) => { assert.equal(c.paid, true, "mined after the hold would have run out: the check stands"); assert.equal(store.mayAdvance(c), true); });
   await run(1012, true, async (c) => { assert.equal(c.status, "CONFIRMED", "moved on: left as it is"); assert.equal(store.mayAdvance(c), true); });
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
-  assert.ok(app.includes("\\n\\nAnother order with this reference can still arrive until block {block}; it will put both orders back on a check by hand.\\n\\nConfirm only"), "the question says so");
+  // CHANGED on purpose (0.19.369): the buyer's total and what was received now come before "Confirm only", as on Minima Core Desktop
+  assert.ok(app.includes("\\n\\nAnother order with this reference can still arrive until block {block}; it will put both orders back on a check by hand.\\n\\nThe buyer's total: {amount} {cur} (their own figure)\\nReceived so far: {paid} {cur2}\\n\\nConfirm only"), "the question says so");
 });
 
-// ---- 0.19.362 (as released 0.18.308): the review's nits (review-desktop-r4 G5) ----
+// ---- 0.19.362 (as Minima Core Desktop 0.18.308): the review's nits (review-desktop-r4 G5) ----
 test("a coin given up on flags the order it would pay (another buyer's copy too); one that names no order is cleared by the Inbox's Hide; at most 64 are said", async () => {
   // the victim's copy ORD-V~victim (with a secret) is the order the coin proves; the copier's ORD-V is held under the reference
   await copyRig(async (st) => { const S = newSecret(); store.setLog(() => {}); st.msg.push(sOrder(ATK, "ORD-V", 1009, "COPIER"), sOrder(VICTIM, "ORD-V", 1010, "VICTIM", S)); await walkTo(st, 1009, 1010);

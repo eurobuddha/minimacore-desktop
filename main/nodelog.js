@@ -2,7 +2,7 @@
  * nodelog.js — the node's stdout/stderr, on disk.
  *
  * node-manager keeps the last 800 lines in RAM for the Logs view and nothing else. On 15 Sep 2026 the node
- * wrote "Script NOT found for address : 0x0CDCD6…" some forty-five times over two hours while every AtomiX
+ * wrote "Script NOT found for address : 0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A" (the AtomiX HTLC address) some forty-five times over two hours while every AtomiX
  * claim was refused; by the time anyone looked, the ring had rolled and the only diagnostic was gone. A
  * multi-hour reconstruction from txnlist and the chain followed. This keeps every redacted line in
  * <userData>/node.log, rotating to node.log.1 at MAX_BYTES, so the last day or two of node output is always

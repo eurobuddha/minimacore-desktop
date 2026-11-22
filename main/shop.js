@@ -290,7 +290,7 @@ function routeIncoming(w, fromPublicId, coinBlock) {
       const DUP = "another buyer sent an order with the same reference " + w.ref + ": a payment with it cannot be told apart, so check both orders by hand";
       // 0.19.352 (as released 0.18.297): an order with a secret is paid only by coins carrying its proof, so another buyer's order with its
       // reference never holds it (nor unpays it), unless that order came with the very same proof; an order without a secret is held as before.
-      // 0.19.360 (as released 0.18.306): except a PAID one by a newcomer WITH a secret (review-desktop-r4 S5): an order without a secret is paid only
+      // 0.19.360 (as Minima Core Desktop 0.18.306): except a PAID one by a newcomer WITH a secret (review-desktop-r4 S5): an order without a secret is paid only
       // by coins without a proof, and an honest newcomer with a secret pays with its proof, so it cannot be the one whose coin paid it; that newcomer
       // waits for its own proved coin. A newcomer without a secret, or with one that cannot be read, still holds it; an order stored before 0.19.352
       // (paid by any coin with its reference) too.
@@ -388,7 +388,7 @@ async function scanPayments(depth) {
   if (!any) return null;
   capSeen();
   // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one
-  // block by coin id (0.19.359, as released 0.18.305): the larger coin went first by Number() of its amount, which compared amounts of different
+  // block by coin id (0.19.359, as Minima Core Desktop 0.18.305): the larger coin went first by Number() of its amount, which compared amounts of different
   // tokens and rounded long decimals; nothing depends on it, since a remainder judged before its payment is gathered as dust and counted on the
   // second look below.
   const cid = (c) => String((c && c.coinid) || "").toLowerCase();
@@ -405,10 +405,10 @@ async function scanPayments(depth) {
       // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
       // the order this coin pays, by its proof in port 2 (0.19.352, as released 0.18.297), and the orders with a secret it does not prove
       const pay = store.payee(ref, statePort(c, 2)), o = pay.order; if (!o && !pay.unproven.length) return "";
-      if (o) ref = o.ref;   // a coin given up on from here flags the order it would pay, another buyer's copy too (0.19.362, as released 0.18.308)
+      if (o) ref = o.ref;   // a coin given up on from here flags the order it would pay, another buyer's copy too (0.19.362, as Minima Core Desktop 0.18.308)
       const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
       // an order with a secret is paid only by coins proving it (0.19.352): a coin that pays no order at all is one NOTE on each such unpaid order
-      // with its reference, the first coin's id whole (0.19.359, as released 0.18.305: it was a problem, which held the order, so a stranger's coin
+      // with its reference, the first coin's id whole (0.19.359, as Minima Core Desktop 0.18.305: it was a problem, which held the order, so a stranger's coin
       // with the reference, a worthless token or dust, stopped the proved payment from paying it). The note holds nothing: the order is paid by
       // its proved coins as ever, and an unpaid one with a note can be checked by hand (a buyer who paid by hand without the proof).
       // with the coin's amount as the node gave it (never rounded) and its token id whole, or Minima (0.19.368, as Minima Core Desktop 0.18.311;
@@ -475,7 +475,7 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // (store.settleBlock). A copier's order mined after the payment and the real order mined up to 3 blocks after it then meet as two orders with
 // one reference before either can be confirmed, and the paid one is held again (flagDuplicate). A payment that proves the order's secret
 // settles at once: only that order's buyer could have made it. A coin of unknown block settles at once, as before.
-// Settled is for good (0.19.358, as released 0.18.304; store.latchSettled): a later failed or cut orders read, or a restart, does not hold a settled
+// Settled is for good (0.19.358, as Minima Core Desktop 0.18.304; store.latchSettled): a later failed or cut orders read, or a restart, does not hold a settled
 // order again, and an order confirmed or moved on is never held; only a second order with its reference that unpays it (flagDuplicate) takes it back.
 const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
@@ -498,7 +498,7 @@ function proofOf(secret) {
 // the cursor never moved. The count is kept in memory, for this session: after a restart a coin gets JUDGE_TRIES passes again. One try per pass:
 // a coin that threw moves nothing, so no backfill read of the same pass judges it again.
 const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Map();   // coin id -> passes that threw; coin id given up on -> the order flagged (0.19.356)
-// at most GAVE_UP_MAX coins given up on are said (0.19.362, as released 0.18.308), the oldest go first: each was logged with its error and its order
+// at most GAVE_UP_MAX coins given up on are said (0.19.362, as Minima Core Desktop 0.18.308), the oldest go first: each was logged with its error and its order
 // (when one is known) keeps its problem; one that names no order (its reference could not be read) is cleared by the Inbox's Hide
 const GAVE_UP_MAX = 64;
 let judgeFailed = [], lastJudgeFailed = [];
@@ -532,7 +532,7 @@ async function scanOnce() {
     const reach = tip - served, f0 = meta("backfill_floor_block"), t0 = meta("backfill_target_block");
     store.setOrdersRead(a !== null && tip ? { tip, from: !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0 } : null);
     const b = await scanPayments(depth).catch(() => null);
-    store.latchSettled();   // what this pass's good orders read settled stays settled (0.19.358, as released 0.18.304)
+    store.latchSettled();   // what this pass's good orders read settled stays settled (0.19.358, as Minima Core Desktop 0.18.304)
     backfilled = true;
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).

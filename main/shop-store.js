@@ -302,7 +302,7 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid, block) {
  *  One marked PAID and not moved on (0.19.344, as released 0.18.289) is held again: the payment that paid it may be the other buyer's
  *  (the reference is plain text on chain, so a copier's order can be the one held first), so it is unpaid, UNCHECKED, and moves on
  *  only once checked by hand. What was received stays counted on it. Nothing was sent for PAID: the buyer hears from CONFIRMED on. */
-// `block` (0.19.361, as released 0.18.307): the block of the order that comes with the same reference. An order checked by hand while it was
+// `block` (0.19.361, as Minima Core Desktop 0.18.307): the block of the order that comes with the same reference. An order checked by hand while it was
 // settling, only to move it on before its hold ran out (checkedUntil, see handCheck), is still unpaid and held by a second order mined up to
 // that block, unless it was moved on.
 function flagDuplicate(ref, problem, block) {
@@ -328,7 +328,7 @@ function handCheck(ref) {
   // checked while settling (0.19.361): a second order with its reference mined up to the block the hold would have run to still holds it (flagDuplicate)
   o.handChecked = true; if (hold) o.checkedUntil = hold; flush(); return true;
 }
-/** A coin with this order's reference that does not carry its proof and pays no order (0.19.359, as released 0.18.305): a note for the vendor,
+/** A coin with this order's reference that does not carry its proof and pays no order (0.19.359, as Minima Core Desktop 0.18.305): a note for the vendor,
  *  kept on the order and shown, at most one (the first coin's id, amount and token id whole; 0.19.368: up to 600 characters, so no id in it is cut). It holds nothing (not a problem: what is due, the status and whether
  *  it may advance are as without it); an unpaid order with one can be checked by hand. Not on an order already paid. */
 function noteNoProof(ref, note) {
@@ -341,7 +341,7 @@ function noteNoProof(ref, note) {
  *  it + 3 with the orders from that coin's block up taken as read (`from`, see main/shop.js scanOnce, which says where that is not so): by then a second order with its reference
  *  would have been read and held both (flagDuplicate). The block it is held until, or 0 when it is not held (not paid, paid by its proof, checked
  *  by hand, a coin of unknown block, confirmed or moved on, or settled). `ordersRead` is the last pass's, in memory only.
- *  Settled is latched on the order (0.19.358, as released 0.18.304; `settled`, kept on disk): the first pass with a good orders read that finds it
+ *  Settled is latched on the order (0.19.358, as Minima Core Desktop 0.18.304; `settled`, kept on disk): the first pass with a good orders read that finds it
  *  settled (latchSettled) settles it for good, so a later failed or cut orders read, or a restart, never puts a settled order back to settling (it
  *  did: a paid order could not be confirmed, and a CONFIRMED one not shipped, until the next good pass). Only the payment going (flagDuplicate's
  *  unpay) takes the latch away. An order paid before 0.19.358 carries no `settled` and is settled, as released 0.18.286 had it. */
