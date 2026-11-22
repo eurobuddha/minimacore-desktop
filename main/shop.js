@@ -72,7 +72,7 @@ function proofOf(secret) {
 // for a check by hand (a problem on its order, and the status line). It stopped every newer coin for good: the loop rethrew and the cursor
 // never moved. The count is kept in memory, for this session: after a restart a coin gets JUDGE_TRIES passes again.
 // One try per pass: a coin that threw moves nothing, so no backfill read of the same pass judges it again.
-const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Set();   // coin id -> passes that threw; coin ids given up on
+const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Map();   // coin id -> passes that threw; coin id given up on -> the order flagged (0.18.302)
 let judgeFailed = [], lastJudgeFailed = [];
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
@@ -464,7 +464,7 @@ async function scanPayments(depth) {
       seenPayCoins.delete(id);
       const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
       if (n < JUDGE_TRIES) { console.error("[miniMall] payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
-      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id));
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.set(String(id), ref);
       console.error("[miniMall] payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
       try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { console.error("[miniMall] the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
       return "";
@@ -646,7 +646,8 @@ function paymentNotSent(ref) {
   emitter.emit("update"); return { ok: true };
 }
 /** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
-function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
+// a coin given up on whose order the vendor has now checked by hand is no longer said on the status line (0.18.302)
+function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); for (const [c, r] of gaveUpPay) if (r === ref) gaveUpPay.delete(c); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read yet, for the miniMall status line (0.18.213). */
 // What may not have been read below block N, and why (0.18.283: "may not have been", since a tree longer than 1024 blocks read some
 // of them). why: "tree" or "cap" (the node keeps only its recent blocks / its answer was too large), + "Root" when the payments read
@@ -666,8 +667,8 @@ function scanState() {
   const belowText = shown ? unreadText(below, store.getMeta("unreadWhy")) : "";
   // a payment coin that could not be judged (0.18.295), its id whole: tried again, or left for a check by hand
   const judgeText = lastJudgeFailed.map(id => "Payment coin " + id + " could not be judged. It is judged again on the next block.")
-    .concat([...gaveUpPay].map(id => "Payment coin " + id + " could not be judged: check by hand.")).join(" ");
-  return { readFailed: lastPassFailed || lastStepFailed, judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay], catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
+    .concat([...gaveUpPay.keys()].map(id => "Payment coin " + id + " could not be judged: check by hand.")).join(" ");
+  return { readFailed: lastPassFailed || lastStepFailed, judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay.keys()], catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
     // the recent window is what fails when a pass fails (a backfill step reads only inside the node's tree), so it is said as recent
     text: [lastPassFailed ? "Recent orders could not be read: the node did not answer. They are read again on the next block."
       : lastStepFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."

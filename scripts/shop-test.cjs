@@ -866,6 +866,8 @@ test("a payment coin whose judging always throws: an unrelated payment is still 
     assert.equal(t.m.shop.scanState().text, "Payment coin " + P1 + " could not be judged: check by hand."); assert.deepEqual(t.m.shop.scanState().gaveUp, [P1]);
     assert.ok(errs.some(e => e.includes(P1) && e.includes("poison") && /after 3 tries/.test(e)), errs.join(" | "));
     t.st.tip = 1013; await t.m.shop.scanOnce(); assert.equal(calls, 3, "not judged again this session"); assert.equal(Number(t.m.store.getMeta("scanTip")), 1013);
+    // 0.18.302: checked by hand, the coin is no longer said on the status line
+    t.m.shop.vendorCheck("ORD-P1"); assert.deepEqual(t.m.shop.scanState().gaveUp, []); assert.equal(t.m.shop.scanState().text, "", "said until the vendor checked the order");
   } finally { t.m.store.recordPayment = real; console.error = err; }
 });
 // 0.18.290: one "older than the order" problem per order, and no write of shop.json for a coin that changes nothing (2000 coins made

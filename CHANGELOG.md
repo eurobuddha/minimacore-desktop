@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.302] — miniMall: a payment coin given up on is no longer said once its order is checked by hand
+
+- A coin whose judging threw three times is left for a check by hand (0.18.295): a problem on its order and "Payment coin <id> could not be judged: check by hand." on the status line. The line stayed for the rest of the session even after the vendor checked that order by hand. The coin is now kept with the order it flagged, and checking that order by hand takes it off the line.
+- Tests (scripts/shop-test.cjs): the "always throws" test checks the order by hand at the end: the line is empty (fails on 0.18.301).
+
 ## [0.18.301] — miniMall: a tip that comes while a pass is running gets its own pass
 
 - The poll took a new tip as scanned before scanOnce, which returns at once while a pass is running (`scanning`): a tip that came during a long pass got no pass of its own, and its blocks waited for the next one. Now a poll during a pass leaves the tip for the next poll (`tip !== lastTip && !scanning`).
