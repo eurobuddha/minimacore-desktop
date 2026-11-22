@@ -1400,3 +1400,43 @@ test("the poll: a new tip seen while a pass is running is not taken as scanned; 
   assert.equal(Number(t.m.store.getMeta("scanTip")), 1001, "the pass at 1001 finished");
   await t.m.shop._tick(); assert.equal(Number(t.m.store.getMeta("scanTip")), 1002, "the tip seen during it gets its pass");
 });
+
+// ---- 0.18.304: settled is latched on the order (review-desktop-r4 S1a, S1b, S1c, R4). The settling of 0.18.300 looked only at the last pass's
+// orders read, kept in memory: a paid, settled order went back to settling after one failed orders read, after a restart, or after a cut
+// catch-up, and a CONFIRMED order could not be shipped. Released 0.18.286 (no settling) confirmed, shipped and delivered in every one of them ----
+test("S1a, S1b, S1c, R4: a settled order stays settled through a failed orders read, a restart and a cut catch-up; a confirmed one is never held; an order paid before 0.18.304 is settled", async () => {
+  const paidSettled = async (name) => { const t = await setupS(name); t.st.msg = [await sealS(t, t.victim, "ORD-S1", 1009, "VICTIM")]; t.st.pay = [payS("ORD-S1", 1010, undefined, "0xF1")];
+    await walk(t, 1001, 1012); assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-S1")), false, "tip 1012: a fresh order without a secret still settles");
+    await walk(t, 1013, 1020); assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-S1")), true, "settled by the good pass at 1013"); return t; };
+  // S1a: the orders read fails at 1021
+  { const t = await paidSettled("s1a"); t.st.mode = "throw"; t.st.tip = 1021; await t.m.shop.scanOnce();
+    assert.equal(t.m.shop.orderDetail("ORD-S1").settling, null, "S1a: not held again by a failed read"); await t.m.shop.advanceStatus("ORD-S1", "CONFIRMED"); assert.equal(t.m.store.order("ORD-S1").status, "CONFIRMED"); }
+  // S1b: confirmed, then a restart whose first pass's orders read fails: shipped before any pass, after the failed one, delivered after a good one
+  { const t = await paidSettled("s1b"); await t.m.shop.advanceStatus("ORD-S1", "CONFIRMED");
+    const m = await t.reopen(); assert.equal(m.store.mayAdvance(m.store.order("ORD-S1")), true, "S1b: after a restart, before any pass");
+    await m.shop.advanceStatus("ORD-S1", "SHIPPED"); t.st.mode = "throw"; t.st.tip = 1021; await m.shop.scanOnce();
+    assert.equal(m.store.mayAdvance(m.store.order("ORD-S1")), true, "S1b: after a failed first pass"); t.st.mode = "ok"; t.st.tip = 1022; await m.shop.scanOnce();
+    await m.shop.advanceStatus("ORD-S1", "DELIVERED"); assert.equal(m.store.order("ORD-S1").status, "DELIVERED"); }
+  // S1c: a catch-up to 1200 whose orders read is cut to 32 blocks opens a gap above the coin; every later pass too
+  { const t = await paidSettled("s1c"); t.st.hook = (d) => (d > 32 ? { status: true, response: { tooBig: true } } : null);
+    for (const x of [1200, 1201, 1202, 1203, 1210]) { t.st.tip = x; await t.m.shop.scanOnce(); assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-S1")), true, "S1c: tip " + x); }
+    await t.m.shop.advanceStatus("ORD-S1", "CONFIRMED"); }
+  // R4 settled before the gap opened (its coin counted at 1010, a good pass at 1013, then the cut catch-up to 1100): confirmable throughout
+  { const t = await javaSetup("r4s"); t.st.msg = [await t.seal("ORD-R4", 1009)]; const p = t.pay("ORD-R4", 1010); t.st.pay = [p]; await walk(t, 1001, 1013);
+    t.st.hook = (d) => (d > 32 ? { status: true, response: { tooBig: true } } : null); t.st.tip = 1100; await t.m.shop.scanOnce();
+    assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-R4")), true, "R4: settled before the gap"); t.st.hook = null; p.spent = true; await walk(t, 1101, 1110);
+    assert.equal(t.m.store.order("ORD-R4").paid, true); assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-R4")), true); }
+  // a confirmed or moved-on order is never held, whatever its latch; an order paid before 0.18.304 (no `settled`) is settled; not after a restart either
+  { const t = await javaSetup("latch"), S = t.m.store, base = { role: "sell", shopId: "latch", amount: "1", currency: "Minima", tokenid: "0x00", items: [{ product: "Tea", quantity: 1, unitPrice: "1" }], shipping: "", problems: [], due: "1", paid: true, coinBlock: 5000 };
+    S.upsertOrder(Object.assign({ ref: "ORD-L1", status: "CONFIRMED", settled: false }, base)); S.upsertOrder(Object.assign({ ref: "ORD-L2", status: "SHIPPED", settled: false }, base));
+    S.upsertOrder(Object.assign({ ref: "ORD-L3", status: "PAID" }, base)); S.upsertOrder(Object.assign({ ref: "ORD-L4", status: "PAID", settled: false }, base));
+    const m = await t.reopen();
+    for (const r of ["ORD-L1", "ORD-L2", "ORD-L3"]) { assert.equal(m.store.settleBlock(m.store.order(r)), 0, r); assert.equal(m.store.mayAdvance(m.store.order(r)), true, r); }
+    assert.equal(m.store.settleBlock(m.store.order("ORD-L4")), 5003, "a payment of this version still settles"); }
+  // a latched PAID order that meets a second buyer's order with its reference is unpaid and held as before, and the latch goes with the payment
+  { const t = await setupS("s1m"); t.st.pay = [payS("ORD-V", 1010, undefined, "0xF2")]; t.st.msg = [await sealS(t, t.atk, "ORD-V", 1011, "COPIER")];
+    await walk(t, 1010, 1015); assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-V")), true, "settled");
+    t.st.msg.push(await sealS(t, t.victim, "ORD-V", 1020, "VICTIM")); await walk(t, 1020, 1021);
+    const c = t.m.store.order("ORD-V"); assert.equal(c.paid, false); assert.equal(c.status, "UNCHECKED"); assert.equal(c.settled, false); assert.equal(c.problems[0], DUPV);
+    assert.equal(t.m.store.mayAdvance(c), false); assert.equal(t.m.store.mayAdvance(copyOf(t, t.victim)), false); }
+});

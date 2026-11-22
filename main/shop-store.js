@@ -224,7 +224,7 @@ function countCoins(o, ref, coins, paidTokenid) {
   const ids = Object.keys(mem.counted); if (ids.length > COUNTED_MAX) for (const k of ids.slice(0, ids.length - COUNTED_MAX)) delete mem.counted[k];   // the oldest go first; the order's own list still holds them
   o.paidTokenid = paidTokenid; o.paidAt = Date.now();
   const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
-  if (outcome === "PAID") { o.paid = true; PENDING_DUST.delete(ref); }
+  if (outcome === "PAID") { o.paid = true; o.settled = false; PENDING_DUST.delete(ref); }   // settles from here (0.18.304: settleBlock, latchSettled)
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
   return outcome;
 }
@@ -283,7 +283,7 @@ function flagDuplicate(ref, problem) {
   if (!unpay && (o.paid || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.PAID)) return false;
   ensureChecked(o); if (o.problems.includes(problem)) return false;
   o.problems = [problem].concat(o.problems); o.due = "";
-  if (unpay) { o.paid = false; o.status = "UNCHECKED"; }
+  if (unpay) { o.paid = false; o.status = "UNCHECKED"; o.settled = false; }   // the latch goes with the payment (0.18.304)
   else if (o.status !== "INQUIRY" && (STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED && o.status !== "WRONG_TOKEN") o.status = "UNCHECKED";
   flush(); return true;
 }
@@ -301,16 +301,29 @@ function handCheck(ref) {
 /** Settling (0.18.300). A payment is counted the first time it is read (as released 0.18.286), but an order paid without a proof of its secret
  *  (no secret, or stored before 0.18.297) may be a copier's, paid by another buyer's coin whose real order is mined up to 3 blocks after it.
  *  Such an order, paid, is held until a pass whose orders read succeeded has reached the block of the newest coin counted for it + 3 with
- *  every order from that coin's block up known read: by then a second order with its reference would have been read and held both
- *  (flagDuplicate). The block it is held until, or 0 when it is not held (not paid, paid by its proof, checked by hand, a coin of unknown
- *  block, or settled). `ordersRead` is the last pass's, in memory only: after a restart a paid order settles on the first good pass. */
+ *  the orders from that coin's block up taken as read (`from`, see main/shop.js scanOnce): by then a second order with its reference would
+ *  have been read and held both (flagDuplicate). The block it is held until, or 0 when it is not held (not paid, paid by its proof, checked by
+ *  hand, a coin of unknown block, confirmed or moved on, or settled). `ordersRead` is the last pass's, in memory only.
+ *  Settled is latched on the order (0.18.304, `settled`, kept on disk): the first pass with a good orders read that finds it settled
+ *  (latchSettled) settles it for good, so a later failed or cut orders read, or a restart, never puts a settled order back to settling (it did:
+ *  a paid order could not be confirmed, and a CONFIRMED one not shipped, until the next good pass). Only the payment going (flagDuplicate's
+ *  unpay) takes the latch away. An order paid before 0.18.304 carries no `settled` and is settled, as released 0.18.286 had it. */
 const PAY_SETTLE = 3;
-let ordersRead = null;   // { tip, from }: the last pass's orders read reached `tip`, every order from block `from` up is known; null: it failed
+let ordersRead = null;   // { tip, from }: the last pass's orders read reached `tip`, the orders from block `from` up are taken as read; null: it failed
 function setOrdersRead(r) { ordersRead = r && Number.isSafeInteger(r.tip) ? { tip: r.tip, from: Number(r.from) || 0 } : null; }
 function settleBlock(o) {
-  if (!o || o.role !== "sell" || !o.paid || o.commit || o.handChecked || !Number.isSafeInteger(o.coinBlock) || o.coinBlock <= 0) return 0;
+  if (!o || o.role !== "sell" || !o.paid || o.commit || o.handChecked || o.settled !== false || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.CONFIRMED
+    || !Number.isSafeInteger(o.coinBlock) || o.coinBlock <= 0) return 0;
   const n = o.coinBlock + PAY_SETTLE;
   return ordersRead && ordersRead.tip >= n && ordersRead.from <= o.coinBlock ? 0 : n;
+}
+/** After a pass whose orders read succeeded (0.18.304): every paid order it finds settled is settled for good. */
+function latchSettled() {
+  ensureLoaded(); if (!ordersRead) return false;
+  let any = false;
+  for (const o of Object.values(mem.orders)) if (o && o.settled === false && o.paid && !settleBlock(o)) { o.settled = true; any = true; }
+  if (any) flush();
+  return any;
 }
 /** May the vendor confirm / ship / deliver this order? Paid by the listing's figure and settled, or checked by hand. */
 function mayAdvance(o) { return !!(o && (o.handChecked || (o.paid && !settleBlock(o)))); }
@@ -328,7 +341,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, settleBlock, setOrdersRead, ensureChecked,
+  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, settleBlock, setOrdersRead, latchSettled, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
   _money: { decCmp, decGte, decAdd, decSub, payableTotal }, PENDING_MAX,
   _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }

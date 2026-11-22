@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.304] — miniMall: a settled order stays settled; a confirmed order is never held
+
+- 0.18.300 settled an order without a proof of its secret by the last pass's orders read alone, kept in memory and with nothing kept on the order, and the hold did not look at the order's status. So a paid, settled order went back to settling after one failed orders read (it could not be confirmed until the next good pass), a CONFIRMED order could not be shipped after a restart until the first good pass, and a catch-up whose orders read was cut put a settled order back to settling (review-desktop-r4 S1a, S1b, S1c, R4; released 0.18.286 confirmed and shipped them). Now the first pass with a good orders read that finds a paid order settled marks it settled on the order (`settled`, kept on disk), and no failed or cut read, and no restart, takes that away. An order CONFIRMED or later is never held. An order paid before this version (no `settled` on it) is settled, as released.
+- Kept: a fresh order without a secret still settles until a good orders read is 3 blocks past its newest coin; a PAID order not moved on that meets a second buyer's order with its reference is still unpaid and held for a check by hand (0.18.289), and that takes its settled mark away with the payment.
+- Tests (scripts/shop-test.cjs): S1a, S1b, S1c and R4 settled before the gap: confirmable, shippable and deliverable throughout; a CONFIRMED or SHIPPED order with the mark unset is not held; an order paid before this version is settled; a latched order met by a second buyer's order is unpaid and held (fails on 0.18.303: "S1a: not held again by a failed read").
+
 ## [0.18.303] — Vestr: main/vestr.js names the covenant's address whole
 
 - Its header wrote the shared covenant's address shortened ("0x3C43…C8BE"), which cannot be copied or looked up. It now reads 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE, the file's own CONTRACT. A comment only: nothing Vestr does changes.
