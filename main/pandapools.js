@@ -34,6 +34,16 @@ const MKT_BOOK = "https://api.mexc.com/api/v3/ticker/bookTicker?symbol=MINIMAUSD
 const MKT_MIN_USDT = 25, MKT_FRESH_MS = 5 * 60000, MKT_GAP_MS = 30000;
 let mktMid = 0, mktAt = 0, mktLastTry = 0, mktFetching = false;
 function isMarketFed(tid) { return !!tid && String(tid).toLowerCase() === USDT_TOKENID.toLowerCase(); }
+// PRIVATE-CHAIN PROOF SEAM (0.19.383): the token createPool makes pools of. Always MxUSD in the app. Only the manual proof
+// scripts/e2e-pandapools-private-chain.cjs changes it, to a token it mints on a throwaway -test chain (MxUSD does not
+// exist there). Unreachable in the packaged app: refused when app.isPackaged, and neither main.js nor any IPC handler
+// or preload names it (scripts/pandapools-e2e-seam.test.cjs holds both true).
+let createToken = USDT_TOKENID;
+function _setCreateTokenForPrivateChainProof(tokenid) {
+  if (app.isPackaged) throw new Error("The private-chain proof seam is not available in a packaged app.");
+  if (!/^0x[0-9A-Fa-f]{64}$/.test(String(tokenid || ""))) throw new Error("A full token id is needed.");
+  createToken = String(tokenid);
+}
 
 const emitter = new EventEmitter();
 let ctx = null;                        // the vm context holding the reused globals (Book, PoolMgr, Store, Curve, Router, PP)
@@ -668,15 +678,15 @@ function nodeDecimals(tokenid) {
  *  execution deadline stamped when the slot is entered. */
 async function createPool(tokenid, tokDecimals, x0, y0) {
   await init();
-  if (!isMarketFed(tokenid)) throw new Error("PandaPools creates MINIMA / MxUSD pools only (the token with a market price). Nothing was sent.");
+  if (!isMarketFed(tokenid) && !(createToken !== USDT_TOKENID && String(tokenid).toLowerCase() === createToken.toLowerCase())) throw new Error("PandaPools creates MINIMA / MxUSD pools only (the token with a market price). Nothing was sent.");
   if (!plainAmount(x0) || !plainAmount(y0)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the queue (0.19.271)
   return queuedAction("Creating the pool", function (resolve, reject) {
     var deadline = execDeadline();
-    nodeDecimals(USDT_TOKENID).then(caught(reject, "Creating the pool", function (dec) {
+    nodeDecimals(createToken).then(caught(reject, "Creating the pool", function (dec) {
       if (dec == null) { reject(new Error("The token's decimals could not be read from the node. Nothing was sent.")); return; }
       if (tokDecimals != null && String(tokDecimals) !== "" && Number(tokDecimals) !== dec) { reject(new Error("The node says this token has " + dec + " decimals, not " + tokDecimals + ". Nothing was sent; open Create again.")); return; }
       if (!ready || !ctx || Date.now() > deadline) { reject(new Error("Creating the pool: timed out before the token was read — nothing was posted. Retry.")); return; }
-      ctx.PoolMgr.createPool(USDT_TOKENID, dec, x0, y0, {
+      ctx.PoolMgr.createPool(createToken, dec, x0, y0, {
       created: caught(reject, "Creating the pool", function (p, txpowid) {
         ctx.Store.ownRecord(p);                                         // recovery recipe (Layer 1)
         ctx.Store.lpRecord(p.address, p.reserveM, p.reserveT, lastTip); // LP fee/IL baseline
@@ -958,5 +968,5 @@ module.exports = {
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
   onNodeRestarted, lastNodeFailure, status, activeWork, ownPools, setAsideStore,
-  _setRunner, _setDataDir, _stashQuote: function (q) { var id = ++quoteCounter; lastQuotes[id] = q; return id; }, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed, _setWaits, NO_ANSWER,
+  _setRunner, _setDataDir, _setCreateTokenForPrivateChainProof, _stashQuote: function (q) { var id = ++quoteCounter; lastQuotes[id] = q; return id; }, _labelById: labelById, _relabelSwap: relabelSwap, _depositUsed: depositUsed, _setWaits, NO_ANSWER,
 };
