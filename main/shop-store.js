@@ -28,6 +28,8 @@ function ensureLoaded() {
     const j = JSON.parse(raw);
     if (j) { mem.shops = j.shops || {}; mem.orders = j.orders || {}; mem.chat = j.chat || {}; mem.meta = j.meta || {}; mem.counted = j.counted || {}; }
     for (const o of Object.values(mem.orders)) migrate(o);
+    // the waiting list of 0.18.299 (never released), gone since 0.18.300: never read, and not written back (0.18.308)
+    if (Object.hasOwn(mem.meta, "payWait")) { delete mem.meta.payWait; persistSoon(); }
   } catch (e) {
     // Source of truth — never silently clobber a corrupt file; preserve it and start fresh.
     try { fs.renameSync(filePath(), filePath() + ".corrupt-" + Date.now()); } catch (e2) {}
@@ -314,7 +316,7 @@ function noteNoProof(ref, note) {
 /** Settling (0.18.300). A payment is counted the first time it is read (as released 0.18.286), but an order paid without a proof of its secret
  *  (no secret, or stored before 0.18.297) may be a copier's, paid by another buyer's coin whose real order is mined up to 3 blocks after it.
  *  Such an order, paid, is held until a pass whose orders read succeeded has reached the block of the newest coin counted for it + 3 with
- *  the orders from that coin's block up taken as read (`from`, see main/shop.js scanOnce): by then a second order with its reference would
+ *  the orders from that coin's block up taken as read (`from`, see main/shop.js scanOnce, which says where that is not so): by then a second order with its reference would
  *  have been read and held both (flagDuplicate). The block it is held until, or 0 when it is not held (not paid, paid by its proof, checked by
  *  hand, a coin of unknown block, confirmed or moved on, or settled). `ordersRead` is the last pass's, in memory only.
  *  Settled is latched on the order (0.18.304, `settled`, kept on disk): the first pass with a good orders read that finds it settled

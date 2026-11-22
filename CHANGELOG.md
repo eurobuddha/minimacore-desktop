@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.308] — miniMall: the review's nits (a coin given up on flags the order it would pay; held in the list; no shortened id)
+
+- A payment coin given up on after three passes that threw (0.18.295) put its problem on the order kept under the coin's reference, also when the coin proves another buyer's copy of it (ref~buyer): it now lands on the order the coin would pay, whenever that is known. One whose reference could not be read names no order, so no check by hand cleared it from the status line: the status line's Dismiss now clears those. At most 64 coins given up on are said; the oldest go first (each was logged with its error, and its order keeps its problem).
+- The order list showed a settling order as plain "paid", and only its page said it was held: the list row now carries a "held" mark beside its status.
+- A shop.json written by the never-released 0.18.299 may carry its waiting list (`payWait`): it is dropped on load, never read.
+- Comments: the settling comments said every order from the coin's block up was known read. That is not so on a first pass whose orders read was cut, nor after a backfill that ended with blocks it could not read: there an order settles as if those blocks had been read, as released 0.18.286 paid it at sight. The comments now say so; nothing there changes.
+- No shortened id: the 0.18.303 entry above and the test's comment quoted the covenant's old shortened address, and renderer/app.js's Vestr header named it shortened; the header now names 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE whole. The test of main/vestr.js checks that its pattern finds a shortened id, built in the test from CONTRACT's own first and last digits, so no shortened id is written in the test either.
+- Tests (scripts/shop-test.cjs, scripts/inject-test.cjs): the coin given up on lands on the victim's copy, not the copier's order; 70 coins whose reference cannot be read: the newest 64 said, Dismiss clears them; a settling order is held in the list; payWait is dropped and not written back (fails on 0.18.307).
+
 ## [0.18.307] — miniMall: a check by hand made while an order settles does not outlast its hold
 
 - A settling order can be checked by hand to move it on before its hold runs out (0.18.300). That check made it immune to the second order its hold was waiting for: the vendor checked a copier's settling order, the real order without a secret came 2 blocks later, and the copier's order stayed PAID and confirmable (review-desktop-r4 S3). The check now keeps the block the hold would have run to; a second order without a secret mined up to that block still unpays the order and holds both for a check by hand, unless it was already confirmed or moved on. The check-by-hand question for a settling order now says so: "Another order with this reference can still arrive until block N; it will put both orders back on a check by hand."
@@ -32,7 +41,7 @@ matching [GitHub Release](../../releases).
 
 ## [0.18.303] — Vestr: main/vestr.js names the covenant's address whole
 
-- Its header wrote the shared covenant's address shortened ("0x3C43…C8BE"), which cannot be copied or looked up. It now reads 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE, the file's own CONTRACT. A comment only: nothing Vestr does changes.
+- Its header wrote the shared covenant's address shortened, which cannot be copied or looked up. It now reads 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE, the file's own CONTRACT. A comment only: nothing Vestr does changes.
 - Tests (scripts/inject-test.cjs): the header names CONTRACT whole and no hexadecimal id in the file is shortened (fails on 0.18.302).
 
 ## [0.18.302] — miniMall: a payment coin given up on is no longer said once its order is checked by hand

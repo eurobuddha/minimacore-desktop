@@ -1533,3 +1533,33 @@ test("S3: an order checked by hand while settling is still held by a second orde
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes("\\n\\nAnother order with this reference can still arrive until block \" + d.settling.block + \"; it will put both orders back on a check by hand.\""), "the question says so");
 });
+
+// ---- 0.18.308: the review's nits (review-desktop-r4 G5) ----
+test("a coin given up on flags the order it would pay (another buyer's copy too); one that names no order is cleared by Dismiss; at most 64 are said", async () => {
+  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
+  try {
+    // the victim's copy ORD-V~victim (with a secret) is the order the coin proves; the copier's ORD-V is held under the reference
+    { const S = newSecret(), t = await setupS("gv"); t.st.msg = [await sealS(t, t.atk, "ORD-V", 1009, "COPIER"), await sealS(t, t.victim, "ORD-V", 1010, "VICTIM", S)]; await walk(t, 1009, 1010);
+      t.st.pay = [payS("ORD-V", 1011, proofT(S), "0xFE01")]; const real = t.m.store.recordPayment; t.m.store.recordPayment = function () { throw new Error("poison"); };
+      try { await walk(t, 1011, 1013); } finally { t.m.store.recordPayment = real; }
+      const v = copyOf(t, t.victim), c = t.m.store.order("ORD-V"), P = "payment coin 0xFE01 could not be judged: check by hand";
+      assert.ok(v.problems.includes(P), "on the order the coin would pay: " + v.problems.join(" | ")); assert.ok(!c.problems.includes(P), "not on the copier's");
+      t.m.shop.vendorCheck(v.ref); assert.deepEqual(t.m.shop.scanState().gaveUp, [], "checking that order clears it"); }
+    // a coin whose reference cannot be read throws before it names an order: said, and cleared by Dismiss; 70 of them: the newest 64 said
+    { const t = await setupS("gn"); const bad = (i) => { const c = { coinid: "0xBB" + (100 + i), tokenid: "0x00", amount: "1", created: 1011 }; Object.defineProperty(c, "state", { get() { throw new Error("unreadable"); } }); return c; };
+      t.st.pay = Array.from({ length: 70 }, (_, i) => bad(i)); await walk(t, 1011, 1013);
+      const st = t.m.shop.scanState(); assert.equal(st.gaveUp.length, 64); assert.ok(!st.gaveUp.includes("0xBB100") && st.gaveUp.includes("0xBB169"), "the oldest go first");
+      assert.equal(st.gaveUpNoOrder, true); assert.ok(st.text.includes("Payment coin 0xBB169 could not be judged: check by hand."));
+      t.m.shop.dismissUnread(); assert.deepEqual(t.m.shop.scanState().gaveUp, []); assert.equal(t.m.shop.scanState().text, "");
+      const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"); assert.ok(app.includes("|| scan.gaveUpNoOrder ? ` <button"), "the Dismiss button is offered for them"); }
+  } finally { console.error = err; }
+});
+test("the order list says a settling order is held; a stale waiting list of the never-released 0.18.299 is dropped on load", async () => {
+  const t = await setupS("held"); t.st.msg = [await sealS(t, t.victim, "ORD-H", 1009, "VICTIM")]; t.st.pay = [payS("ORD-H", 1010, undefined, "0xFE01")];
+  await walk(t, 1009, 1011); assert.equal(t.m.shop.ordersList().find(o => o.ref === "ORD-H").held, true, "settling: held in the list");
+  await walk(t, 1012, 1013); assert.equal(t.m.shop.ordersList().find(o => o.ref === "ORD-H").held, false);
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"); assert.ok(app.includes("${o.held ? ` <span class=\"shop-pill warn\">held</span>` : \"\"}"), "the list row shows it");
+  t.m.store.setMeta("payWait", [{ coin: "0xFE09", block: 1010, ref: "ORD-H" }]); const m = await t.reopen();
+  assert.equal(m.store.getMeta("payWait"), undefined, "ignored"); m.store.flush();
+  assert.ok(!fs.readFileSync(path.join(DIR, "shop.json"), "utf8").includes("payWait"), "and not written back");
+});

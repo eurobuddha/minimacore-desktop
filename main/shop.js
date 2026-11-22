@@ -75,6 +75,9 @@ function proofOf(secret) {
 // never moved. The count is kept in memory, for this session: after a restart a coin gets JUDGE_TRIES passes again.
 // One try per pass: a coin that threw moves nothing, so no backfill read of the same pass judges it again.
 const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Map();   // coin id -> passes that threw; coin id given up on -> the order flagged (0.18.302)
+// at most GAVE_UP_MAX coins given up on are said (0.18.308), the oldest go first: each was logged with its error and its order (when one is known)
+// keeps its problem; one that names no order (its reference could not be read) is cleared by the status line's Dismiss
+const GAVE_UP_MAX = 64;
 let judgeFailed = [], lastJudgeFailed = [];
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
@@ -472,7 +475,8 @@ async function scanPayments(depth) {
       seenPayCoins.delete(id);
       const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
       if (n < JUDGE_TRIES) { console.error("[miniMall] payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
-      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.set(String(id), ref);
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.delete(String(id)); gaveUpPay.set(String(id), ref);
+      while (gaveUpPay.size > GAVE_UP_MAX) gaveUpPay.delete(gaveUpPay.keys().next().value);
       console.error("[miniMall] payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
       try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { console.error("[miniMall] the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
       return "";
@@ -484,6 +488,7 @@ async function scanPayments(depth) {
     setRef(ref);
     // the order this coin pays, by its proof in port 2 (0.18.297), and the orders with a secret it does not prove
     const pay = store.payee(ref, statePort(c, 2)), o = pay.order && !pay.order.paid ? pay.order : null;
+    if (pay.order) setRef(pay.order.ref);   // a coin given up on from here flags the order it would pay, another buyer's copy too (0.18.308)
     if (!o && !pay.unproven.length) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
     // an order with a secret is paid only by coins proving it (0.18.297): a coin that pays no order at all is one NOTE on each such unpaid order
@@ -522,9 +527,13 @@ async function scanOnce() {
     passServed = depth; readFailed = false; judgeFailed = [];
     const stuck = () => readFailed || judgeFailed.length > 0;   // a coin that could not be judged moves nothing either (0.18.295)
     const a = await scanOrders(depth).catch(failed);
-    // what a payment's verdict waits for (0.18.300, store.settleBlock): this pass's orders read reached the tip, and with what earlier passes
-    // read (down to a pending backfill's floor) every order from `from` up to the tip is known; cut above it, only what this read reached. A
-    // failed one: none. Payments are read and counted in every pass whatever the orders read did (as released 0.18.286).
+    // what a payment's verdict waits for (0.18.300, store.settleBlock): this pass's orders read reached the tip, and the orders from block `from`
+    // up are taken as read: this read's reach when it did not get down to the last pass's tip; while a backfill is pending, its floor (or this
+    // read's reach, if lower). Otherwise `from` is 0 and everything below is taken as read. That is so when the last pass's tip was reached and no
+    // gap is pending, but NOT on a first pass (no cursor) whose read was cut, nor after a backfill that ended with blocks it could not read (said
+    // as "may not have been read" below block N): there an order settles as if those blocks had been read, as released 0.18.286 paid it at
+    // sight (0.18.308: this comment said every order from `from` up was known). A failed read: nothing is taken as read. Payments are read and
+    // counted in every pass whatever the orders read did (as released 0.18.286).
     const reach = tip - passServed, f0 = Number(store.getMeta("bfFloor")) || 0, t0 = Number(store.getMeta("bfTarget")) || 0;
     store.setOrdersRead(!readFailed && tip ? { tip, from: !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0 } : null);
     const b = await scanPayments(depth).catch(failed);
@@ -633,7 +642,7 @@ function payState(o) {
 }
 function ordersList() {
   return store.orders().map(o => Object.assign({ ref: o.ref, role: o.role, shopId: o.shopId, shopName: o.shopName, status: o.status,
-    amount: o.amount, due: o.due || "", unchecked: !!(o.problems && o.problems.length), currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread }, payState(o))).sort((a, b) => (b.date || 0) - (a.date || 0));
+    amount: o.amount, due: o.due || "", unchecked: !!(o.problems && o.problems.length), held: !!store.settleBlock(o), currency: o.currency, tokenid: o.tokenid, paid: !!o.paid, date: o.date, unread: !!o.unread }, payState(o))).sort((a, b) => (b.date || 0) - (a.date || 0));
 }
 function orderDetail(ref) {
   const o = store.order(ref); if (!o) return null; store.markOrderRead(ref); if (o.role === "sell") store.ensureChecked(o);
@@ -678,14 +687,15 @@ function scanState() {
   // a payment coin that could not be judged (0.18.295), its id whole: tried again, or left for a check by hand
   const judgeText = lastJudgeFailed.map(id => "Payment coin " + id + " could not be judged. It is judged again on the next block.")
     .concat([...gaveUpPay.keys()].map(id => "Payment coin " + id + " could not be judged: check by hand.")).join(" ");
-  return { readFailed: lastPassFailed || lastStepFailed, judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay.keys()], catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
+  return { readFailed: lastPassFailed || lastStepFailed, judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay.keys()], gaveUpNoOrder: [...gaveUpPay.values()].some(r => !r), catchingUpTo: target, unreadBelow: below, unreadShown: !!shown, skipped,
     // the recent window is what fails when a pass fails (a backfill step reads only inside the node's tree), so it is said as recent
     text: [lastPassFailed ? "Recent orders could not be read: the node did not answer. They are read again on the next block."
       : lastStepFailed ? "Older orders could not be read yet: the node did not answer. They are read again on the next block."
       : target ? "Reading orders and payments from while the app was closed (back to block " + target + ")." : belowText, judgeText, skippedText].filter(Boolean).join(" ") };   // a payout address skipped as not valid, whole (0.18.227)
 }
 /** The unread notice was seen (0.18.277): hidden until a new one; the fact stays in the log. */
-function dismissUnread() { store.setMeta("unreadDismissed", Number(store.getMeta("unreadBelow")) || 0); emitter.emit("update"); return { ok: true }; }
+// and a coin given up on that names no order (0.18.308): no order to check by hand clears it
+function dismissUnread() { store.setMeta("unreadDismissed", Number(store.getMeta("unreadBelow")) || 0); for (const [c, r] of gaveUpPay) if (!r) gaveUpPay.delete(c); emitter.emit("update"); return { ok: true }; }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 
 module.exports = {

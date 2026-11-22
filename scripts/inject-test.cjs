@@ -523,9 +523,13 @@ test("Vestr collect (V5): a pending reply to txnpost is not 'collected'", async 
   R.done();
 });
 
-// 0.18.303: the covenant's address is written whole where main/vestr.js names it (it was "0x3C43…C8BE"): an id is for copying
+// 0.18.303: the covenant's address is written whole where main/vestr.js names it (it was written shortened): an id is for copying
 test("main/vestr.js names the covenant's address whole, and no hexadecimal id in it is shortened", () => {
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "vestr.js"), "utf8");
   assert.ok(src.includes("deploys to " + require("../main/vestr.js").CONTRACT + " "), "the comment names CONTRACT whole");
-  assert.ok(!/0x[0-9A-Fa-f]+(…|\.\.\.)[0-9A-Fa-f]*/.test(src), "no shortened id");
+  const shortened = /0x[0-9A-Fa-f]+(…|\.\.\.)[0-9A-Fa-f]*/;
+  assert.ok(!shortened.test(src), "no shortened id");
+  // the check finds what 0.18.302 wrote: built here from CONTRACT's own first and last digits (0.18.308), so no shortened id is in this file either
+  const C = require("../main/vestr.js").CONTRACT;
+  for (const cut of ["\u2026", "..."]) assert.ok(shortened.test(C.slice(0, 6) + cut + C.slice(-4)), "the check would find " + JSON.stringify(cut));
 });

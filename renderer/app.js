@@ -2864,13 +2864,13 @@ async function renderShopOrders() {
   if (shopOrderRef) return renderShopOrderDetail(shopOrderRef);
   const orders = await api.shopOrders().catch(() => []);
   const scan = await api.shopScanState().catch(() => null);
-  const scanLine = scan && scan.text ? `<div class="shop-warn" style="margin-bottom:8px">${esc(scan.text)}${scan.unreadShown && !scan.readFailed && !scan.catchingUpTo ? ` <button class="btn btn--sm btn--outline" id="shopUnreadOk">Dismiss</button>` : ""}</div>` : "";   // the unread notice can be dismissed (0.18.277)
+  const scanLine = scan && scan.text ? `<div class="shop-warn" style="margin-bottom:8px">${esc(scan.text)}${(scan.unreadShown && !scan.readFailed && !scan.catchingUpTo) || scan.gaveUpNoOrder ? ` <button class="btn btn--sm btn--outline" id="shopUnreadOk">Dismiss</button>` : ""}</div>` : "";   // the unread notice can be dismissed (0.18.277)
   const id = shopIdentity ? idHtml(shopIdentity.publicId) : "…";   // RULE 1: the whole id, one click to copy (axShort left with the AtomiX panel)
   const wireDismiss = () => { const b = el("shopUnreadOk"); if (b) b.onclick = async () => { await api.shopDismissUnread().catch(() => {}); renderShopOrders(); }; };
   if (!orders.length) { host.innerHTML = scanLine + `<div class="card"><div class="empty">No orders yet. Orders to your shops (Selling) and orders you place (Buying) both land here.<br>Your shop id: ${id}</div></div>`; wireDismiss(); return; }
   const row = o => `<div class="card shop-order" data-oref="${esc(o.ref)}"><div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><span class="mono">${esc(o.ref)}</span>${o.unread ? ' <span class="shop-dot"></span>' : ""}<div class="view__desc" style="margin:2px 0 0">${esc(o.shopName || "")}</div></div>
-      <div style="text-align:right"><div class="mono">${esc(o.role === "sell" && o.due ? o.due : o.amount)} ${esc(ShopRules.cur(o.currency))}${o.role === "sell" && o.unchecked ? " (buyer's figure)" : ""}</div>${shopStatusPill(o.status, o.unpaid)}</div></div></div>`;
+      <div style="text-align:right"><div class="mono">${esc(o.role === "sell" && o.due ? o.due : o.amount)} ${esc(ShopRules.cur(o.currency))}${o.role === "sell" && o.unchecked ? " (buyer's figure)" : ""}</div>${shopStatusPill(o.status, o.unpaid)}${o.held ? ` <span class="shop-pill warn">held</span>` : ""}</div></div></div>`;   // paid, still settling (0.18.308): said in the list too
   const sec = (title, list) => list.length ? `<div class="ax-seclabel">${title}</div>` + list.map(row).join("") : "";
   host.innerHTML = scanLine + sec("SELLING · orders to your shops", orders.filter(o => o.role === "sell")) + sec("BUYING · orders you placed", orders.filter(o => o.role === "buy"));
   host.querySelectorAll("[data-oref]").forEach(r => r.onclick = () => { shopOrderRef = r.dataset.oref; renderShopOrders(); });
@@ -3167,7 +3167,7 @@ function casinoActivity(line, cls) { CasinoPanel.activity(line, cls); }
 function casinoAgeGate(onCertify) { CasinoPanel.ageGate(onCertify); }
 function resetCasinoState() { CasinoPanel.reset(); }
 
-// ============================ Vestr (token vesting — shared covenant 0x3C43…) ============================
+// ============================ Vestr (token vesting — shared covenant 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE) ============================
 // Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,
 // collectable per grace cadence. Node computes the exact collectable (main/vestr.js runscript). Merged layout.
 let vestrView = "list";          // list | create | calc
