@@ -378,10 +378,13 @@ async function scanPayments(depth) {
   }
   if (!any) return null;
   capSeen();
-  // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it
-  // completes. Within one block the larger coin first, so the remainder comes last.
+  // Oldest first (0.19.200, as released 0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one
+  // block by coin id (0.19.359, as released 0.18.305): the larger coin went first by Number() of its amount, which compared amounts of different
+  // tokens and rounded long decimals; nothing depends on it, since a remainder judged before its payment is gathered as dust and counted on the
+  // second look below.
+  const cid = (c) => String((c && c.coinid) || "").toLowerCase();
   const coins = listed.map((c, i) => ({ c, i })).sort((a, b) => (Number(a.c && a.c.created) || 0) - (Number(b.c && b.c.created) || 0)
-    || (b.c && a.c && b.c.amount != null && a.c.amount != null ? (Number(coinAmount(b.c)) - Number(coinAmount(a.c))) : 0) || (b.i - a.i)).map(x => x.c);
+    || (cid(a.c) < cid(b.c) ? -1 : cid(a.c) > cid(b.c) ? 1 : 0) || (b.i - a.i)).map(x => x.c);
   let changed = false;
   const judge = (c) => {
     const id = c && c.coinid; if (!id || seenPayCoins.has(id)) return "";
@@ -394,9 +397,11 @@ async function scanPayments(depth) {
       // the order this coin pays, by its proof in port 2 (0.19.352, as released 0.18.297), and the orders with a secret it does not prove
       const pay = store.payee(ref, statePort(c, 2)), o = pay.order; if (!o && !pay.unproven.length) return "";
       const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
-      // an order with a secret is paid only by coins proving it (0.19.352): a coin that pays no order at all is one problem on each such order
-      // with its reference, once per order, never on one already paid by its proof (a coin counted for another order is that order's)
-      if (!o) { for (const u of pay.unproven) if (!u.paid && !(u.problems || []).some(p => String(p).startsWith(NO_PROOF))) store.flagDuplicate(u.ref, noProof(String(id))); return ""; }   // not marked seen: the order it proves may still be read
+      // an order with a secret is paid only by coins proving it (0.19.352): a coin that pays no order at all is one NOTE on each such unpaid order
+      // with its reference, the first coin's id whole (0.19.359, as released 0.18.305: it was a problem, which held the order, so a stranger's coin
+      // with the reference, a worthless token or dust, stopped the proved payment from paying it). The note holds nothing: the order is paid by
+      // its proved coins as ever, and an unpaid one with a note can be checked by hand (a buyer who paid by hand without the proof).
+      if (!o) { for (const u of pay.unproven) store.noteNoProof(u.ref, noProof(String(id))); return ""; }   // not marked seen: the order it proves may still be read
       seenPayCoins.add(id);
       if (o.paid) return "";
       // a payment older than its order never pays it automatically (0.19.339, as released 0.18.285): held for a check by hand, the coin id whole

@@ -1040,7 +1040,8 @@ test("a copier's order with a copied reference is never paid by the real buyer's
       await walkTo(st, 1010, 1016);
       const c = store.order("ORD-V"); neverPaid(c); paidByItsCoin(store.order("ORD-V~" + VICTIM));
       // an order with a secret is not held by another's order; this one is held by the real payment, read before the real order (0.19.354: at sight)
-      if (atkSecret) assert.deepEqual(c.problems, [NOPROOF(V)], tag); else assert.equal(c.problems[0], DUPV, tag + ": an order without one is held as before");
+      // CHANGED on purpose (0.19.359, as released 0.18.305): the coin that does not prove it is a note on it, never a problem
+      if (atkSecret) { assert.deepEqual(c.problems, [], tag); assert.deepEqual(c.notes, [NOPROOF(V)], tag); } else assert.equal(c.problems[0], DUPV, tag + ": an order without one is held as before");
       assert.equal(shop.orderDetail("ORD-V~" + VICTIM).sharedRef, null, "its payments are counted on it"); });
     // real first: the order, its payment, then the copier's order
     await copyRig(async (st) => { st.pay.push(sPay("ORD-V", 1010, P, V)); st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM", S), sOrder(ATK, "ORD-V", 1011, "COPIER", atkSecret));
@@ -1064,7 +1065,7 @@ test("a copier's order with a copied reference is never paid by the real buyer's
     await copyRig(async (st) => { st.msg.push(sOrder(VICTIM, "ORD-V", 1003, "VICTIM", S), sOrder(ATK, "ORD-V", 2490, "COPIER", atkSecret)); st.pay.push(sPay("ORD-V", 1005, P, V));
       for (let i = 0; i < 6; i++) { jTip(st, 2500 + i); await shop.scanOnce(); }
       const c = store.order("ORD-V"); assert.ok(c && c.delivery === "COPIER"); assert.equal(c.paid, false); assert.ok(!(c.coins || []).length);
-      if (atkSecret) assert.deepEqual(c.problems, [NOPROOF(V)], "the copier's order with a secret: the payment does not prove it");
+      if (atkSecret) { assert.deepEqual(c.problems, []); assert.deepEqual(c.notes, [NOPROOF(V)], "the copier's order with a secret: the payment does not prove it (a note, 0.19.359)"); }
       else assert.deepEqual(c.problems, [], "the copier's order with no secret: a proved coin never pays it, so nothing holds it"); });
   }
 });
@@ -1129,11 +1130,12 @@ test("two orders with one reference: different secrets are paid each by its own 
     assert.deepEqual(store.order("ORD-V").problems, []); assert.deepEqual(store.order("ORD-V~" + ATK).problems, [], "neither is held by the other");
     assert.equal(store.order("ORD-V~" + ATK).paid, true, "B paid by its own coin"); assert.equal(store.mayAdvance(store.order("ORD-V~" + ATK)), true, "and confirmable at once: its payment proves its secret");
     await walkTo(st, 1012, 1012);
-    assert.deepEqual(store.order("ORD-V").problems, [NOPROOF("0xFE51")], "one problem on the unpaid order, the first coin's id whole, not one per coin");
-    assert.deepEqual(store.order("ORD-V~" + ATK).problems, [], "an order already paid by its proof is not disturbed"); assert.equal(store.order("ORD-V~" + ATK).paid, true);
+    // CHANGED on purpose (0.19.359, as released 0.18.305): a note, never a problem (it held the order, so its own proved coin then could not pay it)
+    assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xFE51")], "one note on the unpaid order, the first coin's id whole, not one per coin"); assert.deepEqual(store.order("ORD-V").problems, []);
+    assert.deepEqual(store.order("ORD-V~" + ATK).problems, [], "an order already paid by its proof is not disturbed"); assert.equal(store.order("ORD-V~" + ATK).notes, undefined); assert.equal(store.order("ORD-V~" + ATK).paid, true);
     await walkTo(st, 1013, 1016);
-    const a2 = store.order("ORD-V"); assert.deepEqual(a2.coins, ["0xfe53"], "A's own coin counted on it, the stray ones on nothing"); assert.equal(a2.status, "UNCHECKED", "and held by the one problem");
-    assert.equal(store.handCheck("ORD-V"), true); });
+    const a2 = store.order("ORD-V"); assert.deepEqual(a2.coins, ["0xfe53"], "A's own coin counted on it, the stray ones on nothing"); assert.equal(a2.status, "PAID", "and paid by it: the note holds nothing");
+    assert.equal(store.mayAdvance(a2), true); assert.deepEqual(a2.notes, [NOPROOF("0xFE51")], "the note stays shown"); });
   // the same buyer's order sent again (the same secret): one order, paid once
   await copyRig(async (st) => { const A = newSecret();
     st.msg.push(sOrder(VICTIM, "ORD-V", 1011, "VICTIM", A), sOrder(VICTIM, "ORD-V", 1009, "VICTIM", A)); st.pay.push(sPay("ORD-V", 1010, proofT(A), "0xFE60"));
@@ -1282,4 +1284,48 @@ test("S1a, S1b, S1c, R4: a settled order stays settled through a failed orders r
     st.msg.push(sOrder(VICTIM, "ORD-V", 1020, "VICTIM")); await walkTo(st, 1020, 1021);
     const c = store.order("ORD-V"); assert.equal(c.paid, false); assert.equal(c.status, "UNCHECKED"); assert.equal(c.settled, false); assert.equal(c.problems[0], DUPV);
     assert.equal(store.mayAdvance(c), false); assert.equal(store.mayAdvance(store.order("ORD-V~" + VICTIM)), false); });
+});
+
+// ---- 0.19.359 (as released 0.18.305): a coin without an order's proof is a note on it, never a hold (review-desktop-r4 S2a, S2b, S2c, S2d, S4). It
+// went through flagDuplicate (due cleared, UNCHECKED), so a stranger's coin with the reference stopped the proved payment from paying the order;
+// released 0.18.286 paid all three. Within one block coins are judged by coin id, never by Number() of amounts (of different tokens, rounded) ----
+test("S2a, S2b, S2c, S2d: a coin with the reference and without the order's proof is a note, never a hold: the proved payment pays the order; S4: a copier's order is never paid", async () => {
+  const paid = (o, coins, note) => { assert.equal(o.paid, true, o.problems.join(" | ")); assert.equal(o.status, "PAID"); assert.deepEqual(o.problems, []); assert.deepEqual(o.coins, coins); assert.equal(o.due, "1.5");
+    assert.deepEqual(o.notes, note ? [NOPROOF(note)] : undefined, "the note, the first coin's id whole"); };
+  const run = (fn) => copyRig(async (st) => { const S = newSecret(); st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM", S)); await fn(st, proofT(S)); });
+  // S2a: a worthless token's coin with the reference and no proof, the same block as the proved payment
+  await run(async (st, P) => { st.pay.push(sPay("ORD-V", 1010, P, "0xFE01"), Object.assign(sPay("ORD-V", 1010, undefined, "0xBAD1", "0.000000001"), { tokenid: "0x" + "AB".repeat(32), tokenamount: "1000000" }));
+    await walkTo(st, 1001, 1020); paid(store.order("ORD-V"), ["0xfe01"], "0xBAD1"); assert.equal(store.mayAdvance(store.order("ORD-V")), true); await shop.advanceStatus("ORD-V", "CONFIRMED"); });
+  // S2b: a dust coin with no proof between a half payment and its top-up
+  await run(async (st, P) => { st.pay.push(sPay("ORD-V", 1010, P, "0xFE01", "0.75")); await walkTo(st, 1001, 1012); assert.equal(store.order("ORD-V").status, "UNDERPAID");
+    st.pay.push(sPay("ORD-V", 1013, undefined, "0xBAD2", "0.0000001")); await walkTo(st, 1013, 1014);
+    assert.equal(store.order("ORD-V").status, "UNDERPAID", "the note changes nothing"); assert.equal(store.order("ORD-V").due, "1.5");
+    st.pay.push(sPay("ORD-V", 1015, P, "0xFE02", "0.75")); await walkTo(st, 1015, 1020); paid(store.order("ORD-V"), ["0xfe01", "0xfe02"], "0xBAD2"); assert.equal(store.mayAdvance(store.order("ORD-V")), true); });
+  // S2c: the dust coin after the proved payment: paid, nothing noted on a paid order
+  await run(async (st, P) => { st.pay.push(sPay("ORD-V", 1010, P, "0xFE01"), sPay("ORD-V", 1012, undefined, "0xBAD3", "0.0000001")); await walkTo(st, 1001, 1020); paid(store.order("ORD-V"), ["0xfe01"], null); });
+  // S2d: a coin with another proof before the real payment
+  await run(async (st, P) => { st.pay.push(sPay("ORD-V", 1010, proofT(newSecret()), "0xBAD4", "0.0000001")); await walkTo(st, 1001, 1012);
+    st.pay.push(sPay("ORD-V", 1013, P, "0xFE01")); await walkTo(st, 1013, 1020); paid(store.order("ORD-V"), ["0xfe01"], "0xBAD4"); });
+  // an unpaid order with a note can be checked by hand (a buyer who paid by hand without the proof); the screen shows the note
+  await run(async (st) => { st.pay.push(sPay("ORD-V", 1010, undefined, "0xBAD5")); await walkTo(st, 1001, 1014);
+    const o = store.order("ORD-V"); assert.equal(o.paid, false); assert.equal(o.status, "PENDING"); assert.deepEqual(o.notes, [NOPROOF("0xBAD5")]); assert.equal(store.mayAdvance(o), false);
+    shop.vendorCheck("ORD-V"); assert.equal(store.mayAdvance(store.order("ORD-V")), true, "checked by hand"); });
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes("o.notes.map(p => \"• \" + esc(MainSaid.say(p)))") && app.includes("t(\"This order is not paid yet:\\n{notes}"), "the note is shown, said in the app's language, and in the check-by-hand question");
+  // S4: copier first (no secret, their own, malformed, the victim's proof as their secret in either case), then the payment, then the real order
+  const S = newSecret(), P = proofT(S);
+  for (const [tag, n] of [["none", undefined], ["own", newSecret()], ["malformed", "0x1234"], ["proof", P], ["proof lower", P.toLowerCase()]]) await copyRig(async (st) => {
+    st.pay.push(sPay("ORD-V", 1010, P, "0xFE01")); st.msg.push(sOrder(ATK, "ORD-V", 1011, "COPIER", n), sOrder(VICTIM, "ORD-V", 1012, "VICTIM", S)); await walkTo(st, 1009, 1016);
+    const c = store.order("ORD-V"), v = store.order("ORD-V~" + VICTIM);
+    assert.equal(c.delivery, "COPIER"); assert.equal(c.paid, false, tag); assert.ok(!(c.coins || []).length, tag); assert.equal(store.mayAdvance(c), false, tag);
+    assert.equal(v.paid, true, tag); assert.deepEqual(v.coins, ["0xfe01"], tag); assert.equal(store.mayAdvance(v), true, tag); });
+  await copyRig(async (st) => { const ATK2 = "0x" + "67".repeat(32); st.pay.push(sPay("ORD-V", 1010, P, "0xFE01"));
+    st.msg.push(sOrder(ATK, "ORD-V", 1011, "COPIER"), sOrder(ATK2, "ORD-V", 1011, "COPIER2", newSecret()), sOrder(VICTIM, "ORD-V", 1012, "VICTIM", S)); await walkTo(st, 1009, 1016);
+    const v = store.order("ORD-V~" + VICTIM); assert.equal(v.paid, true); assert.equal(store.mayAdvance(v), true);
+    for (const o of store.orders().filter(x => x.delivery !== "VICTIM")) { assert.equal(o.paid, false, o.delivery); assert.ok(!(o.coins || []).length); } });
+  // one block: coins judged by coin id, whatever their amounts say as floats
+  await copyRig(async (st) => { const seen = []; st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM"));
+    st.pay.push(sPay("ORD-V", 1010, undefined, "0xC2", "0.30000000000000000001"), sPay("ORD-V", 1010, undefined, "0xC1", "0.3"), sPay("ORD-V", 1010, undefined, "0xC3", "0.4"));
+    const real = store.recordPayment; store.recordPayment = function (ref, id) { seen.push(id); return real.apply(this, arguments); };
+    try { await walkTo(st, 1010, 1010); } finally { store.recordPayment = real; } assert.deepEqual(seen.slice(0, 3), ["0xC1", "0xC2", "0xC3"]); });
 });

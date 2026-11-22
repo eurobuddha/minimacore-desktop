@@ -405,7 +405,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.355 (as released 0.18.301: a poll during a running pass no longer takes the new tip as scanned)
   // main/shop.js again in 0.19.356 (as released 0.18.302: a payment coin given up on is no longer said once its order is checked by hand)
   // both again in 0.19.358 (a settled order stays settled)
-  for (const [f, want, ver] of [["main/shop.js", "e10cbf5ef79ad103865d4be5402e6dab512b254eb662496321f7b8975998999b", "0.19.358"], ["main/shop-store.js", "5c629b28d90d8112d3f273ec24a6ccfb4d702be3c3a75dcb8ee09983ce4368bc", "0.19.358"],
+  // both again in 0.19.359 (a coin without an order's proof is a note, never a hold)
+  for (const [f, want, ver] of [["main/shop.js", "b44b8a9afaa96242bb5311cb75e290a2241f55b22537e69961deaf40fd6f5703", "0.19.359"], ["main/shop-store.js", "776fe375df9e00d5dedaf99f8a6a4df33b994ba8d2cc123b8067604410fd90ac", "0.19.359"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 
