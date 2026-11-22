@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.376] — Dexicon: the 6-decimal line in the on-chain confirmation also says what a pool does
+
+- The confirmation line added in 0.19.374 now reads "On-chain prices have 6 decimals: your limit {typed} is sent as {sent}. The same on-chain orders qualify; a pool may fill very slightly less, never at a worse price." (owner's wording): the same on-chain ORDERS qualify, and a pool, priced continuously, may fill very slightly less at the 6-decimal limit, never at a worse price. zh / ru / uk; the Trade screen test pins the new sentence. Wording only.
+
 ## [0.19.375] — Dexicon: SWEEP across FAST and on-chain is worked out as on the phone and shown, not yet sendable
 
 - With a POOL bid above a FAST bid, a click on the FAST row left two buttons, each taking one source. The phone (Pandamonium 2.2.109's Dexicon) offers a third, SWEEP, that takes both. Its rules are ported into renderer/dexicon-core.js in exact decimals: `sweepSplit` (MainActivity.split: on-chain takes all it holds at or better than the best FAST price plus what FAST cannot cover, FAST the middle up to what it offers, on-chain capped at what it holds at the limit), `sweepAvg` (cut to 8 decimals; the phone rounds half up) and `decideBoth` (no sweep unless both parts are more than zero). The on-chain numbers are the hosted page's own plan: a new read-only page action, `quote` (renderer/dexicon/mds.js), returns PandaComposite.plan's totals for a side, a 6-decimal limit and an amount; it sets nothing, answers no dialog and sends nothing. Routing and pool maths are not re-implemented.

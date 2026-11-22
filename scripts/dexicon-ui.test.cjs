@@ -827,7 +827,7 @@ test("0.19.374: the owner's case: a POOL bid above a FAST bid, the FAST row clic
   const asked = "Selling 1234.56789012 MINIMA now\nEffective 0.0045\n\nRest 500 MINIMA @ 0.004413 as a limit order after the trade confirms.";
   u.answer(d1.id, { asked }); await u.settle(); await u.settle();
   assert.equal(u.dialogs.length, 1);
-  assert.match(u.dialogs[0].innerHTML, /^<h2>Review this on-chain trade<\/h2><pre>On-chain prices have 6 decimals: your limit 0\.00441234 is sent as 0\.004413 \(the same on-chain orders qualify\)\.\n\nSelling 1234\.56789012 MINIMA now/);
+  assert.match(u.dialogs[0].innerHTML, /^<h2>Review this on-chain trade<\/h2><pre>On-chain prices have 6 decimals: your limit 0\.00441234 is sent as 0\.004413\. The same on-chain orders qualify; a pool may fill very slightly less, never at a worse price\.\n\nSelling 1234\.56789012 MINIMA now/);
   assert.match(u.dialogs[0].innerHTML, /Rest 500 MINIMA @ 0\.004413 as a limit order/, "a remainder rests at the price sent, and the page's review says that price");
   const intent = u.cmds.find(c => c.op === "intent");
   assert.deepEqual(JSON.parse(JSON.stringify(intent)), { op: "intent", type: "LIMIT", buy: false, price: "0.004413", amount: "1734.56789012" }, "the confirmed intent is what the page will send, so main/dexicon.js matches it");

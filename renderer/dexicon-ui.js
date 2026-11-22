@@ -408,7 +408,7 @@ const DexUI = (() => {
       const lim = C.chainLimit(X.buy, price);
       if (!lim) return say(I18N.t("On-chain prices have 6 decimals, and this limit is below the smallest one (0.000001). Nothing was signed or sent."), "note");
       args.price = C.str(lim);
-      if (C.cmp(lim, C.dec(price)) !== 0) gridNote = I18N.t("On-chain prices have 6 decimals: your limit {typed} is sent as {sent} (the same on-chain orders qualify).", { typed: price, sent: C.fmtPrice(lim) }) + "\n\n";
+      if (C.cmp(lim, C.dec(price)) !== 0) gridNote = I18N.t("On-chain prices have 6 decimals: your limit {typed} is sent as {sent}. The same on-chain orders qualify; a pool may fill very slightly less, never at a worse price.", { typed: price, sent: C.fmtPrice(lim) }) + "\n\n";
     }
     if (layer === "fast") {
       // H1: the click carries what the review on screen said; the page signs only if its own book still says so
