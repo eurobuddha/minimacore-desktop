@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.382] — Dexicon's on-chain engine reaches READY on a slow node (a new block no longer hijacks its start)
+
+- The on-chain (resting) engine never became ready ("its start did not finish within 5 minutes (a node command did not answer)"). Reproduced with the real vendored engine: the host fired NEWBLOCK while the engine's boot was inside its own key load (`PDService.loadKeys`, one `runscript` per wallet key); the refresh this started saw keys not ready yet and began a second key load (`retryKeysIfStale`), which replaced `PDService.keyLoad`, so the boot's own load returned silently and the boot never reached READY — every retry the same. `main/dexicon/service.desktop.js` (BOOT FIRST) now delivers NEWBLOCK to the resting engine only once its boot has ended READY (the boot reads the tip and refreshes by itself when it ends); a boot that fails is retried as before. The consolidate path's refresh is guarded the same way.
+- Test in scripts/dexicon-host.test.cjs: a node whose key address reads take 600 ms and whose tip moves at every read; the engine reaches READY (fails on 0.19.381). scripts/dexicon-ui.test.cjs (allow-list test) now waits for the resting engine to finish starting before it counts network calls: the engine's first refresh (and its price read) now comes when its boot ends, no longer at the first block.
+- The same fault can occur in the MiniDapps (mds/dexicon service.js and mds/pandadex-mds service.js deliver NEWBLOCK to `PDService.refresh` whether or not the boot has finished): reported to the donor, not changed here.
+
 ## [0.19.381] — A pool swap is no longer refused on every real node ("Script with that address not found")
 
 - Every PandaPools swap stopped before signing with "the node could not say which key signs one of the coins it would spend … (its "scripts" command): Script with that address not found". The engine's signing check (`ReserveRecovery.checkSignature`) asked the node `scripts address:` with each input's address lower-cased; the node looks script rows up case-sensitively (stored upper-case), so it never found one. Fixed at the source, PandaPools MiniDapp 0.6.45 (2c99fbb07c7d493e5ace025fe5284295b8e9cbc5): the address goes to the node exactly as the coin row carries it, and the reply is still compared ignoring case. `main/pandapools/reserve-recovery.js` re-vendored (the only engine file that changed), `scripts/pandapools-parity.manifest.json` re-pinned.

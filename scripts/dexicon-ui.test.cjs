@@ -634,7 +634,9 @@ test("the page's relay traffic passes the host's allow-list: the engine's relays
   const host = dexicon.makeHost({ quiet: true, dataDir: fs.mkdtempSync(path.join(os.tmpdir(), "dx-ui-")), runner: node.run, net, tickMs: 3600000 });
   node.attach(host);
   assert.deepEqual(await host.command({ op: "net", method: "GET", url: "https://eurobuddha.com/dex-relay/dex/book?market=x&since=0&hold=0" }), { status: false, error: "host not allowed" }, "before the engine is up: nothing");
-  await host.start(); await M.until(() => host.status().ready);
+  // the resting engine refreshes once when its boot ends (0.19.382 BOOT FIRST) and reads the price then: let that settle,
+  // so the count below is the page's refused traffic only
+  await host.start(); await M.until(() => host.status().ready && host.status().restingReady && host.status().price.mid > 0);
   const relay = host.status().relays[0];
   const ok = await host.command({ op: "net", method: "GET", url: relay + "/dex/book?market=MINIMA&since=0&hold=0" });
   assert.equal(ok.status, true); assert.equal(typeof ok.response, "string", "text, as an XMLHttpRequest gives it");

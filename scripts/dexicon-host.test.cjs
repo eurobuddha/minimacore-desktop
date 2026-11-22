@@ -68,6 +68,25 @@ test("the engine boots in the vm and reaches its ready state, on the mock node o
   assert.ok(!fs.existsSync(path.join(dir, "dexicon.sqlite")));
 });
 
+test("0.19.382 BOOT FIRST: a new block during the resting engine's own key load does not hijack its boot (it reaches READY)", async () => {
+  // A slow node: each key's address read (runscript SIGNEDBY) takes 600 ms, and the tip moves at every block read, so
+  // the host fires NEWBLOCK while the boot is inside loadKeys. Before 0.19.382 that refresh started a second loadKeys
+  // (retryKeysIfStale), the boot's own load ended silently and the engine never became ready.
+  let tip = 1000;
+  const on = async (c) => {
+    if (c === "block") return { status: true, pending: false, response: { block: String(tip++) } };
+    if (/^runscript script:"RETURN SIGNEDBY\(/.test(c)) await new Promise(r => setTimeout(r, 600));
+    return null;
+  };
+  const node = M.mockNode({ on }), host = makeHost({ runner: node.run, dataDir: tmp(), net: M.mockNet(), tickMs: 40, quiet: true, confirm: async () => true });
+  node.attach(host); hosts.push(host);
+  await host.start();
+  await M.until(() => host.status().restingReady, 6000);
+  assert.equal(node.seen.filter(c => /^runscript script:"RETURN SIGNEDBY\(/.test(c)).length >= 1, true);
+  assert.ok(host._ctx().PDService.keysUsable(), "the boot's own key load completed");
+  host.stop();
+});
+
 test("nothing is sent before start, and stop ends the timer and the block watch", async () => {
   const node = M.mockNode(), host = makeHost({ runner: node.run, dataDir: tmp(), net: M.mockNet(), tickMs: 30, quiet: true });
   node.attach(host); hosts.push(host);

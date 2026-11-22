@@ -27,6 +27,11 @@
  *               gets one `inited` per node start, this host gets one per app start. (0.19.373) An ERROR that ends a
  *               boot is logged with its message and kept as the reason the resting engine is not ready (DX.restingWhy,
  *               restingWhy on every STATE packet), so the screens can say why and refuse an on-chain action at once.
+ *   BOOT FIRST  (0.19.382) NEWBLOCK is not delivered to the resting engine (PDService.refresh) until its boot has ended
+ *               READY. A refresh during the boot's own key load (retryKeysIfStale: keys not ready yet, block > 0) started a
+ *               second loadKeys, which replaced PDService.keyLoad: the boot's load then returned silently (its current()
+ *               check) and the boot never reached READY ("its start did not finish within 5 minutes"), every retry alike.
+ *               The boot reads the tip and refreshes by itself when it ends; a failed boot is retried as before (RETRY).
  *   READ MODEL  DX (bottom of the file): ready / publicId / book / mine for the screens, and a relay book poll to feed
  *               it (in the MiniDapp the page polls the book itself). Read-only: it places, changes and cancels nothing.
  *   REFUSALS    (0.18.108) reply() sends a `refused` at LOW priority (the host's MDS.net.POST, 4th argument): it waits
@@ -455,7 +460,7 @@ function consolidate(data) {
             var resp = r.response || {}, id = resp.txpowid || (resp.txpow && resp.txpow.txpowid) || '';
             log('consolidate ' + tok + ' → ' + id);
             PDService.tell('POSTED', { message: 'Consolidation submitted' + (id ? ' — txpow ' + id : '') + '. Final after the next block.', tx: id });
-            PDService.refresh();
+            if (PDService.ready) PDService.refresh();   // BOOT FIRST (header)
         });
     });
 }
@@ -511,7 +516,7 @@ function pdEvent(msg) {
     try {
         if (!STORE_MINE) return;   // FOREIGN STORE (header): the resting engine reads its ladder and orders from the store too
         if (msg.event === 'inited' || msg.event === 'MDS_TIMER_10SECONDS') pdBoot();
-        else if (msg.event === 'NEWBLOCK') PDService.cmd('block', function (result) { var tip = PandaSafety.tipBlock(result); if (tip > 0) { PDService.block = tip; PDService.refresh(); } });
+        else if (msg.event === 'NEWBLOCK') { if (PDService.ready) PDService.cmd('block', function (result) { var tip = PandaSafety.tipBlock(result); if (tip > 0) { PDService.block = tip; PDService.refresh(); } }); }   // BOOT FIRST (header)
         else if (msg.event === 'MDSCOMMS' && msg.data && !msg.data.public) {
             var packet = JSON.parse(msg.data.message || '{}');
             if (packet.origin === 'ui' && packet.type === 'LIMIT' && onlyOwnOrders(packet.data || {})) return;
