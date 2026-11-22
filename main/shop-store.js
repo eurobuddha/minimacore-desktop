@@ -143,6 +143,23 @@ function upsertOrder(o) {
 }
 function order(ref) { ensureLoaded(); return has(mem.orders, ref) ? mem.orders[ref] : null; }
 function orders() { ensureLoaded(); return Object.values(mem.orders); }
+/** The incoming orders sent with this reference (0.19.352, as released 0.18.297): the one kept under it first, then other buyers' copies (ref~buyer). */
+function refOrders(ref) {
+  ensureLoaded(); if (typeof ref !== "string") return [];
+  const first = order(ref), head = first && first.role === "sell" && !first.wireRef ? [first] : [];
+  return head.concat(Object.values(mem.orders).filter(o => o && o.role === "sell" && o.wireRef === ref && o !== first));
+}
+/** The order a payment coin with this reference pays (0.19.352, as released 0.18.297; the phone Inbox's MerchDb.recordPayment rule): `proof` is
+ *  the coin's state port 2. A coin with a proof pays only the order whose secret it proves (o.commit), the first one or another buyer's copy; a
+ *  coin without one pays the first order that has no secret, as before; neither pays an order with a secret it does not prove (`unproven`).
+ *  An order stored before 0.19.352 (neither commit nor noSecret: its secret, if it came with one, was not read) is paid as before by any coin
+ *  with its reference. A port 2 that is not 0x and 64 hexadecimal digits proves nothing. */
+function payee(ref, proof) {
+  const all = refOrders(ref), p = typeof proof === "string" && proof ? (proof.length === 66 && /^0x[0-9a-fA-F]{64}$/.test(proof) ? proof.toLowerCase() : "bad") : "";
+  const before = (x) => !x.commit && !x.noSecret;
+  const o = (p && p !== "bad" ? all.find(x => x.commit && x.commit.toLowerCase() === p) : null) || all.find(x => p ? before(x) : !x.commit) || null;
+  return { order: o, unproven: o && o.commit ? [] : all.filter(x => x.commit) };
+}
 /** Set status only if it STRICTLY advances (higher rank) — an out-of-order/malicious STATUS_UPDATE can't roll back. */
 function setStatus(ref, status) {
   ensureLoaded(); const o = order(ref); if (!o) return false;
@@ -306,7 +323,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, ensureChecked,
+  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, setLog, log,
   _money: { decCmp, decGte, decAdd, decSub, payableTotal, isDust }, MAX_PAY_COINS, PENDING_MAX,
   _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }

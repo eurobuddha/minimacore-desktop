@@ -263,10 +263,14 @@ function routeIncoming(w, fromPublicId, coinBlock) {
     // array (this desktop) or a JSON array string (the phone's wire shape); either is kept as an array.
     const items = (listing.itemsOf(w.items) || []).slice(0, 40).map(itemLine), shipping = txt(w.shipping, 200), buyerCurrency = txt(w.currency, 20);
     const chk = listing.check(own, { items, shipping, currency: buyerCurrency });
+    // its proof (0.19.352, as released 0.18.297): no "nonce" (an older Shop or desktop) keeps every rule of before; one that is there and not
+    // 0x and 64 hexadecimal digits is held for a check by hand, never taken as an older Shop's
+    const proof = proofOf(w.nonce), badSecret = !proof && w.nonce !== undefined && w.nonce !== "";
     // The same reference from a second buyer (0.19.241, as released 0.18.208): it was dropped, and a payment carrying that
     // reference was counted for whichever order came first. Both are kept, and neither is paid automatically: a payment
     // cannot be told apart. The second is kept under the reference and that buyer's whole id; what it sends back keeps the wire ref.
     const prior = store.order(w.ref), problems = chk.problems.slice(0, 20).map(p => String(p).slice(0, 300));
+    if (badSecret) problems.unshift(BAD_SECRET);
     // the same buyer's order sent again (0.19.345, as released 0.18.290): the order reached the chain with its OLDEST coin. The node lists newest
     // first, so the copy routed first set orderBlock, and a real payment between the two copies read as older than the order. "The same buyer" is
     // the sealed box's signer (opened.fromPublicId, and w.from must equal it): a copier signs with their own key, so their coin with this reference
@@ -276,14 +280,19 @@ function routeIncoming(w, fromPublicId, coinBlock) {
     if (prior && prior.counterparty !== fromPublicId) {
       if (store.order(dupKey(w.ref, fromPublicId))) return;   // this buyer's copy is already kept
       const DUP = "another buyer sent an order with the same reference " + w.ref + ": a payment with it cannot be told apart, so check both orders by hand";
-      store.flagDuplicate(w.ref, DUP);
-      problems.unshift(DUP); wireRef = w.ref; ref = dupKey(w.ref, fromPublicId);
+      // 0.19.352 (as released 0.18.297): an order with a secret is paid only by coins carrying its proof, so another buyer's order with its
+      // reference never holds it (nor unpays it), unless that order came with the very same proof; an order without a secret is held as before
+      const others = store.refOrders(w.ref), clash = !!proof && others.some(x => x.commit === proof);
+      for (const x of others) if (!x.commit || (clash && x.commit === proof)) store.flagDuplicate(x.ref, DUP);
+      if (!proof || clash) problems.unshift(DUP);
+      wireRef = w.ref; ref = dupKey(w.ref, fromPublicId);
     }
     const isNew = store.upsertOrder({ ref, wireRef, role: "sell", counterparty: fromPublicId, buyerName: txt(w.fromname, 64),
       shopId: w.shopId, shopName: own.shopName || txt(w.shopName, 200), items, amount: txt(w.amount, 64) || "0", buyerCurrency,
       due: problems.length ? "" : chk.due, problems, currency: tokenid === MXUSD_TOKEN ? "USDT" : "Minima",
       tokenid, shipping, delivery: txt(w.delivery, 500), buyerPayaddr: txt(w.buyerPayaddr, 90),
       status: w.type === T.INQUIRY ? "INQUIRY" : problems.length ? "UNCHECKED" : "PENDING", paid: false, date: when(w.date), unread: true, note: txt(w.message, 1000),
+      ...(proof ? { commit: proof } : { noSecret: true }),
       ...(Number.isSafeInteger(coinBlock) && coinBlock > 0 ? { orderBlock: coinBlock } : {}) });   // when the order reached the chain (0.19.339): see PAY_BEFORE_ORDER
     if (isNew) emitter.emit("incoming", { ref, shopName: own.shopName, amount: problems.length ? "" : chk.due, currency: tokenid === MXUSD_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {
@@ -377,20 +386,25 @@ async function scanPayments(depth, tip, ordersFrom) {
       ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
       // Not marked seen while its order is not here yet (0.19.174, as released 0.18.163): a payment mined before its
       // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
-      const o = store.order(ref); if (!o) return "";
+      // the order this coin pays, by its proof in port 2 (0.19.352, as released 0.18.297), and the orders with a secret it does not prove
+      const pay = store.payee(ref, statePort(c, 2)), o = pay.order; if (!o && !pay.unproven.length) return "";
       const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
       if (known && pb < (ordersFrom || 0)) return "";   // its orders are not read yet (0.19.349)
       // not judged, not marked seen, until the tip reaches the allowance (0.19.344, as released 0.18.289; pb + 3 itself since 0.19.348): read again on a later pass
-      if (o.role === "sell" && !o.paid && known && tip < pb + PAY_BEFORE_ORDER) { const w = waitingPay.get(ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(ref, { coin: String(id), block: pb }); return ""; }
+      if ((!o || !o.paid) && known && tip < pb + PAY_BEFORE_ORDER) { if (o) { const w = waitingPay.get(o.ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(o.ref, { coin: String(id), block: pb }); } return ""; }
+      // an order with a secret is paid only by coins proving it (0.19.352): a coin that pays no order at all is one problem on each such order
+      // with its reference, once per order, never on one already paid by its proof (a coin counted for another order is that order's)
+      if (!o) { for (const u of pay.unproven) if (!u.paid && !(u.problems || []).some(p => String(p).startsWith(NO_PROOF))) store.flagDuplicate(u.ref, noProof(String(id))); return ""; }   // not marked seen: the order it proves may still be read
       seenPayCoins.add(id);
-      if (o.role !== "sell" || o.paid) return "";
+      if (o.paid) return "";
       // a payment older than its order never pays it automatically (0.19.339, as released 0.18.285): held for a check by hand, the coin id whole
       // one such problem per order (0.19.345, as released 0.18.290): each old coin added a line (its id made the text new) and a write of shop.json
-      if (o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
-        store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
-      const outcome = store.recordPayment(ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
+      // not for a coin that proves the order's secret (0.19.352): only that order's buyer could have made it
+      if (!o.commit && o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
+        store.flagDuplicate(o.ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
+      const outcome = store.recordPayment(o.ref, id, coinAmount(c), c.tokenid || MINIMA_TOKEN);   // the coin id: each coin counted once, also after a restart
       if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.19.200)
-      if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
+      if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref: o.ref, paid: outcome }); }
       return outcome || "";
     } catch (e) {
       // a coin whose judging threw is not kept as seen and the pass fails (0.19.346, as released): read again on the next pass. It was
@@ -445,6 +459,19 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // next one, after a restart too (the cursor is on disk).
 const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
+// The order's secret and its proof (0.19.352, as released 0.18.297), as the phone Shop and Inbox make and check them (base-vestr-2.2.76,
+// comms/MerchMessage.java validNonce / commitment / newNonce, merchshop PaymentFlow.stamp, comms/MerchDb.recordPaymentIn): the sealed order
+// carries "nonce", 0x and 64 hexadecimal digits (32 random bytes); its payment coin carries in state port 2 "0x" + the SHA-256 of those 32
+// bytes in capital hexadecimal digits, compared in any letter case. The proof is public once paid; the secret is known only to the buyer and
+// this vendor, so a copier who puts a payment's reference in an order of their own cannot make that payment theirs, whatever order the coins
+// arrive in. Only the proof is kept on an order; the secret is never stored or logged.
+const NO_PROOF = "a payment with this order's reference does not carry this order's proof";
+const noProof = (coin) => "a payment with this order's reference does not carry this order's proof (payment coin " + coin + "): check by hand";
+const BAD_SECRET = "this order's secret cannot be read, so no payment can be proved to be its buyer's: check by hand";
+function proofOf(secret) {
+  if (typeof secret !== "string" || secret.length !== 66 || !/^0x[0-9a-fA-F]{64}$/.test(secret)) return "";
+  return "0x" + crypto.createHash("sha256").update(Buffer.from(secret.slice(2), "hex")).digest("hex").toUpperCase();
+}
 const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
 let judgedTip = 0;              // the tip the last payments read judged against, every payout address read (0.19.348, as released 0.18.293)
 // A payment coin whose judging throws (0.19.350, as released 0.18.295): every other coin is still judged; the pass fails for that coin (nothing
@@ -602,8 +629,9 @@ function orderDetail(ref) {
   const o = store.order(ref); if (!o) return null; store.markOrderRead(ref); if (o.role === "sell") store.ensureChecked(o);
   // a payment still marked in flight (a quit or crash during the send) is "may already have gone through" too (0.19.241, as released 0.18.217);
   // a second buyer's copy of a reference: payments carrying that reference are counted on the first order (as released 0.18.218)
-  const first = o.wireRef ? store.order(o.wireRef) : null;
-  const sharedRef = first ? { ref: first.ref, received: first.paidAmount || "0" } : null;
+  // 0.19.352: not for a copy with a secret (its payments prove it and are counted on it), and the order the coins without a proof go to
+  const first = o.wireRef && !o.commit ? store.payee(o.wireRef, "").order : null;
+  const sharedRef = first && first !== o ? { ref: first.ref, received: first.paidAmount || "0" } : null;
   // a payment with this order's reference that waits for the allowance (0.19.344, as released 0.18.289): said, never as "not paid"
   const w = o.role === "sell" && !o.paid ? waitingPay.get(ref) : null;
   const waiting = w && judgedTip < w.block + PAY_BEFORE_ORDER ? { coin: w.coin, block: w.block, after: w.block + PAY_BEFORE_ORDER - 1 } : null;   // counted at tip block + 3 (0.19.348)
@@ -643,5 +671,6 @@ module.exports = {
   placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
   sendingCount: () => sending.size,   // payments at the node in this process: said by the Quit and Shutdown warnings (0.19.288)
   _unreadText: unreadText,   // test-only: the sentences the Inbox repeats
+  _proofOf: proofOf,         // test-only
   _setRunner, MINIMERCH, MXUSD_TOKEN, tokenFor
 };
