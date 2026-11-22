@@ -290,13 +290,17 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid, block) {
  *  One marked PAID and not moved on (0.19.344, as released 0.18.289) is held again: the payment that paid it may be the other buyer's
  *  (the reference is plain text on chain, so a copier's order can be the one held first), so it is unpaid, UNCHECKED, and moves on
  *  only once checked by hand. What was received stays counted on it. Nothing was sent for PAID: the buyer hears from CONFIRMED on. */
-function flagDuplicate(ref, problem) {
+// `block` (0.19.361, as released 0.18.307): the block of the order that comes with the same reference. An order checked by hand while it was
+// settling, only to move it on before its hold ran out (checkedUntil, see handCheck), is still unpaid and held by a second order mined up to
+// that block, unless it was moved on.
+function flagDuplicate(ref, problem, block) {
   ensureLoaded(); const o = order(ref); if (!o || o.role !== "sell") return false;
-  const unpay = o.status === "PAID" && !o.handChecked;
+  const early = !!o.handChecked && Number.isSafeInteger(o.checkedUntil) && Number.isSafeInteger(block) && block > 0 && block <= o.checkedUntil;
+  const unpay = o.status === "PAID" && (!o.handChecked || early);
   if (!unpay && (o.paid || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.PAID)) return false;
   ensureChecked(o); if (o.problems.includes(problem)) return false;
   o.problems = [problem].concat(o.problems); o.due = "";
-  if (unpay) { o.paid = false; o.status = "UNCHECKED"; o.settled = false; }   // the latch goes with the payment (0.19.358)
+  if (unpay) { o.paid = false; o.status = "UNCHECKED"; o.settled = false; delete o.handChecked; delete o.checkedUntil; }   // the latch goes with the payment (0.19.358), and so does a check made while settling (0.19.361)
   else if (o.status !== "INQUIRY" && o.status !== "WRONG_TOKEN" && (STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED) o.status = "UNCHECKED";
   flush(); return true;
 }
@@ -307,8 +311,10 @@ function handCheck(ref) {
   if (!o || o.role !== "sell") return false;
   // also an order an older version counted money for, and one whose older verdict was kept but that is not paid (0.19.247)
   // and a paid order that is still settling (0.19.354), and an unpaid order with a note of a coin without its proof (0.19.359)
-  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid) && !settleBlock(o) && !(!o.paid && (o.notes || []).length)) return false;
-  o.handChecked = true; flush(); return true;
+  const hold = settleBlock(o);
+  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid) && !hold && !(!o.paid && (o.notes || []).length)) return false;
+  // checked while settling (0.19.361): a second order with its reference mined up to the block the hold would have run to still holds it (flagDuplicate)
+  o.handChecked = true; if (hold) o.checkedUntil = hold; flush(); return true;
 }
 /** A coin with this order's reference that does not carry its proof and pays no order (0.19.359, as released 0.18.305): a note for the vendor,
  *  kept on the order and shown, at most one (the first coin's id whole). It holds nothing (not a problem: what is due, the status and whether

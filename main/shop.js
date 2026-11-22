@@ -295,7 +295,7 @@ function routeIncoming(w, fromPublicId, coinBlock) {
       // waits for its own proved coin. A newcomer without a secret, or with one that cannot be read, still holds it; an order stored before 0.19.352
       // (paid by any coin with its reference) too.
       const others = store.refOrders(w.ref), clash = !!proof && others.some(x => x.commit === proof);
-      for (const x of others) if (x.commit ? clash && x.commit === proof : !(proof && x.paid && x.noSecret)) store.flagDuplicate(x.ref, DUP);
+      for (const x of others) if (x.commit ? clash && x.commit === proof : !(proof && x.paid && x.noSecret)) store.flagDuplicate(x.ref, DUP, coinBlock);   // its block: an order checked by hand while settling (0.19.361)
       if (!proof || clash) problems.unshift(DUP);
       wireRef = w.ref; ref = dupKey(w.ref, fromPublicId);
     }
