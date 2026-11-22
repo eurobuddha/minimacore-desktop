@@ -371,9 +371,10 @@ async function scanPayments(depth, tip, ordersFrom) {
   let changed = false;
   const judge = (c) => {
     const id = c && c.coinid; if (!id || seenPayCoins.has(id)) return "";
+    let ref = "";
     try {   // one coin at a time (0.19.168)
       const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); return ""; }
-      const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
+      ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
       // Not marked seen while its order is not here yet (0.19.174, as released 0.18.163): a payment mined before its
       // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
       const o = store.order(ref); if (!o) return "";
@@ -393,8 +394,15 @@ async function scanPayments(depth, tip, ordersFrom) {
       return outcome || "";
     } catch (e) {
       // a coin whose judging threw is not kept as seen and the pass fails (0.19.346, as released): read again on the next pass. It was
-      // swallowed here and the coin marked seen, so a payment whose count threw once was never counted in that session
-      seenPayCoins.delete(id); store.log("miniMall: a payment coin could not be read (" + String(id).slice(0, 80) + "): " + ((e && e.message) || e)); throw e;
+      // swallowed here and the coin marked seen, so a payment whose count threw once was never counted in that session.
+      // This coin only (0.19.350, as released 0.18.295; see JUDGE_TRIES): the rethrow stopped every newer coin for good
+      seenPayCoins.delete(id);
+      const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
+      if (n < JUDGE_TRIES) { store.log("miniMall: payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id));
+      store.log("miniMall: payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
+      try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { store.log("miniMall: the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
+      return "";
     }
   };
   // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
@@ -439,6 +447,13 @@ const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
 const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
 let judgedTip = 0;              // the tip the last payments read judged against, every payout address read (0.19.348, as released 0.18.293)
+// A payment coin whose judging throws (0.19.350, as released 0.18.295): every other coin is still judged; the pass fails for that coin (nothing
+// advances, said on the Inbox with its id whole, never as the node not answering); after JUDGE_TRIES passes that threw, it is marked seen, logged
+// with its error, and left for a check by hand (a problem on its order, and the Inbox). It stopped every newer coin for good: the loop rethrew and
+// the cursor never moved. The count is kept in memory, for this session: after a restart a coin gets JUDGE_TRIES passes again. One try per pass:
+// a coin that threw moves nothing, so no backfill read of the same pass judges it again.
+const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Set();   // coin id -> passes that threw; coin ids given up on
+let judgeFailed = [], lastJudgeFailed = [];
 // What may not have been read below block N, and why (as released 0.18.283 / 0.18.286, the same words): "cap" (the node's answer was too
 // large) or the tree, + "Root" when the payments read reached the tree's root, where every unspent payment coin is kept whatever its age;
 // "treePayCap": the orders read was whole and only the payments read was cut by the reply cap. "May not have been": a tree longer than
@@ -457,7 +472,7 @@ async function scanOnce() {
     const tip = await currentBlock(), prev = Number(store.getMeta("scanned_tip_block") || 0);
     const meta = (k) => Number(store.getMeta(k)) || 0;
     const depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
-    served = depth;
+    served = depth; judgeFailed = [];
     const a = await scanOrders(depth).catch(() => null);
     // complete enough (0.19.349, as released 0.18.294): the orders read reached the last pass's tip, so with what earlier passes read (down to a
     // pending backfill's floor) every order up to the tip is known; cut above it, only what this read reached. A failed one: no payment judged.
@@ -468,13 +483,14 @@ async function scanOnce() {
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
     let failed = !tip || a === null || b === null, stepFailed = false, changed = !!(a || b);
+    const stuck = () => failed || judgeFailed.length > 0;   // a coin that could not be judged moves nothing either (0.19.350)
     const bf0 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
-    if (!failed && prev && tip < prev) {
+    if (!stuck() && prev && tip < prev) {
       // the chain is BELOW what was read before (a resync, or a reorganisation onto a lower branch): the cursor follows the chain down, so a
       // catch-up faster than the poll still reads the new branch's blocks below the old cursor (0.19.336, as released 0.18.281; 0.19.332 kept
       // it up and they were skipped); a pending backfill waits, and it is no failure
       store.setMeta("scanned_tip_block", tip);
-    } else if (!failed) {
+    } else if (!stuck()) {
       const covered = tip - served;   // the oldest block this pass read (less than asked when the node served less)
       // a gap below this pass (the app was away longer than one pass reads, or the node served less): the backfill reaches down to the
       // oldest unread block and starts just under this pass; a gap that opens while an older one is still being read keeps the oldest
@@ -500,6 +516,7 @@ async function scanOnce() {
         changed = changed || !!(c || d);
         const stall = ordersCut || !root ? stallNext : 0;
         if (c === null || d === null) stepFailed = true;   // a failed read moves nothing: the same reads are tried on the next pass
+        else if (judgeFailed.length) { /* a coin that could not be judged moves nothing (0.19.350) */ }
         else if (stall && stall < 3) store.setMeta("backfill_stall", stall);
         else {
           const why = ordersCut ? (root ? "capRoot" : "cap") : root ? "treeRoot" : "treePayCap";
@@ -517,6 +534,7 @@ async function scanOnce() {
         changed = changed || !!(c || d);
         const reached = tip - served;
         if (c === null || d === null) stepFailed = true;   // nothing moves: the same step is tried on the next pass (0.19.249), said as OLDER orders (0.19.332)
+        else if (judgeFailed.length) { /* a coin that could not be judged moves nothing (0.19.350) */ }
         else if (reached <= target) { store.setMeta("backfill_target_block", 0); store.setMeta("backfill_floor_block", 0); store.setMeta("backfill_stall", 0); }
         else if (reached < floor) { store.setMeta("backfill_floor_block", reached); store.setMeta("backfill_stall", 0); }
         else {
@@ -533,7 +551,7 @@ async function scanOnce() {
       // "may not have been read" stays said (0.19.331; as released, no later read clears it, 0.19.338) until the vendor hides it (dismissUnread)
     }
     const bf1 = meta("backfill_target_block") + "/" + meta("backfill_floor_block") + "/" + meta("unread_below_block");
-    const said = failed !== lastPassFailed || stepFailed !== lastStepFailed || bf0 !== bf1; lastPassFailed = failed; lastStepFailed = stepFailed;
+    const said = failed !== lastPassFailed || stepFailed !== lastStepFailed || bf0 !== bf1 || judgeFailed.join() !== lastJudgeFailed.join(); lastPassFailed = failed; lastStepFailed = stepFailed; lastJudgeFailed = judgeFailed;
     if (changed || said) emitter.emit("update");
   } finally { scanning = false; }
 }
@@ -614,7 +632,8 @@ function scanState() {
   // shown only to someone with a shop, and until it is dismissed (0.19.341, as released 0.18.277): a newer one is shown again
   const shown = !!below && store.shops().length > 0 && below > (Number(store.getMeta("unread_dismissed")) || 0);
   return { readFailed: lastPassFailed, stepFailed: lastStepFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: below, unreadShown: shown,
-    unreadWhy: below ? why : "", unreadText: below ? unreadText(below, why) : "", skipped: [...skippedPay.keys()].filter(skipping) };   // why and its sentence (0.19.338)
+    unreadWhy: below ? why : "", unreadText: below ? unreadText(below, why) : "", skipped: [...skippedPay.keys()].filter(skipping),
+    judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay] };   // payment coins that could not be judged, ids whole (0.19.350)   // why and its sentence (0.19.338)
 }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 

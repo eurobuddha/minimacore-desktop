@@ -945,16 +945,45 @@ test("vendor: a notice stored with no cause says the tree's sentence (the node k
   assert.equal(shop.scanState().unreadWhy, "tree");
   store.setMeta("unread_below_block", 0); store.setLog((m) => { throw new Error("no log expected: " + m); });
 });
+// changed on purpose (0.19.350, as released 0.18.295): the pass fails for that coin (the cursor stays) and the Inbox says so with its id whole, not
+// as the node not answering
 test("vendor: a payment coin whose judging threw is not kept as seen: the pass fails and the next one counts it", async () => {
   await copyRig(async (st) => {
-    st.msg.push(jOrder("ORD-T", 1009)); st.pay.push(jPay("ORD-T", 1010)); store.setLog(() => {});
+    st.msg.push(jOrder("ORD-T", 1009)); const p = jPay("ORD-T", 1010); st.pay.push(p); const logs = []; store.setLog((m) => logs.push(m));
     const real = store.recordPayment; let once = true;
     store.recordPayment = function () { if (once) { once = false; throw new Error("disk full"); } return real.apply(this, arguments); };
     try {
-      jTip(st, 1020); await shop.scanOnce(); assert.equal(store.order("ORD-T").paid, false); assert.equal(shop.scanState().readFailed, true, "the pass failed");
+      jTip(st, 1020); await shop.scanOnce(); assert.equal(store.order("ORD-T").paid, false);
+      assert.deepEqual([shop.scanState().readFailed, shop.scanState().judgeFailed], [false, [p.coinid]], "the pass failed for that coin, not the node"); assert.equal(store.getMeta("scanned_tip_block"), 1000, "the cursor stays");
       jTip(st, 1021); await shop.scanOnce(); assert.equal(store.order("ORD-T").paid, true, "judged again, not skipped as seen");
+      assert.deepEqual(shop.scanState().judgeFailed, []); assert.equal(store.getMeta("scanned_tip_block"), 1021);
+    } finally { store.recordPayment = real; }
+    assert.ok(logs.some(l => l.includes(p.coinid) && l.includes("disk full")), logs.join(" | "));
+  });
+});
+// 0.19.350 (as released 0.18.295): one coin whose judging always throws stopped every newer coin for good (the loop rethrew, the cursor never moved,
+// and the Inbox said the node did not answer); every coin is judged, and the coin is given up on after three passes that threw
+test("vendor: a payment coin whose judging always throws: an unrelated payment is still paid in the same pass; after three passes the coin is left for a check by hand and the cursor moves", async () => {
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-P1", 1001), jOrder("ORD-P2", 1005)); const p1 = jPay("ORD-P1", 1002); st.pay.push(p1, jPay("ORD-P2", 1006));
+    const logs = []; store.setLog((m) => logs.push(m)); const real = store.recordPayment; let calls = 0;
+    store.recordPayment = function (ref) { if (ref === "ORD-P1") { calls++; throw new Error("poison"); } return real.apply(this, arguments); };
+    try {
+      jTip(st, 1010); await shop.scanOnce();
+      assert.equal(store.order("ORD-P2").paid, true, "the newer coin is judged in the same pass"); assert.equal(store.order("ORD-P1").paid, false);
+      assert.deepEqual([shop.scanState().readFailed, shop.scanState().stepFailed, shop.scanState().judgeFailed], [false, false, [p1.coinid]], "not the node");
+      assert.equal(store.getMeta("scanned_tip_block"), 1000, "the cursor stays");
+      jTip(st, 1011); await shop.scanOnce(); assert.equal(store.getMeta("scanned_tip_block"), 1000);
+      jTip(st, 1012); await shop.scanOnce();
+      assert.equal(store.getMeta("scanned_tip_block"), 1012, "given up on after three passes: the cursor moves"); assert.equal(calls, 3);
+      const o = store.order("ORD-P1"); assert.ok(o.problems.includes("payment coin " + p1.coinid + " could not be judged: check by hand"), o.problems.join(" | ")); assert.equal(o.status, "UNCHECKED");
+      assert.deepEqual([shop.scanState().judgeFailed, shop.scanState().gaveUp], [[], [p1.coinid]]);
+      assert.ok(logs.some(l => l.includes(p1.coinid) && l.includes("poison") && /after 3 tries/.test(l)), logs.join(" | "));
+      jTip(st, 1013); await shop.scanOnce(); assert.equal(calls, 3, "not judged again this session"); assert.equal(store.getMeta("scanned_tip_block"), 1013);
     } finally { store.recordPayment = real; }
   });
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes('tr("Payment coin {coin} could not be judged. It is judged again on the next block.", { coin: esc(c) })') && app.includes('tr("Payment coin {coin} could not be judged: check by hand.", { coin: esc(c) })') && app.includes("${judgePay ? `<div class=\"mm-warn\""), "the Inbox says it");
 });
 test("vendor: one payout address whose read throws does not keep the other addresses' payments from being judged; the pass is still a failed one", async () => {
   await copyRig(async (st) => {

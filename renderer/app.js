@@ -3796,9 +3796,12 @@ async function renderShopInbox() {
     : scan && scan.unreadShown ? tr(UNREAD_SAID[scan.unreadWhy] || UNREAD_SAID.tree, { block: esc(String(scan.unreadBelow)) }) + ` <button class="mm-pill" id="mmScanHide">${th("Hide")}</button>` : "";   // kept until hidden (0.19.331); the sentence by its cause (0.19.338)
   // a payout address skipped as not valid, whole (0.19.284)
   const skippedPay = (scan && scan.skipped || []).map(a => tr("Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.", { address: esc(a) })).join("<br>");
+  // a payment coin that could not be judged, its id whole (0.19.350): judged again, or left for a check by hand
+  const judgePay = (scan && scan.judgeFailed || []).map(c => tr("Payment coin {coin} could not be judged. It is judged again on the next block.", { coin: esc(c) }))
+    .concat((scan && scan.gaveUp || []).map(c => tr("Payment coin {coin} could not be judged: check by hand.", { coin: esc(c) }))).join("<br>");
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
     `<div class="mm-ver">${th("miniMall Inbox")}</div>
-     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>${unread ? `<div class="mm-warn">${unread}</div>` : ""}${skippedPay ? `<div class="mm-warn">${skippedPay}</div>` : ""}
+     <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>${unread ? `<div class="mm-warn">${unread}</div>` : ""}${skippedPay ? `<div class="mm-warn">${skippedPay}</div>` : ""}${judgePay ? `<div class="mm-warn" style="overflow-wrap:anywhere">${judgePay}</div>` : ""}
      <div class="mm-chips">${[N_("ALL"), N_("PENDING"), N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${th(s)}</button>`).join("")}</div>
      ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
         <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.due || o.amount)} ${esc(SHOP.cur(o.currency))}${o.unchecked && o.status !== "INQUIRY" ? " " + th("(buyer's figure)") : ""}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);

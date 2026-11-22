@@ -305,6 +305,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["SHOP_NOT_UNSURE", I18N.N_("This order has no payment that may have gone through.")],
     ["SHOP_PAY_BEFORE_ORDER", I18N.N_("a payment with this order's reference is older than the order (payment coin {coin} at block {block}, the order at block {orderBlock}): check by hand")],
     ["SHOP_DUP_REF", I18N.N_("another buyer sent an order with the same reference {ref}: a payment with it cannot be told apart, so check both orders by hand")],
+    ["SHOP_JUDGE_GAVE_UP", I18N.N_("payment coin {coin} could not be judged: check by hand")],
 
     // ---- miniMall: how an incoming order departs from the vendor's own listing (main/shop-listing.js, 0.19.166) ----
     ["SL_DELIVERY", I18N.N_("the delivery method \"{ship}\" is not in your listing")],   // before SL_UNLISTED, whose {what} would take it whole

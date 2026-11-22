@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.350] — miniMall: one payment coin whose judging throws no longer stops every newer one (as released 0.18.295)
+
+- Since 0.19.346 a coin whose judging threw aborted the whole payments loop: every newer coin was left unjudged on every pass, the cursor never moved, and the Inbox said the node did not answer (it had). Now every coin is judged; a coin that threw is not marked seen, and the pass is a failed one for that coin (nothing advances, the same blocks are read again) with the Inbox line "Payment coin {coin} could not be judged. It is judged again on the next block." (the id whole), never as the node not answering.
+- After 3 passes that threw, the coin is marked seen, logged with its id whole and the error, and left for a check by hand: the problem "payment coin {coin} could not be judged: check by hand" on its order (so it cannot advance automatically; said through renderer/mainsaid.js, SHOP_JUDGE_GAVE_UP) and "Payment coin {coin} could not be judged: check by hand." on the Inbox; the cursor then moves. The count is kept in memory for this session (after a restart a coin gets 3 passes again); one try per pass. zh / ru / uk.
+- Tests (scripts/shop-store-test.cjs): ORD-P1's coin always throws, the unrelated ORD-P2 is paid in the same pass, the cursor stays for two passes and moves on the third with the problem and the log line (on 0.19.349 ORD-P2 is never paid); the single-throw test changed on purpose (scanState says the coin, not the node; the cursor). main/shop.js pin updated.
+
 ## [0.19.349] — miniMall: no payment is judged before the orders that may go with it are read (as released 0.18.294)
 
 - When a pass's orders read failed, its payments were still judged, so "orders are read before payments" broke: payment 1010, a copier's order 1011, the real order 1013 and a channel read that failed at the judging tip paid the copier's order (PAID, may advance) until the next good pass. Now a pass, a backfill step or the read past the tree whose orders read failed judges no payment; the coins wait, unseen, for the next pass.
