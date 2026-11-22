@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.309] — miniMall: a newcomer with a secret that leaves a paid order without one as it is says so in a note
+
+- Since 0.18.306 a second buyer's order WITH a secret leaves a PAID order without one as it is. That newcomer was kept silent: PENDING, nothing said, and a check by hand was refused (review-desktop-r5 N1). When its buyer had paid outside the app without the proof, that coin paid the other order, and the vendor could neither see the clash nor act on the real order (the released app put the duplicate problem on it, so it could be checked by hand). It now carries the duplicate sentence as ONE note: "another buyer sent an order with the same reference …: a payment with it cannot be told apart, so check both orders by hand". A note holds nothing (its own proved coin still pays it), and an unpaid order with a note can be checked by hand.
+- Tests (scripts/shop-test.cjs): N1 (the real order shows the note, can be checked by hand, and is still paid by its own proved coin); N1b (paid by its own proved coin: no note, the copier's order held as before); S5's newcomer now carries the note (changed on purpose). N1 and S5 fail on 0.18.308.
+
 ## [0.18.308] — miniMall: the review's nits (a coin given up on flags the order it would pay; held in the list; no shortened id)
 
 - A payment coin given up on after three passes that threw (0.18.295) put its problem on the order kept under the coin's reference, also when the coin proves another buyer's copy of it (ref~buyer): it now lands on the order the coin would pay, whenever that is known. One whose reference could not be read names no order, so no check by hand cleared it from the status line: the status line's Dismiss now clears those. At most 64 coins given up on are said; the oldest go first (each was logged with its error, and its order keeps its problem).

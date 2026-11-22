@@ -401,6 +401,10 @@ function routeIncoming(w, fromPublicId, coinBlock) {
       const others = store.refOrders(w.ref), clash = !!proof && others.some(x => x.commit === proof);
       for (const x of others) if (x.commit ? clash && x.commit === proof : !(proof && x.paid && x.noSecret)) store.flagDuplicate(x.ref, DUP, coinBlock);   // its block: an order checked by hand while settling (0.18.306)
       if (!proof || clash) problems.unshift(DUP);
+      // 0.18.309 (review-desktop-r5 N1): that newcomer was kept silent (PENDING, nothing said, no check by hand), so when its buyer paid outside the
+      // app without the proof, that coin paid the other order and the vendor could neither see the clash nor act on the real order. It carries the
+      // same sentence as ONE note: a note holds nothing (its proved coin still pays it), and an unpaid order with a note can be checked by hand.
+      else if (others.some(x => !x.commit && x.paid && x.noSecret)) order.notes = [DUP];
       order.wireRef = w.ref; order.ref = dupKey(w.ref, fromPublicId);
     }
     Object.assign(order, { due: problems.length ? "" : chk.due, problems,
