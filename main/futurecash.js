@@ -195,7 +195,12 @@ function gateCheck(txn, p) {
  * create(o): o = { run(cmd) -> the node's reply (rpcCall, owner "futurecash"), dir() -> userData, get(url) -> parsed JSON
  * or null (the audit host), log(line), notify(title, body), now() }.
  */
+// What create() calls without asking first, so a missing one would only fail later, on every pass (0.19.372: a `//` comment
+// in main.js swallowed `dir` and the engine threw "o.dir is not a function" for 178 versions). log is guarded where it is
+// called, but a failed start (no store open yet) is said only through it, so it is required too.
+const REQUIRED = ["run", "dir", "get", "log"];
 function create(o) {
+  for (const k of REQUIRED) if (!o || typeof o[k] !== "function") throw new Error("Future Cash Next cannot be created: the option \"" + k + "\" is missing or not a function.");
   const now = o.now || Date.now, log = (l) => { try { o.log && o.log("[futurecash] " + l); } catch (e) {} };
   let store = null, walletKey = "", opening = null, startedAt = 0, openError = "", lastFile = "";
   let scriptsCache = null;      // { block, rows, keys } — the node's script table and keys, read when needed

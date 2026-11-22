@@ -829,3 +829,13 @@ test("L8: a token id or payout from the store reaches a command only in its shap
   node.sent.length = 0; await e.pass(160);
   assert.deepEqual(node.sent.filter(c => /quit|0xFF/.test(c)), [], "nothing malformed was sent");
 });
+
+test("create refuses at once, naming the option, when a required option is missing or not a function (0.19.372: main.js lost `dir` to a comment)", () => {
+  const ok = { run: async () => null, dir: () => tmp(), get: async () => null, log() {} };
+  assert.doesNotThrow(() => FC.create(ok));
+  for (const k of ["run", "dir", "get", "log"]) {
+    const missing = Object.assign({}, ok); delete missing[k];
+    assert.throws(() => FC.create(missing), new RegExp("option \"" + k + "\" is missing or not a function"), k + " missing");
+    assert.throws(() => FC.create(Object.assign({}, ok, { [k]: "x" })), new RegExp("option \"" + k + "\""), k + " not a function");
+  }
+});

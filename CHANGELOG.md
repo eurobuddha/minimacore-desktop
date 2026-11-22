@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.372] — Future Cash Next starts again; its signature limit and notify switch work
+
+- main/main.js passed Future Cash Next its options on one long line, and two later comments were typed into the middle of code: from 0.19.194 `dir: () => app.getPath("userData")` sat after a `//` on that line, so the engine never got its folder and every start threw "o.dir is not a function" (Future Cash Next could not start at all); from 0.19.212 `signCap` and `notify` sat after a `//` on the FC_OPS line, so changing the daily signature limit (and the notify switch) answered "Unknown Future Cash action.". The code is out of the comments again; the comments' text is kept.
+- main/futurecash.js: create() refuses at once, naming the option, when run, dir, get or log is missing or not a function (the options it calls without asking first; log because a failed start is said only through it).
+- Tests: scripts/source-wiring-test.cjs (new, in test:apps): no desktop-authored main/*.js or renderer/*.js line has code after a `//` comment (two known notes allowed by their exact text), and every `api.fc("…")` action renderer/futurecash.js calls is a key of main.js FC_OPS (both fail on 0.19.371: they name main/main.js:476 and :499, and "signCap"); scripts/futurecash-test.cjs: create refuses a missing or non-function run / dir / get / log (fails on 0.19.371).
+
 ## [0.19.371] — miniMall: a paid order keeps the note that another buyer's order has its reference (as Minima Core Desktop 0.18.315)
 
 - Once an order with a secret was paid in full by its proved coins, every note on it was dropped (0.19.368), also the sentence that another buyer's order without a secret has its reference and was paid (0.19.366). So when a copier's order without a secret was paid by the real buyer's coin without its proof, and the real buyer then also paid with the proof, both orders ended PAID and neither said anything about the clash (review-desktop-r6 H4N1). Only the note of a coin without the order's proof is dropped now (it begins "a payment with this order's reference does not carry this order's proof"); the duplicate sentence stays.
