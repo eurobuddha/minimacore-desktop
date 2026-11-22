@@ -390,9 +390,13 @@ function routeIncoming(w, fromPublicId, coinBlock) {
       if (store.order(dupKey(w.ref, fromPublicId))) return;   // this buyer's copy is already kept
       const DUP = "another buyer sent an order with the same reference " + w.ref + ": a payment with it cannot be told apart, so check both orders by hand";
       // 0.18.297: an order with a secret is paid only by coins carrying its proof, so another buyer's order with its reference never
-      // holds it (nor unpays it), unless that order came with the very same proof; an order without a secret is held as before
+      // holds it (nor unpays it), unless that order came with the very same proof; an order without a secret is held as before.
+      // 0.18.306: except a PAID one by a newcomer WITH a secret (review-desktop-r4 S5): an order without a secret is paid only by coins without a
+      // proof, and an honest newcomer with a secret pays with its proof, so it cannot be the one whose coin paid it; that newcomer waits for its
+      // own proved coin. A newcomer without a secret, or with one that cannot be read, still holds it; an order stored before 0.18.297 (paid by
+      // any coin with its reference) too.
       const others = store.refOrders(w.ref), clash = !!proof && others.some(x => x.commit === proof);
-      for (const x of others) if (!x.commit || (clash && x.commit === proof)) store.flagDuplicate(x.ref, DUP);
+      for (const x of others) if (x.commit ? clash && x.commit === proof : !(proof && x.paid && x.noSecret)) store.flagDuplicate(x.ref, DUP);
       if (!proof || clash) problems.unshift(DUP);
       order.wireRef = w.ref; order.ref = dupKey(w.ref, fromPublicId);
     }

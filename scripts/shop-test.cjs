@@ -1494,3 +1494,21 @@ test("S2a, S2b, S2c, S2d: a coin with the reference and without the order's proo
     const real = t.m.store.recordPayment; t.m.store.recordPayment = function (ref, amount, tok, id) { seen.push(id); return real.apply(this, arguments); };
     await walk(t, 1010, 1010); assert.deepEqual(seen.slice(0, 3), ["0xC1", "0xC2", "0xC3"]); }
 });
+
+// ---- 0.18.306: an order arriving WITH a secret does not unpay a PAID order without one (review-desktop-r4 S5): the paid order is paid by a coin
+// without a proof, which an honest buyer with a secret never sends. Released 0.18.286 kept the paid order PAID ----
+test("S5: a PAID order without a secret stays paid when another buyer's order with a secret and its reference comes; one without a secret, or with one that cannot be read, still holds it", async () => {
+  const run = async (name, nonce, legacy) => { const t = await setupS(name); t.st.msg = [await sealS(t, t.victim, "ORD-V", 1009, "VICTIM")]; t.st.pay = [payS("ORD-V", 1010, undefined, "0xFE01")];
+    await walk(t, 1009, 1010); assert.equal(t.m.store.order("ORD-V").paid, true);
+    if (legacy) { const o = t.m.store.order("ORD-V"); delete o.noSecret; t.m.store.flush(); }
+    t.st.msg.push(await sealS(t, t.atk, "ORD-V", 1011, "COPIER", nonce)); await walk(t, 1011, 1016); return [t, t.m.store.order("ORD-V"), copyOf(t, t.atk)]; };
+  { const [t, v, c] = await run("s5", newSecret());
+    assert.equal(v.paid, true, v.problems.join(" | ")); assert.equal(v.status, "PAID"); assert.deepEqual(v.problems, []); assert.equal(t.m.store.mayAdvance(v), true, "settled at 1013");
+    assert.equal(c.paid, false); assert.ok(!(c.coins || []).length); assert.deepEqual(c.problems, [], "it waits for its own proved coin"); assert.equal(c.status, "PENDING");
+    await t.m.shop.advanceStatus("ORD-V", "CONFIRMED"); }
+  for (const [tag, nonce, legacy] of [["none", undefined], ["unreadable", "0x1234"], ["legacy", newSecret(), true]]) {
+    const [t, v, c] = await run("s5" + tag, nonce, legacy);
+    assert.equal(v.paid, false, tag); assert.equal(v.status, "UNCHECKED", tag); assert.equal(v.problems[0], DUPV, tag); assert.equal(t.m.store.mayAdvance(v), false, tag);
+    assert.equal(c.paid, false, tag); assert.equal(t.m.store.mayAdvance(c), false, tag);
+  }
+});

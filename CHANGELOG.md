@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.306] — miniMall: an order with a secret does not unpay a paid order without one
+
+- A PAID order without a secret (not moved on, not checked by hand) was unpaid and held for a check by hand (0.18.289) by any second buyer's order with its reference, also one that came with a secret (review-desktop-r4 S5; released 0.18.286 kept it PAID). An order without a secret is paid only by coins without a proof, and an honest buyer with a secret pays with its proof, so that newcomer cannot be the one whose coin paid it: the paid order now stays PAID, and the newcomer is kept as its own order and waits for its own proved coin. A newcomer without a secret, or with one that cannot be read, still holds the paid order, as does any newcomer an order stored before 0.18.297 (paid by any coin with its reference).
+- Tests (scripts/shop-test.cjs): S5 (the paid order stays paid and is confirmed; the newcomer is not paid and not held); a newcomer without a secret, with an unreadable one, or against an order stored before 0.18.297 still holds it (fails on 0.18.305).
+
 ## [0.18.305] — miniMall: a coin without an order's proof is a note, never a hold; coins of one block are judged by coin id
 
 - An order with a secret is paid only by coins proving it (0.18.297). A coin with its reference that proved nothing and paid no order went through the duplicate rule: what is due was cleared and the order made UNCHECKED, so a stranger's coin with the reference (a worthless token's coin in the same block as the real payment, a dust coin between a half payment and its top-up, a coin with another proof before the payment) left the order unpaid and not confirmable (review-desktop-r4 S2a, S2b, S2d; released 0.18.286 paid all three). Now it is a note on the order, at most one, the first coin's id whole, shown on the order and in the check-by-hand question: it does not touch what is due, the status, or whether the order may be confirmed, and the proved payment pays the order as ever. An unpaid order with such a note can be checked by hand (a buyer who paid by hand without the proof).
