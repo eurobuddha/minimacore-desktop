@@ -3798,15 +3798,17 @@ async function renderShopInbox() {
   const skippedPay = (scan && scan.skipped || []).map(a => tr("Payments to {address} are not read: it is not a valid Minima address. Correct the shop's payout address in miniMall Studio.", { address: esc(a) })).join("<br>");
   // a payment coin that could not be judged, its id whole (0.19.350): judged again, or left for a check by hand
   const judgePay = (scan && scan.judgeFailed || []).map(c => tr("Payment coin {coin} could not be judged. It is judged again on the next block.", { coin: esc(c) }))
-    .concat((scan && scan.gaveUp || []).map(c => tr("Payment coin {coin} could not be judged: check by hand.", { coin: esc(c) }))).join("<br>");
+    .concat((scan && scan.gaveUp || []).map(c => tr("Payment coin {coin} could not be judged: check by hand.", { coin: esc(c) }))).join("<br>")
+    + (scan && scan.gaveUpNoOrder ? ` <button class="mm-pill" id="mmGaveUpHide">${th("Hide")}</button>` : "");   // one that names no order: no check by hand clears it (0.19.362)
   shopFrame(mine.length === 1 ? mine[0].shopName : t("Orders"), () => shopGo("home"), [["mmCard", "≡", t("Vendor Card")]],
     `<div class="mm-ver">${th("miniMall Inbox")}</div>
      <div class="mm-status ${shopIdentity ? "mm-status--ok" : ""}">${shopIdentity ? tr("✓ Ready to receive orders  ·  shop key {publicId}", { publicId: idHtml(shopIdentity.publicId) }) : th("Connecting to your node…")}</div>${unread ? `<div class="mm-warn">${unread}</div>` : ""}${skippedPay ? `<div class="mm-warn">${skippedPay}</div>` : ""}${judgePay ? `<div class="mm-warn" style="overflow-wrap:anywhere">${judgePay}</div>` : ""}
      <div class="mm-chips">${[N_("ALL"), N_("PENDING"), N_("PAID"), N_("CONFIRMED"), N_("SHIPPED"), N_("DELIVERED")].map(s => `<button class="mm-pill mm-chip${shopFilter === s ? " mm-chip--on" : ""}" data-chip="${s}" aria-pressed="${shopFilter === s}">${th(s)}</button>`).join("")}</div>
-     ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span>${shopPill(o.status)}</div>
+     ${list.map(o => `<div class="mm-row" role="button" tabindex="0" data-oref="${esc(o.ref)}"><div class="mm-row__top"><span class="mm-row__t">${o.unread ? "●  " : ""}${esc(o.ref)}</span><span>${shopPill(o.status)}${o.held ? ` <span class="mm-pill" style="background:${SHOP_PILL.UNCHECKED}">${th("held")}</span>` : ""}</span></div>
         <div class="mm-row__s">${esc(o.shopName || "")}   ·   ${esc(o.due || o.amount)} ${esc(SHOP.cur(o.currency))}${o.unchecked && o.status !== "INQUIRY" ? " " + th("(buyer's figure)") : ""}   ·   ${shopAgo(o.date)}</div></div>`).join("")}`);
   el("mmCard").onclick = shopVendorCard;
   if (el("mmScanHide")) el("mmScanHide").onclick = () => api.shopScanDismiss().catch(() => null).then(() => renderShopInbox());
+  if (el("mmGaveUpHide")) el("mmGaveUpHide").onclick = () => api.shopScanDismiss().catch(() => null).then(() => renderShopInbox());
   el("shopSub").querySelectorAll("[data-chip]").forEach(c => { c.onclick = () => { shopFilter = c.dataset.chip; renderShopInbox(); }; });
   el("shopSub").querySelectorAll("[data-oref]").forEach(r => { r.onclick = () => shopGo("inbox", { screen: "order", ref: r.dataset.oref }); });
 }

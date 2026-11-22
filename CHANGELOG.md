@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.362] — miniMall: the review's nits (a coin given up on flags the order it would pay; held in the list), as released 0.18.308
+
+- A payment coin given up on after three passes that threw (0.19.350) put its problem on the order kept under the coin's reference, also when the coin proves another buyer's copy of it (ref~buyer): it now lands on the order the coin would pay, whenever that is known. One whose reference could not be read names no order, so no check by hand cleared it from the Inbox: the Inbox now offers Hide for those (the same Hide as the unread notice's). At most 64 coins given up on are said; the oldest go first (each was logged with its error, and its order keeps its problem).
+- The Inbox's list showed a settling order as plain PAID, and only its page said it was held: the list row now carries a "held" mark beside its status (zh / ru / uk).
+- Comments: the settling comments said every order from the coin's block up was known read. That is not so on a first pass whose orders read was cut, nor after a backfill that ended with blocks it could not read: there an order settles as if those blocks had been read, as released 0.18.286 paid it at sight. The comments now say so; nothing there changes.
+- Not here: this app never wrote 0.18.299's waiting list (payWait), so nothing is dropped on load; no shortened covenant address is in this tree's changelog or tests.
+- main/shop.js and main/shop-store.js change: their pins in scripts/apps-money.test.cjs are updated on purpose.
+- Tests (scripts/shop-store-test.cjs): the coin given up on lands on the victim's copy, not the copier's order; 70 coins whose reference cannot be read: the newest 64 said, Hide clears them; a settling order is held in the list (fails on 0.19.361).
+
 ## [0.19.361] — miniMall: a check by hand made while an order settles does not outlast its hold (as released 0.18.307)
 
 - A settling order can be checked by hand to move it on before its hold runs out (0.19.354). That check made it immune to the second order its hold was waiting for: the vendor checked a copier's settling order, the real order without a secret came 2 blocks later, and the copier's order stayed PAID and confirmable (review-desktop-r4 S3). The check now keeps the block the hold would have run to; a second order without a secret mined up to that block still unpays the order and holds both for a check by hand, unless it was already confirmed or moved on. The check-by-hand question for a settling order now says so: "Another order with this reference can still arrive until block N; it will put both orders back on a check by hand." (zh / ru / uk; the question's former text is replaced in the three catalogs.)
