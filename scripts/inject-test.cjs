@@ -457,7 +457,8 @@ test("Vestr collect (V1): both reads send checkmempool:true; a coin collected in
 });
 test("Vestr collect (V2): txncheck after the build and before txnpost; anything but a valid verdict is refused, deleted, never posted", async () => {
   const R = vestrRig();
-  for (const bad of [{ status: true, response: { validamounts: false, validtransaction: false, valid: { basic: false, mmrproofs: true, scripts: true } } }, R.SCRIPTS_FALSE, { status: true, response: {} }]) {
+  for (const bad of [{ status: true, response: { validamounts: false, validtransaction: false, valid: { basic: false, mmrproofs: true, scripts: true } } }, R.SCRIPTS_FALSE, { status: true, response: {} },
+    { status: true, response: { validtransaction: "true" } }, { status: true, response: { validtransaction: 1 } }]) {
     await R.reset(); R.txncheck = bad;
     await assert.rejects(R.collect(), /^Error: The node checked this collect and judged it invalid, so it was not sent\. Nothing was collected\.$/, JSON.stringify(bad));
     assert.deepEqual(R.txns().slice(-2), ["txncheck", "txndelete"], "no txnpost");
@@ -466,27 +467,28 @@ test("Vestr collect (V2): txncheck after the build and before txnpost; anything 
   await R.reset(); assert.equal((await R.collect()).ok, true); assert.deepEqual(R.txns().slice(-3), ["txncheck", "txnpost", "txndelete"]);
   R.done();
 });
-test("Vestr collect (V3): the coin's shape, then the tip, then nothing available, then the grace wait, counted at the next block (valid there: not refused)", async () => {
+test("Vestr collect (V3): the coin's shape, then the tip, then nothing available, then the grace wait, counted at the tip (as txncheck and the node's relay check)", async () => {
   const R = vestrRig();
   await R.reset({ state: R.st({ 4: "abc" }) }); R.tip = "throw"; await assert.rejects(R.collect(), /cannot be collected: state 4 is not a plain number/, "the shape first, whatever the tip");
   await R.reset(); R.tip = "throw"; await assert.rejects(R.collect(), /^Error: The node's block height could not be read, so nothing was built\. Nothing was sent\.$/);
   await R.reset(); R.tip = { status: false, error: "busy" }; await assert.rejects(R.collect(), /block height could not be read/); assert.ok(!R.sent.some(c => c.startsWith("runscript")), "no maths without a tip");
   await R.reset({ created: "595" }); R.vars = { cancollect: "0", change: "900", mustwait: "TRUE", contractexpired: "FALSE" };   // young, and nothing vested yet
   await assert.rejects(R.collect(), /^Error: Nothing available to collect yet$/, "nothing available before the grace wait");
-  // minblockwait 10, created 100; the collect is mined at tip + 1 at the earliest: tip 108 (age 9 there) waits, tip 109 (age 10 there) goes,
-  // although txncheck, which runs the script at the tip (age 9), says scripts:false for it; at tip 110 a script failure is a failure
-  await R.reset(); R.tip = { status: true, response: { block: "108" } }; await assert.rejects(R.collect(), /grace period of this contract is still running/); assert.deepEqual(R.txns(), []);
-  await R.reset(); R.tip = { status: true, response: { block: "109" } }; R.vars.mustwait = "TRUE"; R.txncheck = R.SCRIPTS_FALSE;
-  assert.equal((await R.collect()).ok, true, "valid in the next block: not refused"); assert.ok(R.txns().includes("txnpost"));
-  await R.reset(); R.tip = { status: true, response: { block: "110" } }; R.txncheck = R.SCRIPTS_FALSE; await assert.rejects(R.collect(), /judged it invalid/);
+  // minblockwait 10, created 100: the age is taken at the tip (txncheck, and the node's relay check of the txpow it mined, run the script with
+  // @BLOCK = the tip; a collect only the next block accepts is never forwarded): tip 109 (age 9) waits, tip 110 (age 10) goes; expired, no wait
+  await R.reset(); R.tip = { status: true, response: { block: "109" } }; await assert.rejects(R.collect(), /grace period of this contract is still running/); assert.deepEqual(R.txns(), []);
+  await R.reset(); R.tip = { status: true, response: { block: "110" } }; assert.equal((await R.collect()).ok, true); assert.ok(R.txns().includes("txnpost"));
+  await R.reset({ created: "1099" }); R.tip = { status: true, response: { block: "1100" } }; R.vars = { cancollect: "900", change: "0", mustwait: "FALSE", contractexpired: "TRUE" };
+  assert.equal((await R.collect()).ok, true, "at the final block the whole coin goes, whatever its age");
   R.done();
 });
 test("Vestr: the list's Collect button agrees with collect() at coin age 0 (CHECK_MATHS's mustwait is FALSE there, the covenant refuses)", async () => {
   const R = vestrRig();
   await R.reset({ created: "600", state: R.st({ 4: "1728" }) });
-  let [v] = await R.vestr.list(); assert.equal(v.canCollectNow, false); assert.equal(v.mustwait, true); assert.equal(v.mustwaitblocks, "1727");
+  let [v] = await R.vestr.list(); assert.equal(v.canCollectNow, false); assert.equal(v.mustwait, true); assert.equal(v.mustwaitblocks, "1728");
   await assert.rejects(R.collect(), /grace period/);
-  await R.reset({ created: "600", state: R.st({ 4: "1" }) }); [v] = await R.vestr.list(); assert.equal(v.canCollectNow, true, "minblockwait 1 at age 0: mined at age 1"); assert.equal((await R.collect()).ok, true);
+  await R.reset({ created: "600", state: R.st({ 4: "1" }) }); [v] = await R.vestr.list(); assert.equal(v.canCollectNow, false, "minblockwait 1 at age 0: waits"); await assert.rejects(R.collect(), /grace period/);
+  await R.reset({ created: "599", state: R.st({ 4: "1" }) }); [v] = await R.vestr.list(); assert.equal(v.canCollectNow, true, "age 1"); assert.equal((await R.collect()).ok, true);
   R.done();
 });
 test("Vestr collect (V5): a pending reply to txnpost is not 'collected'", async () => {

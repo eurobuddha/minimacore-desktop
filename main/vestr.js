@@ -74,17 +74,18 @@ function decSub(a, b) {
   return f ? i + "." + f : i;
 }
 /**
- * Blocks still to wait before the covenant's grace line lets a collect through (0.18.291). The covenant refuses while
- * `@COINAGE LT minblockwait`, and @COINAGE is read at the block that mines the collect: the next block at the earliest, so
- * the age that counts is tip + 1 - created. A collect valid in the next block is not refused. A contract at or past its final
- * block (at the tip, where the payout is worked out: the whole coin, the covenant's first branch) never waits. CHECK_MATHS's
- * own mustwait reads the tip's age and is FALSE at age 0 (`(@BLOCK - @COINAGE) GT "0"`), so it decides nothing here, and the
- * list's Collect button reads this same figure.
+ * Blocks still to wait before the covenant's grace line lets a collect through (0.18.291; the age at the tip since 0.18.292,
+ * as the phone's Contract.inGrace). The covenant refuses while `@COINAGE LT minblockwait`, skipped from the final block on (its
+ * first branch pays the whole coin). The age is taken at the TIP: txncheck runs the script with @BLOCK = the tip, and so does the
+ * node's own relay check of a txpow it just mined (Main MAIN_TXPOWMINED posts it through NIOMessage like any peer's; a
+ * non-monotonic txn whose scripts fail at the tip is kept but never forwarded, and nothing re-broadcasts the mempool), so a collect
+ * only the next block would accept never leaves this node. Only the block builder checks against tip + 1. CHECK_MATHS's own
+ * mustwait is FALSE at age 0 (`(@BLOCK - @COINAGE) GT "0"`), so it decides nothing here; the list's Collect button reads this figure.
  */
 function graceWait(coin, tp) {
   const created = Number(coin.created), minwait = Number(stateVar(coin, 4)), final = Number(stateVar(coin, 3));
   if (![created, minwait, final, tp].every(Number.isFinite)) return Infinity;
-  return tp >= final ? 0 : Math.max(0, minwait - (tp + 1 - created));
+  return tp >= final ? 0 : Math.max(0, minwait - (tp - created));
 }
 // Coins this session collected (0.18.291): refused a second time while the node still lists them as unspent and not in its mempool.
 const collectedHere = new Set();
@@ -246,13 +247,10 @@ async function collect(coinid, burn) {
   for (const p of [0, 1, 2, 3, 4, 5, 6, 7, 8, 199]) cmds.push("txnstate id:" + id + " port:" + p + " value:" + stateVar(coin, p));
   cmds.push("txncheck id:" + id);   // the node judges the built transaction before anything is posted (0.18.291)
   cmds.push("txnpost id:" + id + (burn && Number(burn) > 0 ? " burn:" + burn : ""));
-  // txncheck runs the script with @BLOCK = the tip (TxPoWChecker.checkTxPoWScripts(tip.getMMR(), txpow, tip.getTxPoW()); @COINAGE =
-  // tip - created), one block before the earliest that can mine the collect. A collect that passes the grace line only from the next
-  // block (its age at the tip one short of minblockwait) fails `@COINAGE LT minblockwait` there and returns before any output check, so
-  // for it scripts:false is expected; the amounts, the basic checks and the MMR proofs must still be valid.
-  const edge = !(tp >= Number(stateVar(coin, 3))) && tp - Number(coin.created) < Number(stateVar(coin, 4));
-  const judged = (r) => { const R = r.response || {}, ok = R.valid || {};
-    return R.validamounts === true && ok.basic === true && ok.mmrproofs === true && (R.validtransaction === true || (edge && ok.scripts === false)); };
+  // txncheck's response.validtransaction = checkTxPoWBasic (inputs, amounts add up) AND the MMR proofs AND every script, run with @BLOCK =
+  // the tip (TxPoWChecker.checkTxPoWScripts(tip.getMMR(), txpow, tip.getTxPoW())): posted only when it is the boolean true (0.18.292, as
+  // the phone's Contract.txnCheckValid); the grace wait above is counted at the tip too, so the two agree.
+  const judged = (r) => !!(r.response && r.response.validtransaction === true);
   try {
     // every step must say status true (0.18.209: an empty or unreadable reply counted as success); the post is the one
     // step that cannot be called failed when there is no answer, because the transaction may have gone
