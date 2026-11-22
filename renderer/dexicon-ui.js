@@ -24,10 +24,11 @@ const DexUI = (() => {
     assets: "M6,6 h11 a3,3 0 0,1 3,3 v6 a3,3 0 0,1 -3,3 h-11 a3,3 0 0,1 -3,-3 v-6 a3,3 0 0,1 3,-3 z M16,12 h2.5",
     settings: "M4,7 L20,7 M4,17 L20,17 M9,4 L9,10 M15,14 L15,20"
   };
-  let mem = C.load(read(), oldTheme()), opts = null, node = { state: "" }, st = null;
+  /** the app's applied theme (main sets nativeTheme.themeSource before the window exists, so this is right from the first frame) */
+  const appLight = () => { try { return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: light)").matches; } catch (e) { return false; } };
+  let mem = C.load(read(), appLight()), opts = null, node = { state: "" }, st = null;
 
   function read() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
-  function oldTheme() { try { return localStorage.getItem("ax_theme"); } catch (e) { return null; } }   // the removed AtomiX panel's own theme choice
   function write() { try { localStorage.setItem(KEY, C.save(mem)); } catch (e) {} }
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -648,5 +649,7 @@ const DexUI = (() => {
       + `<div class="dx-card"><div class="dx-h">${th("ENGINE")}</div><div class="dx-sub dx-sub--sans">${tr("Dexicon engine {version} · block {block} · {label}", { version: esc((st && st.version) || "…"), block: esc((st && st.block) || "…"), label: px && px.mid > 0 ? esc(C.priceName(px.source) + " " + px.mid + (px.label ? " (" + px.label + ")" : "")) : th("no MEXC price yet") })}</div></div>`;
   }
 
-  return { init, paint, render, node: node_, dialog, paintStrip, say, redraw: () => draw(), money, where: () => ({ shown: shown(), shared: ours(), room: C.ROOMS[mem.room].id, tab: C.tabOf(mem) }), pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
+  /** app.js, when the app's theme changes (Settings › Appearance, or the OS on Follow the system): Dexicon follows it at once. */
+  function followApp() { C.followApp(mem, appLight()); if (opts) { paintTheme(); draw(); } }
+  return { init, paint, render, followApp, node: node_, dialog, paintStrip, say, redraw: () => draw(), money, where: () => ({ shown: shown(), shared: ours(), room: C.ROOMS[mem.room].id, tab: C.tabOf(mem) }), pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
 })();

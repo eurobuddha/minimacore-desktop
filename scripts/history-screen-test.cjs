@@ -66,6 +66,25 @@ test("import: a record is rebuilt field by field; the phone's export and the des
   assert.ok(/ipcMain\.handle\("mcd:importJson", async \(\) =>/.test(mainJs) && /showOpenDialog/.test(mainJs.slice(mainJs.indexOf("mcd:importJson"), mainJs.indexOf("mcd:importJson") + 500)), "the file is chosen in a dialog; the renderer names no path");
 });
 
+// 0.19.379 (owner: "history displays dark even when the app is lightmode same as the os")
+test("History follows the app's theme: the shell's tokens in light, the phone's HistoryDesign in dark", () => {
+  const css = fs.readFileSync(path.join(R, "renderer", "shell.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const at = css.indexOf("#view-history {"), end = css.indexOf("#histMore .btn");
+  const hist = css.slice(at, end), darkAt = hist.indexOf("@media (prefers-color-scheme: dark) {");
+  assert.ok(at > 0 && darkAt > 0, "a dark-only block for History");
+  let depth = 0, close = -1; for (let i = darkAt; i < hist.length; i++) { if (hist[i] === "{") depth++; else if (hist[i] === "}" && --depth === 0) { close = i; break; } }
+  const dark = hist.slice(darkAt, close + 1), light = hist.slice(0, darkAt) + hist.slice(close + 1);
+  // light (and any theme): every colour comes from the shell's variables; no literal dark background, no fixed colour scheme
+  assert.ok(!/#0A0A0F|#15151F|#1F1F2B|#2A2A38|color-scheme:\s*dark/i.test(light), "nothing of the dark palette outside the dark block:\n" + light);
+  assert.ok(/#view-history \{[^}]*background: var\(--bg\)/.test(light), "the screen's background is the shell's");
+  for (const v of ["--hist-accent: var(--accent)", "--hist-in: var(--green)", "--hist-out: var(--red)", "--hist-self: var(--dim)"]) assert.ok(light.includes(v), "light: " + v);
+  assert.ok(!/#[0-9A-F]{6}\b(?![^{]*url)/i.test(light.replace(/url\("[^"]*"\)/g, "")), "light: no literal colour at all");
+  // dark: the phone's HistoryDesign, exactly
+  for (const v of ["#view-history, .shell[data-tab=\"history\"] .main { background: #0A0A0F; }", "color-scheme: dark", "--bg: #0A0A0F", "--surface: #15151F", "--surface2: #1F1F2B", "--border: #2A2A38",
+    "--text: #FFFFFF", "--dim: #9A9AA8", "--dim2: #6A6A78", "--hist-accent: #F7931A", "--hist-in: #2ECC71", "--hist-out: #FF7A66", "--hist-self: #9A9AA8"]) assert.ok(dark.includes(v), "dark: " + v);
+  for (const c of ["in", "out", "self"]) assert.ok(new RegExp("\\.hrow--" + c + " \\.hrow__g, \\.hrow--" + c + " \\.hrow__l1 \\{ color: var\\(--hist-" + c + "\\); \\}").test(light), "row colour " + c + " from the theme");
+});
+
 test("the screen: the phone's header, its four options in its order, then the desktop's two", () => {
   const view = html.slice(html.indexOf('id="view-history"'), html.indexOf('id="view-terminal"'));
   assert.ok(view.includes(">Minima History<") && view.includes(">⟳ Sync<") && view.includes('placeholder="Search address, id, token, amount…"'));

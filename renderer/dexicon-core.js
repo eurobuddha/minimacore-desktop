@@ -22,21 +22,25 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const TAB_LABEL = { swap: N_("Swap"), pools: N_("Pools"), mylp: N_("My LP"), wallet: N_("Wallet"), market: N_("Market"), otc: "OTC", trade: N_("Trade"), orders: N_("Orders"), history: N_("History"), activity: N_("Activity"), assets: N_("Assets"), settings: N_("Settings") };   // translated where drawn (dexicon-ui.js)
   const roomOfView = (view) => ROOMS.findIndex(r => r.view === view);
 
-  /** The saved choices: the last tab of each room and the theme. The room itself is not saved: Dexicon opens on ①. */
-  /** was: what the removed AtomiX panel had saved as its own theme ("daylight" / "onyx"); it counts until Dexicon's own choice is saved. */
-  function load(raw, was) {
+  /** The saved choices: the last tab of each room. The room itself is not saved: Dexicon opens on ①.
+   *  light: the app's applied theme (Settings › Appearance, 0.19.378). Dexicon STARTS in it (0.19.379, owner: no Dexicon
+   *  in dark while the app is light); its sun button switches Dexicon alone until the app's theme next changes
+   *  (followApp), so no theme of Dexicon's own is saved any more. */
+  function load(raw, light) {
     let o = {}; try { o = JSON.parse(raw || "{}") || {}; } catch (e) { o = {}; }
-    const mem = { room: 0, tabs: {}, theme: (o.theme || (was === "daylight" ? "DAYLIGHT" : "")) === "DAYLIGHT" ? "DAYLIGHT" : "ONYX" };
+    const mem = { room: 0, tabs: {}, theme: light === true ? "DAYLIGHT" : "ONYX" };
     for (const r of ROOMS) mem.tabs[r.id] = r.tabs.includes(o.tabs && o.tabs[r.id]) ? o.tabs[r.id] : (r.tabs[0] || "");
     mem.tabs.mxusd = "swap";   // every start opens room 1 on Swap (DoorHost.applyLaunchRule); the tab is remembered while the app runs
     return mem;
   }
-  const save = (mem) => JSON.stringify({ tabs: mem.tabs, theme: mem.theme });
+  const save = (mem) => JSON.stringify({ tabs: mem.tabs });
   function pickRoom(mem, i) { if (ROOMS[i]) mem.room = i; return mem; }
   /** A tab of the CURRENT room; a tab the room does not have changes nothing. */
   function pickTab(mem, tab) { const r = ROOMS[mem.room]; if (r.tabs.includes(tab)) mem.tabs[r.id] = tab; return mem; }
   const tabOf = (mem) => mem.tabs[ROOMS[mem.room].id];
   const toggleTheme = (mem) => { mem.theme = mem.theme === "ONYX" ? "DAYLIGHT" : "ONYX"; return mem; };
+  /** The app's theme changed: Dexicon follows it (its sun button's choice ends there). */
+  const followApp = (mem, light) => { mem.theme = light === true ? "DAYLIGHT" : "ONYX"; return mem; };
 
   /** One money action at a time in ALL of Dexicon, rooms 1, 2 and 3 (0.18.118 for room 3; every room since 0.18.122):
    *  while one is being reviewed, signed or sent, a second click, a held Enter or a button of another room does
@@ -447,5 +451,5 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
     funds, freeFor, crossing, chainCrosses, chainWhy, chainLimit, sweepSplit, sweepAvg, decideBoth, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
-    ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, PUT_BACK, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
+    ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, PUT_BACK, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, followApp, strip };
 });

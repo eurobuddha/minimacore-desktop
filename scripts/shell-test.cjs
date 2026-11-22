@@ -69,7 +69,49 @@ test("the theme: Settings offers Follow the system, Light and Dark, and saves th
   const set = app.slice(app.indexOf("async function renderSettings()"), app.indexOf("function keysInfo("));
   assert.ok(set.includes('sec("Appearance"') && set.includes('name="setTheme"'), "an Appearance card with the three choices");
   assert.ok(/input\[name="setTheme"\]'\)\.forEach\(r => r\.onchange = async \(\) => \{ try \{ CFG = await api\.saveConfig\(\{ theme: r\.value \}\)/.test(set), "a choice is saved at once");
-  assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", applyTheme\);\napplyTheme\(\);/.test(app), "data-theme follows the applied theme, from the first frame and live");
+  assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", \(\) => \{ applyTheme\(\);/.test(app) && /\napplyTheme\(\);/.test(app), "data-theme follows the applied theme, from the first frame and live");
+});
+// 0.19.379 (owner: History was dark with the app light): no screen container of the desktop's own stylesheets has a dark
+// background written as a colour outside a dark-only block. The exceptions are the tray apps the phone itself draws dark
+// in its light theme too (their originals' fixed palettes: docs/reference/pandamonium-2.2.52 light-71b, 74*, 76, 77, 84,
+// 75*); they have no light design to follow, so they are listed, not changed.
+const FIXED_DARK = { "#view-ethwallet": "ETH Wallet: the original's fixed dark palette (phone: light-71b)", "#view-vestr": "Vestr: fixed dark (phone: light-74*)",
+  "#view-minimall": "miniMall: Pandamonium's MallActivity palette (phone: light-84)", "#view-webwallet": "Web Wallet: the Minima web wallet's fixed dark",
+  "#view-faucet": "Faucet: fixed dark (phone: light-77)", "#view-keyuses": "KeyUses: fixed dark (phone: light-76)", ".en": "Entropy: fixed dark (phone: light-75*)" };
+function cssRules(src) {   // [{ sel, ctx (enclosing @-rules), body }], comments removed
+  const out = [], stack = []; let buf = "";
+  for (const c of src.replace(/\/\*[\s\S]*?\*\//g, "")) {
+    if (c === "{") { stack.push(buf.trim()); buf = ""; }
+    else if (c === "}") { const sel = stack.pop(); if (buf.trim()) out.push({ sel, ctx: stack.join(" "), body: buf }); buf = ""; }
+    else buf += c;
+  }
+  return out;
+}
+const darkColour = (v) => [...String(v).matchAll(/#([0-9a-f]{3,8})\b/gi)].some(([, h]) => { if (h.length === 3) h = [...h].map(c => c + c).join(""); const [r, g, b] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.25; })
+  || [...String(v).matchAll(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?/g)].some(m => (+m[1] + +m[2] + +m[3]) / 765 < 0.25 && (m[4] == null || +m[4] >= 0.9));
+test("every screen container follows the theme: no hard-coded dark background outside a dark-only block (listed exceptions only)", () => {
+  const bad = [], seen = new Set();
+  for (const f of ["style.css", "app.css", "shell.css", "apps.css", "chat.css", "mail.css", "dexicon.css"]) {
+    for (const r of cssRules(fs.readFileSync(path.join(R, f), "utf8"))) {
+      if (/prefers-color-scheme:\s*dark/.test(r.ctx)) continue;
+      const bg = [...r.body.matchAll(/background(?:-color)?\s*:\s*([^;]+)/g)].map(m => m[1]).filter(darkColour);
+      if (!bg.length) continue;
+      for (const one of r.sel.split(",").map(x => x.trim())) {
+        const top = /^(#view-[a-z]+)(?:\.view--active)?$/.exec(one) || /^\.shell\[data-tab="[a-z]+"\] \.main$/.exec(one) || /^(\.histapp|\.en)$/.exec(one);
+        if (!top) continue;
+        const key = top[1] || one; seen.add(key);
+        if (!FIXED_DARK[key]) bad.push(f + ": " + one + " { background: " + bg.join(", ") + " }");
+      }
+    }
+  }
+  assert.deepEqual(bad, [], "a screen that stays dark while the app is light");
+  for (const k of Object.keys(FIXED_DARK)) assert.ok(seen.has(k), k + " is no longer fixed dark: take it off the list");
+});
+test("the screens with a light / dark button of their own start in the app's theme and follow it (Dexicon, Future Cash Next, Minima Explorer)", () => {
+  const fc = fs.readFileSync(path.join(R, "futurecash.js"), "utf8"), tools = fs.readFileSync(path.join(R, "apps-tools.js"), "utf8");
+  assert.ok(fc.includes('const fcnTheme = () => FCN_PICK || (SYSTEM_LIGHT.matches ? "light" : "dark");') && !/localStorage/.test(fc), "Future Cash: the app's theme unless its button was pressed since; nothing of its own saved");
+  assert.ok(tools.includes("const exLight = () => (EX_PICK != null ? EX_PICK : SYSTEM_LIGHT.matches);") && tools.includes("const light = exLight();") && !/explorerTheme/.test(tools), "Explorer: the same");
+  assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", \(\) => \{ applyTheme\(\); try \{ DexUI\.followApp\(\); \} catch \(e\) \{\} try \{ fcnFollowApp\(\); \} catch \(e\) \{\} try \{ exFollowApp\(\); \} catch \(e\) \{\} \}\);/.test(app), "a change of the app's theme reaches all three");
 });
 test("the theme: Pandamonium's exact tokens", () => {
   assert.ok(/prefers-color-scheme: light/.test(css) && /prefers-color-scheme: light/.test(app));

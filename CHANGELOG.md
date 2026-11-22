@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.379] — History, Dexicon, Future Cash Next and the Explorer follow the app's theme
+
+- History was dark with the app light: it wore the phone's HistoryDesign palette (dark and orange) in both themes, as the phone does. The owner asked for it to follow the app: in light it now takes the shell's own tokens and accent (received / sent / self in the shell's green / red / dim); in dark it keeps HistoryDesign exactly (renderer/shell.css, under `@media (prefers-color-scheme: dark)`, which follows Settings › Appearance).
+- Dexicon (rooms ①, ② and ③ and its header's sun button), Future Cash Next and Minima Explorer each had a light / dark button of their own, saved, starting dark. They now start in the app's theme and follow it when it changes; their button switches that screen alone until the app's theme next changes; nothing of their own is saved (dexicon-core.js `load(raw, light)` / `followApp`, futurecash.js `FCN_PICK`, apps-tools.js `EX_PICK`, app.js's theme listener). The Dexicon page in its hidden frame takes Dexicon's theme through its own stored key when its market-maker dialog opens (unchanged, no donor change needed).
+- Audited and not changed: ETH Wallet, Vestr, miniMall, Web Wallet, Faucet, KeyUses and Entropy keep their originals' fixed dark palettes (the phone draws them dark in its light theme too: docs/reference/pandamonium-2.2.52 light-71b, 74*, 76, 77, 84, 75*; no light design exists to follow); the tray is dark in both themes as on the phone; Mail keeps its own Paper / Dark.
+- Tests: scripts/history-screen-test.cjs (History under light and under dark); scripts/shell-test.cjs (every screen container of the desktop's stylesheets: no hard-coded dark background outside a dark-only block, the fixed-dark apps listed with their reason; the three screens with their own button follow the app); scripts/dexicon-ui.test.cjs (Dexicon starts in the app's theme, the sun's choice lasts until the app's theme changes, no theme saved). Each fails on 0.19.378.
+
 ## [0.19.378] — Settings: Appearance, with Follow the system / Light / Dark for the whole app
 
 - There was no way to choose light or dark: the app only followed the OS (the phone's shell has no in-app choice either: it follows Android's own Dark theme setting). Settings now has an Appearance card with three choices, Follow the system (the default, and what every saved value other than "light" / "dark" means, including the released app's old "current" / "original-*"), Light and Dark, saved as config `theme`.

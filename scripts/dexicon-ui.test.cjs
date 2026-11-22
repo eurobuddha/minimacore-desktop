@@ -12,7 +12,13 @@ test("rooms: three, in the phone's order; Exchange has the phone's six tabs", ()
   assert.deepEqual(C.ROOMS[1].tabs.map(t => C.TAB_LABEL[t]), ["Swap", "Pools", "My LP", "Wallet", "Activity"], "room 2 is PandaPools' five tabs");   // scripts/dexicon-pp.test.cjs; room 1: scripts/dexicon-ax.test.cjs
 });
 
-test("each room remembers its last tab; Dexicon opens on room 1; the theme is remembered", () => {
+test("each room remembers its last tab; Dexicon opens on room 1, in the app's theme (0.19.379)", () => {
+  assert.equal(C.load(null, true).theme, "DAYLIGHT", "the app is light: Dexicon starts light");
+  assert.equal(C.load('{"theme":"ONYX"}', true).theme, "DAYLIGHT", "a theme Dexicon saved before is not read: the app's wins");
+  assert.equal(C.load('{"theme":"DAYLIGHT"}', false).theme, "ONYX", "the app is dark: Dexicon starts dark");
+  assert.equal(C.followApp(C.toggleTheme(C.load(null, false)), false).theme, "ONYX", "the sun's choice lasts until the app's theme changes");
+  assert.equal(C.followApp(C.load(null, false), true).theme, "DAYLIGHT");
+  assert.ok(!/theme/.test(C.save(C.load(null, true))), "no theme of its own is saved");
   let mem = C.load(null);
   assert.equal(mem.room, 0); assert.equal(mem.theme, "ONYX"); assert.equal(mem.tabs.exchange, "trade");
   C.pickRoom(mem, 2); C.pickTab(mem, "history");
@@ -23,8 +29,8 @@ test("each room remembers its last tab; Dexicon opens on room 1; the theme is re
   C.toggleTheme(mem);
   const again = C.load(C.save(mem));
   assert.equal(again.room, 0, "a new start opens on room 1");
-  assert.equal(again.tabs.exchange, "history"); assert.equal(again.theme, "DAYLIGHT");
-  assert.equal(C.toggleTheme(again).theme, "ONYX");
+  assert.equal(again.tabs.exchange, "history"); assert.equal(again.theme, "ONYX", "a new start is in the app's theme, not the sun's last choice");
+  assert.equal(C.toggleTheme(again).theme, "DAYLIGHT");
   for (const junk of ["", "{", "null", '{"tabs":{"exchange":"nope"},"theme":7}', '{"tabs":"x"}']) {
     const m = C.load(junk); assert.equal(m.tabs.exchange, "trade", "junk: " + junk); assert.equal(m.theme, "ONYX");
   }

@@ -13,9 +13,12 @@
 "use strict";
 
 let FCN = { tab: "guardian", st: null, stakes: null, stakesError: "", log: [], harden: null, loading: false, audited: false, busy: false };
-const FCN_THEME_KEY = "fcnTheme";
 const FCN_MXUSD = "0X7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";   // the Minima dollar token: named MxUSD, its id still shown whole
-const fcnTheme = () => { try { return localStorage.getItem(FCN_THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } };   // Onyx (dark) is the original's default
+// Onyx / Daylight (0.19.379): it starts in the app's theme (Settings › Appearance; SYSTEM_LIGHT, app.js) and follows it when it
+// changes (fcnFollowApp); its own sun button switches Future Cash alone until then. Nothing of its own is saved any more.
+let FCN_PICK = null;
+const fcnTheme = () => FCN_PICK || (SYSTEM_LIGHT.matches ? "light" : "dark");
+function fcnFollowApp() { FCN_PICK = null; if (activeView === "futurecash") paintFutureCash(); }
 const fcnAmt = (a) => { const s = String(a == null ? "" : a); return /^\d+\.\d+$/.test(s) ? s.replace(/0+$/, "").replace(/\.$/, "") : s; };   // trailing zeros only: never rounded
 const fcnCopy = (v, cls) => `<button class="fcn-copy ${cls || ""}" data-copy="${esc(v)}" title="${th("Click to copy")}">${esc(v)}</button>`;
 const fcnSay = (m) => MainSaid.say(String(m || ""));
@@ -201,7 +204,7 @@ function paintFutureCash() {
 }
 function fcnWire(host) {
   const on = (id, fn) => { const b = el(id); if (b) b.onclick = fn; };
-  on("fcnTheme", () => { try { localStorage.setItem(FCN_THEME_KEY, fcnTheme() === "dark" ? "light" : "dark"); } catch (e) {} paintFutureCash(); });
+  on("fcnTheme", () => { FCN_PICK = fcnTheme() === "dark" ? "light" : "dark"; paintFutureCash(); });
   host.querySelectorAll("[data-fcn-tab]").forEach(b => b.onclick = () => { FCN.tab = b.dataset.fcnTab; paintFutureCash(); futureCashLoad(false); });
   on("fcnAudit", () => fcnAct(() => api.fc("audit", true), null));
   on("fcnStart", fcnStart);

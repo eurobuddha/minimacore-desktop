@@ -59,10 +59,13 @@ function renderKeyUses() {
 // ---- Minima Explorer: Pandamonium's block explorer (integrated/blockexplorer MainActivity), over main/explorer.js ---
 // Home (three tiles, LATEST BLOCKS, Load older), then pushed pages with Back: block, transaction, address. Every read is
 // one of the seven the main process builds; blocks are fetched one at a time with the original's pause. Its own dark /
-// light palette behind the header's button, as the original (it does not follow the system).
+// light palette behind the header's button, as the original. It starts in the app's theme and follows it when it changes
+// (0.19.379, exFollowApp); the button switches the Explorer alone until then. Nothing of its own is saved any more.
 // Different from the phone on purpose: every id and address is shown whole (the phone cuts them to 10…8) and can be copied.
 const EX_MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-let EX = null;
+let EX = null, EX_PICK = null;   // EX_PICK: the header button's choice (true = light) until the app's theme next changes
+const exLight = () => (EX_PICK != null ? EX_PICK : SYSTEM_LIGHT.matches);
+function exFollowApp() { EX_PICK = null; const r = el("exRoot"); if (!r) return; const on = exLight(); r.classList.toggle("ex--light", on); el("exTheme").textContent = on ? "☾" : "☀"; el("exTheme").setAttribute("aria-label", on ? t("Dark theme") : t("Light theme")); }
 function explorerReset() { const gen = EX ? EX.gen + 1 : 1; EX = { gen, walk: 0, tip: "", seen: "", blocks: [], lowest: 0, loading: false, end: false, status: "", speed: "", db: "", pages: [], blockCache: new Map(), txCache: new Map(), timer: null }; }
 explorerReset();
 const exKeep = (map, key, value, cap) => { map.delete(key); map.set(key, value); if (map.size > cap) map.delete(map.keys().next().value); };
@@ -305,14 +308,14 @@ function explorerAct(n) {
 function renderExplorer() {
   const host = el("explorerBody");
   if (!el("exContent")) {
-    const light = store("explorerTheme") === "light";
+    const light = exLight();
     host.innerHTML = `<div class="ex${light ? " ex--light" : ""}" id="exRoot"><div class="ex-head"><div class="ex-title">${th("Minima Explorer")}</div><div class="ex-tip" id="exTip"></div>
         <button class="ex-theme" id="exTheme" aria-label="${light ? th("Dark theme") : th("Light theme")}">${light ? "☾" : "☀"}</button></div>
       <form class="ex-search" id="exForm"><input class="ex-in" id="exSearch" placeholder="${th("Block № · TxPoW ID · 0x / Mx address")}" aria-label="${th("Block number, TxPoW ID or address")}" autocomplete="off" spellcheck="false"><button class="ex-go" type="submit">${th("Search")}</button></form>
       <div class="ex-pair" id="exPair" hidden><b>${th("Node unavailable")}</b><span>${th("The node is not running. Start it on the Node tab, then come back.")}</span></div>
       <div id="exContent"></div></div>`;
     el("exForm").onsubmit = (e) => { e.preventDefault(); if (running) explorerSearch(); };
-    el("exTheme").onclick = () => { const on = !el("exRoot").classList.contains("ex--light"); store("explorerTheme", on ? "light" : "dark"); el("exRoot").classList.toggle("ex--light", on); el("exTheme").textContent = on ? "☾" : "☀"; el("exTheme").setAttribute("aria-label", on ? t("Dark theme") : t("Light theme")); };
+    el("exTheme").onclick = () => { const on = !el("exRoot").classList.contains("ex--light"); EX_PICK = on; el("exRoot").classList.toggle("ex--light", on); el("exTheme").textContent = on ? "☾" : "☀"; el("exTheme").setAttribute("aria-label", on ? t("Dark theme") : t("Light theme")); };
     host.addEventListener("click", (e) => { const n = e.target.closest("[data-ex]"); if (n) explorerAct(n); });
     host.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.matches("[role=button][data-ex]")) { e.preventDefault(); explorerAct(e.target); } });
   }

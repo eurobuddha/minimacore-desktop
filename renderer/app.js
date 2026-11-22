@@ -106,7 +106,8 @@ const SYSTEM_LIGHT = window.matchMedia("(prefers-color-scheme: light)");
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", SYSTEM_LIGHT.matches ? "light" : "dark");
 }
-SYSTEM_LIGHT.addEventListener("change", applyTheme);
+// the screens with a light / dark button of their own (Dexicon, Future Cash Next, Minima Explorer) start in the app's theme and follow it (0.19.379)
+SYSTEM_LIGHT.addEventListener("change", () => { applyTheme(); try { DexUI.followApp(); } catch (e) {} try { fcnFollowApp(); } catch (e) {} try { exFollowApp(); } catch (e) {} });
 applyTheme();   // at once, not after boot's first IPC: the attribute is never a frame behind the page
 const THEMES = [["system", N_("Follow the system")], ["light", N_("Light")], ["dark", N_("Dark")]];
 
