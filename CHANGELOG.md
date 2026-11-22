@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.378] — Settings: Appearance, with Follow the system / Light / Dark for the whole app
+
+- There was no way to choose light or dark: the app only followed the OS (the phone's shell has no in-app choice either: it follows Android's own Dark theme setting). Settings now has an Appearance card with three choices, Follow the system (the default, and what every saved value other than "light" / "dark" means, including the released app's old "current" / "original-*"), Light and Dark, saved as config `theme`.
+- The main process makes the choice Electron's `nativeTheme.themeSource`, before the window is created (the window background and the first paint are already in it: no flash) and at once on every save (no restart). Electron then makes `prefers-color-scheme` follow it in every page, which is what style.css and shell.css switch their tokens on, so the whole shell changes at once; on Follow the system it follows the OS live. The renderer's `data-theme` (chat.css) is set from the first frame, no longer after the first IPC.
+- Mail keeps its own Paper / Dark (its Settings, 0.19.1, as the phone's Mail): it is Mail's own choice inside Mail and does not follow the app's; the Appearance note says so. Dexicon's own sun button and History are 0.19.379.
+- Tests (scripts/shell-test.cjs): the saved choice x the OS preference -> the applied theme for every value (legacy and garbage included), only the three values saved, applied before the window exists and on a save, the three choices in Settings; the old "no toggle anywhere" test is replaced on purpose (the owner asked for the toggle); scripts/core-screens-test.cjs: Appearance in the Settings card order. zh / ru / uk.
+
 ## [0.19.377] — PandaPools can write again: the host answers `checkmode`, and a refusal of the engine's guard is said
 
 - PandaPools could not do anything that writes (a swap said "could not get a payout address", with "The node's last answer while this ran (its \"checkmode\" command): Command not found."). The vendored engine's write guard (main/pandapools/runtime-guard.js) asks `checkmode` before every command not on its read-only list. `checkmode` is an MDS command: the block-line node jars and the plain minima.jar this app runs answer "Command not found", so the guard refused EVERY write without sending it, and paused the background service at every block (retrackOwn, keep-fresh, re-announce, rescue-flow and ReserveRecovery's signature check were not running either; the pause went to MDS.log, a no-op here).

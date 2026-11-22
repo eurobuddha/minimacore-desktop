@@ -316,7 +316,7 @@ test("Startup Params refuses -blockaskeyuses and -lowram; the tray line shows th
 test("Settings holds the desktop's own items in the shell's style, and no second command box", () => {
   const body = app.slice(app.indexOf("async function renderSettings()"), app.indexOf("function keysInfo("));
   const titles = [...body.matchAll(/sec\("([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(titles, ["This computer", "Updates", "Node", "Signing keys", "Address key uses", "Signing keys", "Address labels", "History", "Coin guard"]);
+  assert.deepEqual(titles, ["This computer", "Appearance", "Updates", "Node", "Signing keys", "Address key uses", "Signing keys", "Address labels", "History", "Coin guard"]);
   assert.ok(!/diagCmd|diagGo|diagOut|Diagnostics/.test(app), "the Diagnostics command box is gone: the Terminal is the one place to type a node command");
   assert.ok(!/api\.cmd\(/.test(body), "Settings sends no free-text command");
   assert.ok(!/vault|megammrsync|backup password/.test(body), "seed, resync and backup live in Backup & Recovery");

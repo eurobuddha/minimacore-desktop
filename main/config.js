@@ -72,7 +72,8 @@ const DEFAULTS = {
   params: PARAMS.defaultParams(),   // EVERY other minima.jar startup flag, user-editable at first run
   extraArgs: "",             // any additional raw args, appended verbatim
   labels: {},                // address → friendly name (shown in Receive / History / CSV)
-  theme: "current",          // current | original-light | original-dark
+  theme: "system",           // the app's look (Settings, Appearance; 0.19.378): "system" | "light" | "dark". Anything else (the released app's
+                             // old "current" / "original-*") is read as "system", as this app has always shown it (themeSource below)
   casinoEnabled: false,      // P2P Chance was removed in 0.18.68 and nothing sets this any more. An install that
                              // had it on keeps it: it is the gate for the settle-only loop (main/casino.js) that
                              // gets that wallet's existing bets and offers paid out. Do not delete this key.
@@ -144,6 +145,7 @@ function sanitisePatch(cfg) {
       out[k] = n; continue;
     }
     if (k === "frozenApps") { out[k] = require("./freeze").clean(v); continue; }
+    if (k === "theme") { if (v === "system" || v === "light" || v === "dark") out[k] = v; continue; }
     if (k === "coinGuardSends") { if (v === "off" || v === "observe" || v === "enforce") out[k] = v; continue; }
     if (want === "string") { if (typeof v === "string") out[k] = v; continue; }
     out[k] = v;
@@ -309,4 +311,9 @@ function setSecret(value, account) {
 /** Remove a named secret (both Keychain + file fallback). */
 function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(secretFileFor(account)); } catch (e) { /* absent */ } }
 
-module.exports = { load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+/** The saved theme as Electron's nativeTheme.themeSource (main.js sets it before the window exists and on every change).
+ *  "system" follows the OS live; Electron makes every page's prefers-color-scheme (style.css, shell.css, the Dexicon frame)
+ *  and the window's own colours follow it. */
+function themeSource(v) { return v === "light" || v === "dark" ? v : "system"; }
+
+module.exports = { themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

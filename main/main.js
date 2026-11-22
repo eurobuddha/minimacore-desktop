@@ -103,10 +103,13 @@ app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(
 require("./parlons-notify").install({ events: node, electron: require("electron"), window: () => win, open: () => parlons.openExternal() });
 
 function createWindow() {
+  // The saved theme (Settings, Appearance) before the window exists, so the first paint is already in it (no flash): the
+  // background below and every page's prefers-color-scheme follow nativeTheme.themeSource. 0.19.378
+  nativeTheme.themeSource = config.themeSource(config.load().theme);
   win = new BrowserWindow({
     // Pandamonium on the unfolded Fold is 932 x 704 dp: the reference the shell is built to. The standard
     // title bar is kept (no hiddenInset): the shell's own toolbar has the tray button where the Mac's
-    // traffic lights would sit. The background is Pandamonium's core_bg for the system theme.
+    // traffic lights would sit. The background is Pandamonium's core_bg for the applied theme (the saved choice, set just above).
     width: 932, height: 732, minWidth: 440, minHeight: 640,
     title: flavor.test ? flavor.windowTitle + " (TEST PROFILE)" : flavor.windowTitle,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#0F1114" : "#F4F5F7",
@@ -286,6 +289,7 @@ function saveConfigPatch(patch) {
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
   const c = config.save(patch || {});
+  if (patch && "theme" in patch) nativeTheme.themeSource = config.themeSource(c.theme);   // the whole app, at once, no restart
   reserveMode(c);
   if (c.walletDone) firstRunOpen = false;   // the wallet step is over for this launch
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted

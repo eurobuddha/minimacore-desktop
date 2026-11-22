@@ -97,20 +97,23 @@ function idHtml(value, shown) {
 }
 
 // ---- theme -----------------------------------------------------------------
-// The theme follows the system, as Pandamonium does: there is no toggle. style.css switches its tokens on
-// prefers-color-scheme; data-theme is kept in step for the panels that key their own palettes on it
-// (mail.css, chat.css). The old saved "theme" config value is no longer read.
+// Follow the system, Light or Dark (Settings, Appearance; 0.19.378). The choice is config "theme"; the main process makes it
+// Electron's nativeTheme.themeSource (before the window exists, and on every save), and Electron makes prefers-color-scheme
+// follow it in every page: style.css and shell.css switch their tokens on that media query, so the whole app changes at
+// once, and on "Follow the system" follows the OS live, as Pandamonium does. data-theme is kept in step for the panels
+// that key their own palettes on it (chat.css).
 const SYSTEM_LIGHT = window.matchMedia("(prefers-color-scheme: light)");
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", SYSTEM_LIGHT.matches ? "light" : "dark");
 }
 SYSTEM_LIGHT.addEventListener("change", applyTheme);
+applyTheme();   // at once, not after boot's first IPC: the attribute is never a frame behind the page
+const THEMES = [["system", N_("Follow the system")], ["light", N_("Light")], ["dark", N_("Dark")]];
 
 // ---- boot ------------------------------------------------------------------
 async function boot() {
   CFG = await api.getConfig();
   try { KEYMODE = (await api.keyMode()) || KEYMODE; } catch (e) {}
-  applyTheme();
   initShell();
   // RULE 1, app-wide: anything rendered with a shortened identifier carries the COMPLETE value in
   // data-copy, and one click puts that complete value on the clipboard. Delegated from the document so it
@@ -3023,6 +3026,8 @@ async function renderSettings() {
   host.innerHTML =
     sec(t("This computer"), `<div class="ps-sw set-sw"><span class="ps-sw__t" id="setAutostartL">${th("Open at login")}</span><button class="switch switch--m2" role="switch" id="setAutostart" aria-checked="${CFG.openAtLogin ? "true" : "false"}" aria-labelledby="setAutostartL"></button></div>
       <p class="ps-note">${th("Start Minima Core, and so your node, when you log in to this computer. It opens to the tray on Mac. Uses the login items on Mac and Windows and the autostart folder on Linux.")}</p>`) +
+    sec(t("Appearance"), `${THEMES.map(([v, l]) => `<label class="set-radio"><input type="radio" name="setTheme" value="${v}" ${(CFG.theme === "light" || CFG.theme === "dark" ? CFG.theme : "system") === v ? "checked" : ""}><span>${th(l)}</span></label>`).join("")}
+      <p class="ps-note">${th("The whole app changes at once. Follow the system takes this computer's light or dark setting, and changes with it. Mail keeps its own Paper or Dark, in Mail's Settings.")}</p>`) +
     sec(t("Updates"), !fl.updates ? `<p class="set-text">${tr("{name} does not update itself: it reads no update feed and downloads nothing. A newer build is installed by hand.", { name: esc(fl.name) })}</p>` : `<p class="set-text">${th("Minima Core checks its own store feed for a newer build. Downloads are verified against the feed's sha256 and opened for you to install; nothing installs by itself.")}</p>
       <p class="set-text" id="updBody">${th("Checking…")}</p>
       <div class="home-actions set-actions"><button class="btn btn--outline" id="updCheck">${th("Check now")}</button><button class="btn btn--primary" id="updGet" hidden>${th("Download")}</button></div>
@@ -3115,6 +3120,7 @@ async function renderSettings() {
     else toast(on ? t("Minima Core will open when you log in ✓") : t("Minima Core will no longer open at login"), "ok");
     renderSettings();
   };
+  host.querySelectorAll('input[name="setTheme"]').forEach(r => r.onchange = async () => { try { CFG = await api.saveConfig({ theme: r.value }); } catch (e) { toast(ipcError(e), "err"); } });   // main applies it to the whole app (nativeTheme)
   chanceLeftCard();
   if (el("kuOpen")) el("kuOpen").onclick = () => selectTab("keyuses");
 }

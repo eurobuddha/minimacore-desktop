@@ -1,5 +1,5 @@
-// The Pandamonium shell (0.18.69+): pins the six tabs, the tray, the overflow menu and the system theme,
-// so a later change cannot quietly bring back the old seventeen-tab strip or the theme toggle.
+// The Pandamonium shell (0.18.69+): pins the six tabs, the tray, the overflow menu and the theme (follow the system,
+// light or dark: 0.19.378), so a later change cannot quietly bring back the old seventeen-tab strip.
 "use strict";
 const test = require("node:test"), assert = require("node:assert"), fs = require("fs"), path = require("path");
 require("../renderer/i18n.js");   // t(), th(), tr() as the window has them: the key is the English text, so code lifted out of the renderer reads as before
@@ -46,8 +46,32 @@ test("the badges survived the move", () => {
   assert.ok(/id="chatTab"[^>]*hidden/.test(html), "the Chat tab stays hidden until boot() shows it");
 });
 
-test("the theme follows the system: no toggle, Pandamonium's exact tokens", () => {
-  assert.ok(!/themeBtn|cycleTheme|setTheme/.test(html + app), "no theme toggle anywhere");
+// 0.19.378 (owner: "no light/dark mode toggle"): Follow the system / Light / Dark in Settings, config "theme", applied by the main
+// process as nativeTheme.themeSource, which Electron makes every page's prefers-color-scheme follow.
+const ROOT = path.join(__dirname, "..");
+const configSrc = fs.readFileSync(path.join(ROOT, "main", "config.js"), "utf8"), mainSrc = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
+test("the theme: the saved choice x the OS preference gives the applied theme", () => {
+  const themeSource = new Function(configSrc.match(/\nfunction themeSource\(v\)[^\n]*/)[0] + "; return themeSource;")();
+  // Electron's rule for nativeTheme.themeSource: "system" takes the OS's setting (and follows it live); "light" / "dark" win over it
+  const applied = (saved, osDark) => { const src = themeSource(saved); return src === "system" ? (osDark ? "dark" : "light") : src; };
+  for (const [saved, os, want] of [["system", true, "dark"], ["system", false, "light"], ["light", true, "light"], ["light", false, "light"], ["dark", false, "dark"], ["dark", true, "dark"],
+    ["current", false, "light"], ["current", true, "dark"], ["original-light", true, "dark"], ["original-dark", false, "light"], [undefined, false, "light"], ["", true, "dark"], ["DARK", false, "light"], [{}, true, "dark"]])
+    assert.equal(applied(saved, os), want, JSON.stringify(saved) + " with the OS " + (os ? "dark" : "light"));
+  assert.ok(/theme: "system",/.test(configSrc), "the default follows the system, as the app always has");
+  assert.ok(/if \(k === "theme"\) \{ if \(v === "system" \|\| v === "light" \|\| v === "dark"\) out\[k\] = v; continue; \}/.test(configSrc), "only the three values are saved");
+  const win = mainSrc.slice(mainSrc.indexOf("function createWindow()"), mainSrc.indexOf("new BrowserWindow("));
+  assert.ok(/nativeTheme\.themeSource = config\.themeSource\(config\.load\(\)\.theme\)/.test(win), "applied before the window exists: the first paint is already in it");
+  const save = mainSrc.slice(mainSrc.indexOf("function saveConfigPatch("), mainSrc.indexOf("function saveConfigPatch(") + 900);
+  assert.ok(/if \(patch && "theme" in patch\) nativeTheme\.themeSource = config\.themeSource\(c\.theme\)/.test(save), "applied at once on a save, no restart");
+});
+test("the theme: Settings offers Follow the system, Light and Dark, and saves the choice", () => {
+  assert.ok(app.includes('const THEMES = [["system", "Follow the system"], ["light", "Light"], ["dark", "Dark"]];'), "the three choices");
+  const set = app.slice(app.indexOf("async function renderSettings()"), app.indexOf("function keysInfo("));
+  assert.ok(set.includes('sec("Appearance"') && set.includes('name="setTheme"'), "an Appearance card with the three choices");
+  assert.ok(/input\[name="setTheme"\]'\)\.forEach\(r => r\.onchange = async \(\) => \{ try \{ CFG = await api\.saveConfig\(\{ theme: r\.value \}\)/.test(set), "a choice is saved at once");
+  assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", applyTheme\);\napplyTheme\(\);/.test(app), "data-theme follows the applied theme, from the first frame and live");
+});
+test("the theme: Pandamonium's exact tokens", () => {
   assert.ok(/prefers-color-scheme: light/.test(css) && /prefers-color-scheme: light/.test(app));
   const dark = css.slice(css.indexOf(":root {"), css.indexOf("@media (prefers-color-scheme: light)"));
   const light = css.slice(css.indexOf("@media (prefers-color-scheme: light)"));

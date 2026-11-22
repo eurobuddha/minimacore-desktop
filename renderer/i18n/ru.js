@@ -5569,3 +5569,12 @@
   "PandaPools is paused: this node's wallet is locked, so your pools are not being kept fresh. Unlock the wallet and it goes on by itself.",
   "PandaPools is paused ({why}), so your pools are not being kept fresh. It tries again at every block."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "Follow the system": "Как в системе",
+  "Light": "Светлая",
+  "The whole app changes at once. Follow the system takes this computer's light or dark setting, and changes with it. Mail keeps its own Paper or Dark, in Mail's Settings.": "Всё приложение меняется сразу. «Как в системе» берёт светлую или тёмную настройку этого компьютера и меняется вместе с ней. У Почты свой выбор «Светлая» или «Тёмная» в её настройках."
+}, { review: [
+  "Follow the system",
+  "Light",
+  "The whole app changes at once. Follow the system takes this computer's light or dark setting, and changes with it. Mail keeps its own Paper or Dark, in Mail's Settings."
+] });
