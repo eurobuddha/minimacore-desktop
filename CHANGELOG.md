@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.355] — miniMall: a tip that comes while a pass is running gets its own pass (as released 0.18.301)
+
+- The poll took a new tip as scanned before scanOnce, which returns at once while a pass is running (`scanning`): a tip that came during a long pass got no pass of its own, and its blocks waited for the next one. Now a poll during a pass leaves the tip for the next poll (`tip !== lastTip && !scanning`). main/shop.js pin updated on purpose.
+- Tests (scripts/shop-store-test.cjs): a poll at 1002 while the pass at 1001 is reading its orders, then the next poll scans 1002 (fails with the old condition).
+
 ## [0.19.354] — miniMall: a payment is counted the first time it is read again; an order without a secret settles before it can be confirmed (as released 0.18.300)
 
 - 0.19.344 to 0.19.353 left a payment coin unjudged (not counted, not marked) until tip block + 3, and while its orders were not read. `coins` lists unspent coins only and the vendor's own wallet may spend a coin 3 blocks old, so a coin still waiting after tip block + 3 (no pass at exactly that tip, an orders read that failed, a gap above the coin, a reorganisation) could be spent before it was ever counted, and its order stayed unpaid with nothing said (review-desktop-r3 R1, R2, R2b, R4; released 0.18.286 paid them). Now every payments read counts what it lists at once, in every pass, whatever the orders read did. The wait, the Inbox's "counted after block N" line (gone from the zh / ru / uk catalogs too), the skipping of the payments read after a failed orders read and its waiting rule are gone.

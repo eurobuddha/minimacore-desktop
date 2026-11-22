@@ -580,10 +580,13 @@ async function startLoop() {
   await init();
   if (scanTimer) return;
   await scanOnce();
-  scanTimer = setInterval(async () => {
-    try { const r = await nodeCmd("block"); const tip = parseInt((r && r.response && (r.response.block != null ? r.response.block : r.response)), 10) || 0;
-      if (tip !== lastTip) { lastTip = tip; await scanOnce(); } } catch (e) {}
-  }, SCAN_EVERY_MS);
+  scanTimer = setInterval(tick, SCAN_EVERY_MS);
+}
+/** One poll (0.19.355, as released 0.18.301): a new tip gets a pass, but only when no pass is running. It took the tip as scanned while scanOnce
+ *  returned at once on `scanning`, so a tip that came during a long pass got no pass of its own until the next block. */
+async function tick() {
+  try { const r = await nodeCmd("block"); const tip = parseInt((r && r.response && (r.response.block != null ? r.response.block : r.response)), 10) || 0;
+    if (tip !== lastTip && !scanning) { lastTip = tip; await scanOnce(); } } catch (e) {}
 }
 function stopLoop() { if (scanTimer) { clearInterval(scanTimer); scanTimer = null; } }
 
@@ -664,6 +667,6 @@ module.exports = {
   placeOrder, retryPayment, paymentNotSent, advanceStatus, reply, checkImported, vendorCheck,
   sendingCount: () => sending.size,   // payments at the node in this process: said by the Quit and Shutdown warnings (0.19.288)
   _unreadText: unreadText,   // test-only: the sentences the Inbox repeats
-  _proofOf: proofOf,         // test-only
+  _proofOf: proofOf, _tick: tick,   // test-only
   _setRunner, MINIMERCH, MXUSD_TOKEN, tokenFor
 };

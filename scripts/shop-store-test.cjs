@@ -1227,3 +1227,17 @@ test("R3a with a secret: the real order under the window's reach is paid by its 
     assert.equal(store.order("ORD-V").paid, false); assert.ok(!(store.order("ORD-V").coins || []).length);
   });
 });
+
+// ---- 0.19.355 (as released 0.18.301): a tip that comes while a pass is running gets a pass of its own on the next poll ----
+test("vendor: the poll: a new tip seen while a pass is running is not taken as scanned; the next poll scans it", async () => {
+  await copyRig(async (st) => {
+    const base = javaNode(st); let release, hold = null;
+    shop._setRunner(async (c) => { if (hold && c.startsWith("coins address:" + shop.MINIMERCH)) await hold; return base(c); });
+    jTip(st, 1001); hold = new Promise(r => { release = r; }); const running = shop._tick();
+    await new Promise(r => setImmediate(r));   // the pass at 1001 is reading its orders
+    jTip(st, 1002); await shop._tick();          // a poll during it
+    hold = null; release(); await running;
+    assert.equal(Number(store.getMeta("scanned_tip_block")), 1001, "the pass at 1001 finished");
+    await shop._tick(); assert.equal(Number(store.getMeta("scanned_tip_block")), 1002, "the tip seen during it gets its pass");
+  });
+});
