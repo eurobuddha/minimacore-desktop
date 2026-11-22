@@ -250,6 +250,17 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     return why ? I18N.t("The on-chain order book could not start: {reason}. It is tried again every minute. FAST orders are not affected.", { reason: why })
       : I18N.t("The on-chain order book is still starting. Nothing can be sent to it yet.");
   }
+  /** The limit an on-chain action is sent with (0.19.374). On-chain prices sit on a 6-decimal grid (resting orders are
+   *  placed at 6 decimals, pool depth is sampled on 0.00001 ticks) while a FAST price may have 8, and the page takes at
+   *  most 6 (renderer/dexicon/mds.js). A SELL is sent at the typed limit cut UP to 6 decimals, a BUY cut DOWN: every
+   *  6-decimal level at or better than the typed limit is still at or better than the sent one, and no level worse than
+   *  the typed limit becomes acceptable (scripts/dexicon-ui.test.cjs proves it over a grid). The amount is not touched.
+   *  null: not a price, or a BUY below the smallest on-chain price. */
+  function chainLimit(buy, priceText) {
+    const p = dec(priceText); if (!p || p.v === 0n) return null;
+    const c = buy ? down(p, 6) : up(p, 6);
+    return c.v === 0n ? null : c;
+  }
   /** What a reviewed plan tells the page at the click (renderer/dexicon/mds.js ACTS.place): the page signs only when
    *  its own book still says the same. */
   const expectOf = (pl) => (pl.fast ? { expect: "take", take: str(pl.take), worst: str(pl.worst || zero) } : { expect: "rest" });
@@ -393,6 +404,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, chainWhy, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, chainWhy, chainLimit, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, PUT_BACK, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

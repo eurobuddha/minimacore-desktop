@@ -374,6 +374,13 @@ const DexUI = (() => {
     X.said = null;
     if (layer === "chain" && C.chainWhy(st)) return say(C.chainWhy(st) + " " + I18N.t("Nothing was signed or sent."), "note");   // 0.19.373: never a review for what cannot be sent
     const args = { buy: X.buy, price, amount, layer };
+    let gridNote = "";
+    if (layer === "chain") {   // 0.19.374: the on-chain limit on the 6-decimal grid, never past the typed one (C.chainLimit)
+      const lim = C.chainLimit(X.buy, price);
+      if (!lim) return say(I18N.t("On-chain prices have 6 decimals, and this limit is below the smallest one (0.000001). Nothing was signed or sent."), "note");
+      args.price = C.str(lim);
+      if (C.cmp(lim, C.dec(price)) !== 0) gridNote = I18N.t("On-chain prices have 6 decimals: your limit {typed} is sent as {sent} (the same on-chain orders qualify).", { typed: price, sent: C.fmtPrice(lim) }) + "\n\n";
+    }
     if (layer === "fast") {
       // H1: the click carries what the review on screen said; the page signs only if its own book still says so
       const pl = C.plan(book(), X.buy, price, amount, fundsNow());
@@ -385,11 +392,11 @@ const DexUI = (() => {
     }
     let r = await drive("place", args);
     while (!r.error && r.asked && r.asked !== args.reviewed) {   // on-chain: the page's own review, word for word, before anything is signed
-      const ok = await dialog(args.reviewed ? I18N.t("The book moved. Review again") : I18N.t("Review this on-chain trade"), I18N.t("{asked}\n\nYour node signs this transaction and posts it. It is final only when a block confirms it (about 3 minutes); until then Activity shows it as waiting.", { asked: r.asked }), I18N.t("Sign and send"));
+      const ok = await dialog(args.reviewed ? I18N.t("The book moved. Review again") : I18N.t("Review this on-chain trade"), gridNote + I18N.t("{asked}\n\nYour node signs this transaction and posts it. It is final only when a block confirms it (about 3 minutes); until then Activity shows it as waiting.", { asked: r.asked }), I18N.t("Sign and send"));
       if (!ok) return say(I18N.t("Nothing was signed or sent."), "note");
       args.reviewed = r.asked;
       // 0.19.231: what was just confirmed here is the one LIMIT the main process lets the page hand to the engine
-      try { await api.dxCommand({ op: "intent", type: "LIMIT", buy: X.buy, price, amount }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
+      try { await api.dxCommand({ op: "intent", type: "LIMIT", buy: X.buy, price: args.price, amount }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
       r = await drive("place", args);
     }
     if (r.error) { X.sent = null; return say(r.error); }

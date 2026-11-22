@@ -713,7 +713,7 @@ test("Settings: a relay the desktop cannot reach is refused before anything is s
 // 0.19.231: the native screens record what the user confirmed; the main process asks about anything else the page wants
 test("the native Exchange screens record the confirmed on-chain trade, edit and relay change as intents; main.js answers the rest with its own question", () => {
   const ui = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ui.js"), "utf8"), main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
-  assert.ok(/args\.reviewed = r\.asked;\s*\n[^\n]*\n\s*try \{ await api\.dxCommand\(\{ op: "intent", type: "LIMIT", buy: X\.buy, price, amount \}\); \}/.test(ui), "after the on-chain review, before the page is driven");
+  assert.ok(/args\.reviewed = r\.asked;\s*\n[^\n]*\n\s*try \{ await api\.dxCommand\(\{ op: "intent", type: "LIMIT", buy: X\.buy, price: args\.price, amount \}\); \}/.test(ui), "after the on-chain review, before the page is driven");
   assert.ok(/if \(!fast\) \{ try \{ await api\.dxCommand\(\{ op: "intent", type: "EDIT", coinid: id, price: next \}\);/.test(ui));
   assert.ok(/api\.dxCommand\(\{ op: "intent", type: "KV", key: "relays" \}\)/.test(ui));
   assert.ok(/dexicon\.setConfirm\(async \(title, detail\) => \{/.test(main) && /buttons: \[lang\.t\("Refuse"\), lang\.t\("Allow"\)\], defaultId: 0, cancelId: 0/.test(main), "a main-process question, Refuse the default");
@@ -785,4 +785,60 @@ test("0.19.373: the page refuses an on-chain place before its review while the e
   go(4); assert.equal(reply().asked, win.pageAsks, "ready: the page's own review, as before");
   say({ dxRoom: 1, drive: { id: 5, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "fast", expect: "rest" } } });
   assert.equal(reply().error, null, "a FAST order does not wait for the on-chain engine");
+});
+
+// ---------------------------------------------------------------- the on-chain limit on the 6-decimal grid (0.19.374)
+test("0.19.374: the on-chain limit admits exactly the 6-decimal levels the typed limit admits, and never one it does not", () => {
+  const lv = (n) => ({ v: BigInt(n), s: 6 });   // a 6-decimal on-chain level
+  let checked = 0;
+  for (let t8 = 440000; t8 <= 443000; t8++) {   // every 8-decimal limit from 0.00440000 to 0.00443000
+    const typed = { v: BigInt(t8), s: 8 }, text = C.str(typed), sell = C.chainLimit(false, text), buy = C.chainLimit(true, text);
+    assert.ok(C.cmp(sell, typed) >= 0 && C.cmp(buy, typed) <= 0, "the sent limit is never worse for the user than the typed one: " + text);
+    assert.ok(sell.s <= 6 && buy.s <= 6);
+    for (let l = 4398; l <= 4432; l++) {
+      const L = lv(l);
+      assert.equal(C.cmp(L, typed) >= 0, C.cmp(L, sell) >= 0, "SELL " + text + ": bid level " + C.str(L));
+      assert.equal(C.cmp(L, typed) <= 0, C.cmp(L, buy) <= 0, "BUY " + text + ": ask level " + C.str(L));
+      checked++;
+    }
+  }
+  assert.equal(checked, 3001 * 35);
+  assert.equal(C.str(C.chainLimit(false, "0.00441234")), "0.004413"); assert.equal(C.str(C.chainLimit(true, "0.00441234")), "0.004412");
+  assert.equal(C.str(C.chainLimit(false, "0.004413")), "0.004413", "a 6-decimal limit is sent as it is"); assert.equal(C.str(C.chainLimit(true, "0.0032000")), "0.0032");
+  assert.equal(C.chainLimit(true, "0.0000009"), null, "a BUY below the smallest on-chain price cannot be sent");
+  assert.equal(C.str(C.chainLimit(false, "0.0000009")), "0.000001");
+  assert.equal(C.chainLimit(true, "abc"), null); assert.equal(C.chainLimit(false, "0"), null);
+});
+
+test("0.19.374: the owner's case: a POOL bid above a FAST bid, the FAST row clicked, BOOK / POOL sends 0.004413 (not refused), the review says so, the intent is the sent price, the amount untouched", async () => {
+  const book = { fast: [{ side: "buy", price: "0.00441234", minima: "500", ours: false }], book: [], poolAsks: [], poolBids: [{ price: "0.0045", minima: "1234.56789012" }], pools: [] };
+  const u = await tradeUi({ book });
+  const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));
+  assert.deepEqual(rows, [{ side: "bid", price: "0.0045", cum: "1234.56789012" }, { side: "bid", price: "0.00441234", cum: "1734.56789012" }]);
+  u.els.dxBids.onclick({ target: { closest: () => ({ dataset: rows[1] }) } }); await u.settle();
+  assert.deepEqual([u.els.dxPrice.value, u.els.dxAmount.value], ["0.00441234", "1734.56789012"], "the FAST order's exact price and the cumulative amount");
+  assert.equal(u.els.dxCta2.hidden, false); assert.equal(u.els.dxCta2.disabled, false);
+  u.els.dxCta2.onclick(); await u.settle();
+  const d1 = u.drives()[0].drive;
+  assert.deepEqual(JSON.parse(JSON.stringify(d1.args)), { buy: false, price: "0.004413", amount: "1734.56789012", layer: "chain" }, "a SELL is sent at the typed limit cut up to 6 decimals; the amount as typed");
+  const asked = "Selling 1234.56789012 MINIMA now\nEffective 0.0045\n\nRest 500 MINIMA @ 0.004413 as a limit order after the trade confirms.";
+  u.answer(d1.id, { asked }); await u.settle(); await u.settle();
+  assert.equal(u.dialogs.length, 1);
+  assert.match(u.dialogs[0].innerHTML, /^<h2>Review this on-chain trade<\/h2><pre>On-chain prices have 6 decimals: your limit 0\.00441234 is sent as 0\.004413 \(the same on-chain orders qualify\)\.\n\nSelling 1234\.56789012 MINIMA now/);
+  assert.match(u.dialogs[0].innerHTML, /Rest 500 MINIMA @ 0\.004413 as a limit order/, "a remainder rests at the price sent, and the page's review says that price");
+  const intent = u.cmds.find(c => c.op === "intent");
+  assert.deepEqual(JSON.parse(JSON.stringify(intent)), { op: "intent", type: "LIMIT", buy: false, price: "0.004413", amount: "1734.56789012" }, "the confirmed intent is what the page will send, so main/dexicon.js matches it");
+  const d2 = u.drives()[1].drive;
+  assert.equal(d2.args.price, "0.004413"); assert.equal(d2.args.reviewed, asked);
+  u.answer(d2.id, {}); await u.settle();   // the page sent it: the one money action ends
+  // a 6-decimal limit: no note
+  const v = await tradeUi({ book });
+  v.els.dxBids.onclick({ target: { closest: () => ({ dataset: { side: "bid", price: "0.0045", cum: "1234.56789012" } }) } }); await v.settle();
+  v.els.dxCta2.onclick(); await v.settle(); v.answer(v.drives()[0].drive.id, { asked: "Selling 1234.56789012 MINIMA now" }); await v.settle();
+  assert.equal(v.drives()[0].drive.args.price, "0.0045"); assert.ok(!/6 decimals/.test(v.dialogs[0].innerHTML));
+  v.answer(v.drives()[1].drive.id, {}); await v.settle();
+  // the page's guard stays the last line of defence
+  const { say, reply } = bridge();
+  say({ dxRoom: 1, drive: { id: 1, act: "place", args: { buy: false, price: "0.00441234", amount: "10", layer: "chain" } } });
+  assert.equal(reply().error, "An on-chain order takes a price of at most 6 decimals. Nothing was sent.");
 });
