@@ -24,7 +24,9 @@
  *               still pay the OLD wallet's address. The host moves the store aside (MDS.foreignStore) and starts
  *               clean. Until the check has passed the RESTING engine is not booted either (STORE_MINE).
  *   RETRY       PDService.boot() is tried again (once a minute) while the resting engine is not ready: the MiniDapp
- *               gets one `inited` per node start, this host gets one per app start.
+ *               gets one `inited` per node start, this host gets one per app start. (0.19.373) An ERROR that ends a
+ *               boot is logged with its message and kept as the reason the resting engine is not ready (DX.restingWhy,
+ *               restingWhy on every STATE packet), so the screens can say why and refuse an on-chain action at once.
  *   READ MODEL  DX (bottom of the file): ready / publicId / book / mine for the screens, and a relay book poll to feed
  *               it (in the MiniDapp the page polls the book itself). Read-only: it places, changes and cancels nothing.
  *   REFUSALS    (0.18.108) reply() sends a `refused` at LOW priority (the host's MDS.net.POST, 4th argument): it waits
@@ -472,19 +474,36 @@ function onlyOwnOrders(data) {
  *  READY, or it tells an ERROR and stops (the wrapper below). A boot that does neither for 5 minutes (a node command
  *  that never came back) is given up on, loudly, and the next one may start. */
 var pdBootingSince = 0, PD_BOOT_STUCK_MS = 300000;
+/** NOT READY BECAUSE (0.19.373): the last reason a boot of the on-chain engine ended without READY, in the engine's own
+ *  words ("" = none known: it is still starting). The screens say it (DX.restingWhy, and restingWhy on the STATE packet
+ *  the page reads) and refuse an on-chain action before any review. Before this an ERROR that ended a boot was seen by
+ *  nobody: the native screen keeps only STATE, and this wrapper only reset its boot timer. */
+var pdWhy = '';
+function pdNotReady(why) {
+    why = String(why || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!why || why === pdWhy) return;
+    pdWhy = why;
+    log('on-chain engine not ready: ' + why + ' (its start is tried again every minute; FAST trading is not affected)');
+    try { PDService.snapshot(); } catch (e) { }   // the page hears the reason now, not at the next block
+}
 function pdBoot() {
     var now = Date.now();
     if (PDService.ready) { pdBootingSince = 0; return; }
     if (pdBootingSince > 0) {
         if (now - pdBootingSince < PD_BOOT_STUCK_MS) return;   // still running: a second one would run every step twice, side by side
         log('the on-chain engine\'s start has not finished after ' + (PD_BOOT_STUCK_MS / 60000) + ' minutes; starting it again');
+        pdNotReady('its start did not finish within ' + (PD_BOOT_STUCK_MS / 60000) + ' minutes (a node command did not answer)');
     }
     if (lastPdBootMs > 0 && now - lastPdBootMs < 60000) return;
     lastPdBootMs = now; pdBootingSince = now; PDService.boot();
 }
 (function () {   // a boot that fails says so through PDService.tell('ERROR', …) and returns: that boot is over
     var tell = PDService.tell;
-    PDService.tell = function (type) { if (type === 'ERROR' && !PDService.ready) pdBootingSince = 0; return tell.apply(PDService, arguments); };
+    PDService.tell = function (type, data) {
+        if (type === 'ERROR' && !PDService.ready) { var booting = pdBootingSince > 0; pdBootingSince = 0; if (booting) pdNotReady(data && data.message); }
+        if (type === 'STATE' && data && typeof data === 'object') data.restingWhy = PDService.ready ? '' : pdWhy;
+        return tell.apply(PDService, arguments);
+    };
 })();
 
 /** The FAST maker (this file) and the vendored PandaDEX RESTING engine (PDService) share one MDS.init. */
@@ -582,6 +601,7 @@ function chainMine() {
 var DX = {
     ready: function () { return READY; },
     restingReady: function () { return !!PDService.ready; },
+    restingWhy: function () { return PDService.ready ? '' : pdWhy; },
     publicId: function () { return ME ? ME.publicId() : null; },
     ticking: function () { return TICKING; },
     relays: function () { return RELAY ? RELAY.relays.slice() : []; },

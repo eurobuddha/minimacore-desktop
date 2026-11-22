@@ -946,6 +946,7 @@ ipcMain.handle("mcd:engineSetAside", (_e, which) => {
 // No mcd:dxInvalidate: a window cannot move the store aside, and a wallet replacement does not wait for a window
 // to say so (walletReplaced, below).
 dexicon.emitter.on("comms", (message) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", message); });   // service → screens
+dexicon.emitter.on("nodelog", (line) => node.log("[dexicon] " + line));   // 0.19.373: why the on-chain engine did not start
 dexicon.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:dexicon", null); });           // a new block, or a wallet reset
 node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });
 

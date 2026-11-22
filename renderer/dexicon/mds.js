@@ -215,6 +215,7 @@
         if (a.expect === "rest") need(!seen.n, CHANGED);
         else need(seen.n > 0 && seen.take.gt(0) && NUM.test(a.take) && NUM.test(a.worst) && seen.take.eq(new Decimal(a.take)) && seen.worst.eq(new Decimal(a.worst)), CHANGED);
       }
+      if (a.layer === "chain") chainReady();   // 0.19.373: before the page plans, asks or sends anything
       chooseSide(!!a.buy); DexiconFast.setMode(a.layer === "fast");
       $("price").value = a.price; $("amount").value = a.amount;
       preview(); DexiconFast.refreshPreview();
@@ -256,6 +257,16 @@
   var style = document.createElement("style");
   style.textContent = "html,body{background:transparent!important}.topbar,main>:not(dialog){display:none!important}";
   (document.head || document.documentElement).appendChild(style);
+  /** 0.19.373: an on-chain action is refused, before any review, while the resting engine is not READY (its STATE says
+   *  ready:false, or none came yet) or is building another transaction of this wallet (busy). The engine itself would
+   *  drop the order after the review and the signature prompt ("PandaDEX is still starting…", resting/pd_service.js).
+   *  The reason is the one the desktop's service wrapper adds to STATE (restingWhy). The page is English, as the engine's own words. */
+  function chainReady() {
+    var why = String(state.restingWhy || "").replace(/^\s+|[.\s]+$/g, "");
+    need(state.ready === true, (why ? "The on-chain order book could not start: " + why + ". It is tried again every minute. FAST orders are not affected."
+      : "The on-chain order book is still starting. Nothing can be sent to it yet.") + " Nothing was sent.");
+    need(!state.busy, "Your node is still building another on-chain transaction. Wait for it to finish. Nothing was sent.");
+  }
   /** The page's own test for "this order trades on the chain now" (ui/pd_app.js place): pools, else book orders. */
   function chainCrosses(a) {
     var block = Number(state.block || 0), comp = PandaComposite.plan(state.book || [], state.pools || [], !!a.buy, a.amount, a.price, block), plan;

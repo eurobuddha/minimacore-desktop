@@ -350,7 +350,8 @@ const DexUI = (() => {
     const short = pl.ok && pl.short.v > 0n;
     const typo = C.entryProblem($("dxPrice").value) || C.entryProblem($("dxAmount").value);
     $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? I18N.t("Exceeds your free {buy} by {short} (free {free})", { buy: (buy ? "MxUSD" : "MINIMA"), short: C.fmt(pl.short), free: C.fmtBal(pl.free) }) : "";
-    $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).map(l => `<p>${esc(l)}</p>`).join("")
+    const chainNo = C.chainWhy(st);   // 0.19.373: the on-chain engine is not ready: said, and BOOK / POOL is off
+    $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).concat(pl.ok && pl.chain && chainNo ? [chainNo] : []).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>${th("Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.")}</p>`;
     const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !why.soft;
     for (const b of [cta, cta2]) b.dataset.side = buy ? "buy" : "sell";
@@ -358,7 +359,7 @@ const DexUI = (() => {
     cta.disabled = trading || dead || short || !f.known || !!typo || (pl.ok === false && !!pl.why) || !!(pl.ok && pl.stuck);
     cta2.hidden = !(pl.ok && pl.chain) || trading;
     cta2.innerHTML = esc(I18N.t("{side} · BOOK / POOL", { side: side.trim() })) + "<small>" + th("on-chain, about 3 minutes · review first") + "</small>";
-    cta2.disabled = dead || !f.known || trading || !!typo;
+    cta2.disabled = dead || !f.known || trading || !!typo || !!chainNo;
     // the engine's own words: the take's progress, then what the page or the service last said
     const says = C.pageSays(Page.state, X.svc), lines = says.lines;
     const log = $("dxLog"), mine = X.said;
@@ -371,6 +372,7 @@ const DexUI = (() => {
     const typo = C.entryProblem(price) || C.entryProblem(amount); if (typo) return say(typo, "note");
     if (!num(price) || !num(amount)) return say(I18N.t("Enter a price and an amount."), "note");
     X.said = null;
+    if (layer === "chain" && C.chainWhy(st)) return say(C.chainWhy(st) + " " + I18N.t("Nothing was signed or sent."), "note");   // 0.19.373: never a review for what cannot be sent
     const args = { buy: X.buy, price, amount, layer };
     if (layer === "fast") {
       // H1: the click carries what the review on screen said; the page signs only if its own book still says so

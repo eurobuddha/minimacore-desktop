@@ -241,6 +241,15 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     return { ok: true, buy, price, amount, fast, stuck, takes: n, take, worst, cost, pay, get, rest: fast ? sub(amount, take) : amount, avg: fast && !stuck ? div(cost, take, 8) : null,
       chain, ownOnly: x.ownOnly && !chain, need, free, short, offered: x.offered };
   }
+  /** Why nothing can be sent to the on-chain book now ("" = it can): the resting engine is not ready (0.19.373). The
+   *  engine's own reason when a start ended in an error (status().restingWhy, main/dexicon/service.desktop.js), else it
+   *  is still starting. BOOK / POOL and SWEEP are off while this is not "", and no review is shown. */
+  function chainWhy(st) {
+    if (st && st.restingReady) return "";
+    const why = String((st && st.restingWhy) || "").trim().replace(/[.\s]+$/, "");
+    return why ? I18N.t("The on-chain order book could not start: {reason}. It is tried again every minute. FAST orders are not affected.", { reason: why })
+      : I18N.t("The on-chain order book is still starting. Nothing can be sent to it yet.");
+  }
   /** What a reviewed plan tells the page at the click (renderer/dexicon/mds.js ACTS.place): the page signs only when
    *  its own book still says the same. */
   const expectOf = (pl) => (pl.fast ? { expect: "take", take: str(pl.take), worst: str(pl.worst || zero) } : { expect: "rest" });
@@ -384,6 +393,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, chainWhy, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, PUT_BACK, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, strip };
 });

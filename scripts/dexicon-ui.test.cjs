@@ -275,7 +275,7 @@ function bridge() {
   const win = { console: { log() {}, error() {} }, document: { getElementById: el, querySelectorAll: () => [], querySelector: () => null, head: {}, createElement: () => ({}) }, navigator: {}, setInterval() {}, JSON, Object, Array, String, Number, Promise, Error,
     parent: { postMessage: (m) => sent.push(m) }, addEventListener: (t, f) => { listeners[t] = f; },
     // the page's own globals the driver calls (ui/pd_app.js, ui/app.js), recorded
-    state: { block: 100, book: [], pools: [] }, chooseSide: (b) => calls.push("side:" + b), preview: () => calls.push("preview"), place: () => { calls.push("place"); if (win.pageAsks) calls.push("confirmed:" + win.confirm(win.pageAsks)); },
+    state: { ready: true, block: 100, book: [], pools: [] }, chooseSide: (b) => calls.push("side:" + b), preview: () => calls.push("preview"), place: () => { calls.push("place"); if (win.pageAsks) calls.push("confirmed:" + win.confirm(win.pageAsks)); },
     cancel: (id) => calls.push("cancel:" + id + ":" + win.confirm("?")), editOrder: (id) => calls.push("edit:" + id + ":" + win.prompt("?")), send: (t) => calls.push("send:" + t),
     DexiconFast: { setMode: (f) => calls.push("fast:" + f), refreshPreview() {}, cancelOrder: (id) => calls.push("cancelFast:" + id + ":" + win.confirm("?")), editOrder: (id) => calls.push("editFast:" + id + ":" + win.prompt("?")),
       addRelay: (u) => calls.push("addRelay:" + u), removeRelay() {}, discover() {}, refresh() {}, myId: () => "id", myIdError: () => "" },
@@ -719,4 +719,70 @@ test("the native Exchange screens record the confirmed on-chain trade, edit and 
   assert.ok(/dexicon\.setConfirm\(async \(title, detail\) => \{/.test(main) && /buttons: \[lang\.t\("Refuse"\), lang\.t\("Allow"\)\], defaultId: 0, cancelId: 0/.test(main), "a main-process question, Refuse the default");
   const C = require("../renderer/dexicon-core.js");
   assert.equal(C.bridgeCall({ dxRoom: 1, id: 1, name: "room.dex", args: { op: "intent", type: "LIMIT" } }), null, "the frame cannot record an intent");
+});
+
+// ---------------------------------------------------------------- the on-chain engine not ready (0.19.373)
+/** The Trade screen over a stand-in engine: status, the service's book and the page's FAST book are the test's. */
+async function tradeUi(o) {
+  const vm = require("node:vm"), posted = [], cmds = [];
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage: (m) => posted.push(m) }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false, showModal() { o.dialogs.push(e); setImmediate(() => e.onclick({ target: { closest: () => ({ dataset: { x: o.answer === false ? "0" : "1" } }) } })); }, close() {} }; return e; };
+  o.dialogs = o.dialogs || [];
+  const els = {}, listeners = {}, status = Object.assign({ version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} }, o.status || {});
+  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
+  win.window = win;
+  win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async (a) => { cmds.push(a); return { status: true, rows: [] }; },
+    dxBook: async () => o.book, cmd: async () => ({ status: true, response: [{ tokenid: "0x00", sendable: "100000" }, { tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", sendable: "1000" }] }) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
+  const shell = win.document.getElementById("shell"); shell.dataset.mode = "dex";
+  win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+  win.DexUI.paint("dexicon"); win.DexUI.render(); await settle();
+  const frame = shell.children.find(c => c.tag === "iframe");
+  const page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [], fast: o.book.fast.filter(x => !x.ours), amount: "", trading: false }, p) } });
+  page({});
+  const answer = (id, r) => listeners.message({ source: frame.contentWindow, data: Object.assign({ dxRoom: 1, driven: id, error: null }, r) });
+  return { win, els, posted, cmds, status, page, answer, settle, dialogs: o.dialogs, drives: () => posted.filter(m => m.drive) };
+}
+const CHAIN_BOOK = { fast: [], book: [{ side: "sell", price: "0.0031", minima: "500", ours: false }], poolAsks: [], poolBids: [], pools: [] };
+
+test("0.19.373: the on-chain engine not ready: the reason (or 'still starting') is said, BOOK / POOL is off, and a click shows no review and drives nothing", async () => {
+  assert.equal(C.chainWhy({ restingReady: true, restingWhy: "x" }), "");
+  assert.equal(C.chainWhy({ restingReady: false }), "The on-chain order book is still starting. Nothing can be sent to it yet.");
+  assert.equal(C.chainWhy(null), "The on-chain order book is still starting. Nothing can be sent to it yet.");
+  assert.equal(C.chainWhy({ restingReady: false, restingWhy: "PandaDEX order covenant mismatch; trading disabled" }),
+    "The on-chain order book could not start: PandaDEX order covenant mismatch; trading disabled. It is tried again every minute. FAST orders are not affected.");
+  assert.equal(C.chainWhy({ restingReady: false, restingWhy: "Could not read wallet identity." }), "The on-chain order book could not start: Could not read wallet identity. It is tried again every minute. FAST orders are not affected.", "no double full stop");
+  for (const [restingWhy, said] of [["", /The on-chain order book is still starting\. Nothing can be sent to it yet\./], ["Could not register the V5 covenant", /could not start: Could not register the V5 covenant\. It is tried again every minute\./]]) {
+    const u = await tradeUi({ book: CHAIN_BOOK, status: { restingReady: false, restingWhy } });
+    u.els.dxPrice.value = "0.0032"; u.els.dxAmount.value = "100"; u.els.dxPrice.oninput(); await u.settle();
+    assert.equal(u.els.dxCta2.hidden, false, "the on-chain button is shown (on-chain liquidity crosses)"); assert.equal(u.els.dxCta2.disabled, true, "but off");
+    assert.match(u.els.dxReview.innerHTML, said);
+    u.els.dxCta2.disabled = false; u.els.dxCta2.onclick(); await u.settle();   // even a click that gets through
+    assert.equal(u.drives().length, 0, "the page is not driven"); assert.equal(u.dialogs.length, 0, "no review dialog");
+    assert.ok(!u.cmds.some(c => c.op === "intent"), "no intent recorded");
+    assert.match(u.els.dxLog.innerHTML, said); assert.match(u.els.dxLog.innerHTML, /Nothing was signed or sent\./);
+  }
+  const ok = await tradeUi({ book: CHAIN_BOOK, status: { restingReady: true } });
+  ok.els.dxPrice.value = "0.0032"; ok.els.dxAmount.value = "100"; ok.els.dxPrice.oninput(); await ok.settle();
+  assert.equal(ok.els.dxCta2.disabled, false, "ready: on"); assert.ok(!/order book (could not start|is still starting)/.test(ok.els.dxReview.innerHTML));
+});
+
+test("0.19.373: the page refuses an on-chain place before its review while the engine's STATE is not ready or busy, with the wrapper's reason", () => {
+  const { win, calls, say, reply } = bridge();
+  win.crosses = true; win.pageAsks = "Buying 10 MINIMA now";
+  const go = (id) => say({ dxRoom: 1, drive: { id, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "chain" } } });
+  win.state = { block: 100, book: [], pools: [] };   // no STATE heard yet
+  go(1); assert.equal(reply().error, "The on-chain order book is still starting. Nothing can be sent to it yet. Nothing was sent."); assert.equal(reply().asked, null, "nothing to review");
+  win.state = { ready: false, restingWhy: "Could not read wallet identity", block: 100, book: [], pools: [] };
+  go(2); assert.equal(reply().error, "The on-chain order book could not start: Could not read wallet identity. It is tried again every minute. FAST orders are not affected. Nothing was sent.");
+  win.state = { ready: true, busy: true, block: 100, book: [], pools: [] };
+  go(3); assert.match(reply().error, /still building another on-chain transaction\. Wait for it to finish\. Nothing was sent\./);
+  assert.deepEqual(calls, [], "place() never ran, so the page asked nothing and sent nothing");
+  win.state = { ready: true, block: 100, book: [], pools: [] };
+  go(4); assert.equal(reply().asked, win.pageAsks, "ready: the page's own review, as before");
+  say({ dxRoom: 1, drive: { id: 5, act: "place", args: { buy: true, price: "0.0032", amount: "10", layer: "fast", expect: "rest" } } });
+  assert.equal(reply().error, null, "a FAST order does not wait for the on-chain engine");
 });

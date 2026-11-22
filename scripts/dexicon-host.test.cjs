@@ -1205,3 +1205,28 @@ test("the tick guard: a stuck cycle's late end leaves the new cycle's guard set;
   ctx.tick(done); assert.equal(held.length, 2, "so no third cycle overlaps the second");
   held[1](); assert.equal(ctx.guard(), false, "the running cycle clears it"); assert.equal(dones, 4, "done once per call on every path");
 });
+
+test("0.19.373: a start of the on-chain engine that ends in its ERROR is logged (node log too) with the engine's words, is the reason in status() and on STATE, and is retried until it works", async () => {
+  let refuse = true;
+  const node = M.mockNode({ on: (c) => (refuse && /^newscript trackall:false/.test(c) ? { status: false, error: "mock: newscript refused" } : null) });
+  const host = makeHost({ runner: node.run, dataDir: tmp(), net: M.mockNet(), tickMs: 40, quiet: true, confirm: async () => true });
+  node.attach(host); hosts.push(host);
+  const nodeLog = [], states = [];
+  host.emitter.on("nodelog", l => nodeLog.push(l));
+  host.emitter.on("comms", m => { const p = JSON.parse(m); if (p.type === "STATE") states.push(p.data); });
+  await host.start();
+  await M.until(() => host.status().ready && host.status().restingWhy);
+  const s = host.status();
+  assert.equal(s.restingReady, false); assert.equal(s.restingWhy, "mock: newscript refused", "the engine's own message");
+  assert.deepEqual(nodeLog, ["on-chain engine not ready: mock: newscript refused (its start is tried again every minute; FAST trading is not affected)"]);
+  await M.until(() => states.some(d => d.restingWhy === "mock: newscript refused" && d.ready === false));
+  assert.ok(host.status().log.some(l => /on-chain engine not ready: mock: newscript refused/.test(l)));
+  // the next try (once a minute; the test does not wait the minute) succeeds: ready, and no reason any more
+  refuse = false; vm.runInContext("lastPdBootMs = 0", host._ctx());
+  await M.until(() => host.status().restingReady);
+  assert.equal(host.status().restingWhy, "");
+  await M.until(() => states.length && states[states.length - 1].ready === true && states[states.length - 1].restingWhy === "");
+  assert.equal(nodeLog.length, 1, "logged once, not once a minute");
+  assert.match(fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), /\ndexicon\.emitter\.on\("nodelog", \(line\) => node\.log\("\[dexicon\] " \+ line\)\);/, "main.js writes those lines to the node log");
+  host.stop();
+});

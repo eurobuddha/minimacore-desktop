@@ -228,6 +228,8 @@ function makeHost(opts = {}) {
     LOG.push(s); if (LOG.length > 300) LOG.shift();
     if (!opts.quiet) console.log("[dexicon]", s.slice(9));
     emitter.emit("log", s);
+    // 0.19.373: why the on-chain engine did not start goes to the node log too (main.js), not only to this ring
+    if (NODE_LOG.test(String(line).replace(/^\[dexicon\]\s*/, ""))) emitter.emit("nodelog", String(line).replace(/^\[dexicon\]\s*/, ""));
   }
   let vmJsonParse = null;
   /** Replies cross into the engine's realm as its own objects (Array.isArray, instanceof inside the vm). */
@@ -473,11 +475,11 @@ function makeHost(opts = {}) {
 
   function status() {
     // epoch: which engine this is. The screens' hidden page frame belongs to one engine and is remade when it changes.
-    const s = { version: ENGINE_VERSION, started: !!timer, problem, epoch, ready: false, restingReady: false, publicId: null, block: 0, relays: [],
+    const s = { version: ENGINE_VERSION, started: !!timer, problem, epoch, ready: false, restingReady: false, restingWhy: "", publicId: null, block: 0, relays: [],
       price: { mid: 0, ageMs: null, label: "", source: "" }, log: LOG.slice(-20) };
     try {
       if (!ctx || !ctx.DX || draining) return s;   // draining: this engine takes nothing new and is about to go
-      s.ready = !!ctx.DX.ready(); s.restingReady = !!ctx.DX.restingReady(); s.publicId = s.ready ? String(ctx.DX.publicId()) : null;
+      s.ready = !!ctx.DX.ready(); s.restingReady = !!ctx.DX.restingReady(); s.restingWhy = s.restingReady ? "" : String(ctx.DX.restingWhy() || ""); s.publicId = s.ready ? String(ctx.DX.publicId()) : null;
       s.block = ctx.DX.block(); s.relays = plain(ctx.DX.relays());
       const P = ctx.PandaPrice, age = P.ageMs();
       // source: the engine's own field (lib/ladder.js feed): "MEXC", or "MEXC via CoinGecko" when the last read was the fallback
@@ -696,5 +698,7 @@ function makeHost(opts = {}) {
     _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _ctx: () => ctx, _fire: fire, _netAllowed: netAllowed };
 }
 
+/** The engine's lines that the node log shows as well: a start of the on-chain engine that failed or hung (service.desktop.js pdNotReady). */
+const NODE_LOG = /^on-chain engine not ready: /;
 const host = makeHost({ appHost: true });   // the app's one Dexicon engine (main.js); tests build their own with makeHost(opts)
-module.exports = Object.assign(host, { makeHost, dexCommand, dexSql, DEX_VERBS, ENGINE_VERSION, UNANSWERED });
+module.exports = Object.assign(host, { NODE_LOG, makeHost, dexCommand, dexSql, DEX_VERBS, ENGINE_VERSION, UNANSWERED });
