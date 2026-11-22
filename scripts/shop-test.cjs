@@ -1288,3 +1288,47 @@ test("two orders with one reference: different secrets are paid each by its own 
     assert.equal(c.problems[0], DUPV, first); assert.equal(c.paid, false); assert.deepEqual(c.coins, ["0xfe81"], first + ": the coin without a proof is counted on the held order");
   }
 });
+
+// ---- 0.18.298: the desktop buyer sends the order's secret and proves it on every payment, as the phone Shop ----
+test("buyer: the sealed order carries a fresh secret, both the payment and its Retry carry its proof in port 2, the secret is kept nowhere; a desktop vendor pays the order by that coin", async () => {
+  const vendorId = await sc.deriveIdentity("vendor seed h1"), VADDR = "0x" + "5A".repeat(32);
+  let m = freshModules(); m.store.clear(); m.store.setMeta("vendorAddress", ""); delete SECRETS["shop-identity"];
+  const sends = []; let refuse = true;
+  m.shop._setRunner(async (c) => {
+    if (c.startsWith("vault")) return { status: true, response: { phrase: "round trip buyer" } };
+    if (c.startsWith("getaddress")) return { status: true, response: { miniaddress: "MxG0" + "D".repeat(56) } };
+    if (c.startsWith("checkaddress")) return { status: true, response: { simple: true } };
+    if (c.startsWith("coins")) return { status: true, response: [] };
+    if (c.startsWith("send ")) { sends.push(c); if (refuse && c.includes("address:" + VADDR)) return { status: false, error: "refused" }; }
+    return { status: true, response: { txpowid: "0x01" } };
+  });
+  const errs = [], err = console.error; console.error = (...a) => errs.push(a.join(" "));
+  let r; try {
+    r = await m.shop.placeOrder(shopOf({ shopId: "rt", vendorPublicId: vendorId.publicId, vendorAddress: VADDR }), [{ product: "Tea", quantity: 1, unitPrice: "1", lineTotal: "1" }], "1", "", "home", "");
+    assert.equal(r.payError, "refused"); refuse = false; await m.shop.retryPayment(r.ref);
+  } finally { console.error = err; }
+  const stateOf = (c) => JSON.parse(/ state:(\{[^ ]*\})/.exec(c)[1]);
+  const orderSend = sends.find(c => c.includes("address:" + m.shop.MINIMERCH)), pays = sends.filter(c => c.includes("address:" + VADDR));
+  const opened = await sc.open(vendorId, stateOf(orderSend)["99"]), w = JSON.parse(Buffer.from(opened.plaintext).toString("utf8"));
+  assert.match(w.nonce, /^0x[0-9A-F]{64}$/, "0x and 64 capital hexadecimal digits, as the phone's newNonce");
+  assert.equal(pays.length, 2, "the refused payment and its Retry");
+  for (const p of pays) assert.deepEqual(stateOf(p), { "1": "0x" + Buffer.from(r.ref).toString("hex"), "2": proofT(w.nonce) }, "port 1 the reference, port 2 the proof: " + p);
+  const buy = m.store.order(r.ref); assert.equal(buy.commit, proofT(w.nonce)); m.store.flush();
+  const disk = fs.readFileSync(path.join(DIR, "shop.json"), "utf8");
+  for (const v of [w.nonce, w.nonce.slice(2), w.nonce.slice(2).toLowerCase()]) { assert.ok(!disk.includes(v), "the secret is not stored"); assert.ok(!errs.join("\n").includes(v), "nor logged"); assert.ok(!JSON.stringify(m.shop.orderDetail(r.ref)).includes(v), "nor given to the screen"); }
+  // a second order: another secret
+  await m.shop.placeOrder(shopOf({ shopId: "rt", vendorPublicId: vendorId.publicId, vendorAddress: VADDR }), [{ product: "Tea", quantity: 1, unitPrice: "1" }], "1", "", "home", "");
+  const w2 = JSON.parse(Buffer.from((await sc.open(vendorId, stateOf(sends.filter(c => c.includes("address:" + m.shop.MINIMERCH))[1])["99"])).plaintext).toString("utf8"));
+  assert.notEqual(w2.nonce, w.nonce);
+  // the same coins at a desktop vendor
+  delete SECRETS["shop-identity"]; const t = await javaSetup("rt");
+  t.st.msg = [{ coinid: "0xAD01", created: 1009, state: stateOf(orderSend) }];
+  t.st.pay = [{ coinid: "0xAD02", tokenid: "0x00", amount: "1", created: 1010, state: stateOf(pays[1]) }];
+  await walk(t, 1009, 1014);
+  const o = t.m.store.order(r.ref); assert.ok(o, "the vendor holds the order"); assert.equal(o.commit, proofT(w.nonce)); assert.equal(o.paid, true, o.problems.join(" | ")); assert.equal(o.status, "PAID");
+  // an order placed before 0.18.298 (no proof kept): its Retry carries none, as its order carried no secret
+  delete buy.commit; m.store.setMetaSync("unpaid:" + r.ref, true); sends.length = 0; await m.shop.retryPayment(r.ref);
+  assert.deepEqual(stateOf(sends.find(c => c.includes("address:" + VADDR))), { "1": "0x" + Buffer.from(r.ref).toString("hex") });
+  buy.commit = "0x12 tokenid:0xFF"; m.store.setMetaSync("unpaid:" + r.ref, true); sends.length = 0;
+  await assert.rejects(m.shop.retryPayment(r.ref), /Invalid order proof/); assert.equal(sends.filter(c => c.includes("address:" + VADDR)).length, 0, "nothing sent");
+});
