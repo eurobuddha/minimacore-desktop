@@ -45,16 +45,14 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // order's onSent; a Retry is later still), so a real payment is never created before its order; the two are mined separately, and the
 // order coin (a sealed message of up to 90000 bytes) may land a few blocks after the payment. A payment older than that is held for a
 // check by hand, never refused outright.
-// A payment is judged only once the chain has reached that allowance (0.18.289; at the tip pb + PAY_BEFORE_ORDER since 0.18.293): a
-// payment coin created at block pb waits, not judged and not marked seen, while the tip is below pb + PAY_BEFORE_ORDER. Orders are read
-// before payments in every pass, so a real order mined within the allowance (up to block pb + 3) is held by the pass at tip pb + 3, and a
-// copier's order with the same reference meets it as a second buyer's (both held for a check by hand). Judged at once, a copier's order
-// mined in the block after the payment was paid before the real order arrived. Not later than pb + 3 (0.18.293): the node's `send` may
-// spend a coin from tip pb + 3 (coin age MINIMA_CONFIRM_DEPTH = 3), and `coins` lists unspent coins only, so the vendor's own wallet
-// could spend the payment in block pb + 4 before it was counted (0.18.289 judged from tip pb + 4). A spend posted at tip pb + 3 is mined
-// in block pb + 4 at the earliest, so the pass at tip pb + 3 still lists the coin.
-// A waiting coin is read again: the payments read never skips what an earlier pass read, and every window reaches 64 blocks or more
-// below the tip, so a coin within 3 blocks of the last tip is inside the next one, after a restart too (the cursor is on disk).
+// A payment coin is counted on its order the first time any payments read lists it (0.18.300, as released 0.18.286), at any tip and
+// whether or not this pass's orders read succeeded: `coins` lists unspent coins only and the vendor's own wallet may spend a coin 3 blocks
+// old, so a coin left waiting (0.18.289-0.18.299: not judged before tip pb + 3, nor while its orders were not read) could be spent before it
+// was ever counted, with nothing said. What the wait was for is now the verdict's: an order without a secret paid in full is SETTLING, not
+// yet one the vendor may confirm, until a pass whose orders read succeeded has reached the block of the newest coin counted for it + 3
+// (store.settleBlock). A copier's order mined after the payment and the real order mined up to 3 blocks after it then meet as two orders with
+// one reference before either can be confirmed, and the paid one is held again (flagDuplicate). A payment that proves the order's secret
+// settles at once: only that order's buyer could have made it. A coin of unknown block settles at once, as before.
 const PAY_BEFORE_ORDER = 3;
 const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
 // The order's secret and its proof (0.18.297), as the phone Shop and Inbox make and check them (base-vestr-2.2.76, comms/MerchMessage.java
@@ -69,15 +67,6 @@ function proofOf(secret) {
   if (typeof secret !== "string" || secret.length !== 66 || !/^0x[0-9a-fA-F]{64}$/.test(secret)) return "";
   return "0x" + crypto.createHash("sha256").update(Buffer.from(secret.slice(2), "hex")).digest("hex").toUpperCase();
 }
-// Waiting payment coins kept with the store (0.18.299): a coin seen and not judged yet (the 3-block wait, or its orders not read yet) is kept on
-// disk ("payWait": coin id whole, block, the order it would pay) until it is judged. A later pass at tip >= its block + 3 whose payments read
-// covered its block and read every payout address, and that no longer lists it, puts one check-by-hand problem on that order (it was spent,
-// by the vendor's own wallet or a reorganisation, before it was counted); it was forgotten without a word. At most PAY_WAIT_MAX are kept: the
-// oldest goes first, with a check-by-hand problem on its order, never in silence. An order already paid, or gone, drops its entries.
-const PAY_WAIT_MAX = 256;
-const GONE_PAY = "is no longer listed (spent before it was counted): check by hand", LOST_PAY = "could not be kept until it was counted (too many payments waiting): check by hand";
-const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
-let judgedTip = 0;              // the tip the last payments read judged against, every payout address read (0.18.293)
 // A payment coin whose judging throws (0.18.295): every other coin is still judged; the pass fails for that coin (nothing advances, said with
 // its id whole, never as the node not answering); after JUDGE_TRIES passes that threw, it is marked seen, logged with its error, and left
 // for a check by hand (a problem on its order, and the status line). It stopped every newer coin for good: the loop rethrew and the cursor
@@ -105,7 +94,6 @@ const ACKED = new Set(["PAID", "CONFIRMED", "SHIPPED", "DELIVERED"]);
 const acked = (o) => !!(o && (o.paid || ACKED.has(o.status)));
 // A read the node did not answer (refused at every depth, timed out, threw) in this pass (0.18.213): it was taken as covered,
 // so the newest part of a gap was never read. Any failure now advances nothing; the same blocks are read on the next pass.
-let lastServed = 0;   // the depth the last coinsAt that answered was served (0.18.299)
 let readFailed = false, lastPassFailed = false, lastStepFailed = false;   // the recent window failed / only a backfill step failed (0.18.277)
 
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
@@ -312,6 +300,8 @@ async function advanceStatus(ref, status) {
   // The vendor's screen offers exactly these three (shopAdvanceRow); nothing else is a status a vendor sets (0.18.166).
   if (typeof status !== "string" || !/^(CONFIRMED|SHIPPED|DELIVERED)$/.test(status)) throw new Error("Unknown order status.");
   // Confirm, ship, deliver: only an order paid by what my listing says is due, or one I checked by hand (0.18.159).
+  const hold = store.settleBlock(o);   // paid, not yet settled (0.18.300)
+  if (hold && !o.handChecked) throw new Error("This order's payment is held until block " + hold + " in case another order with the same reference arrives. Check it by hand to move it on now.");
   if (!store.mayAdvance(o)) throw new Error("This order is not paid by what your shop says is due. Check it by hand first.");
   await init();
   store.setStatus(ref, status);
@@ -423,7 +413,7 @@ async function coinsAt(address, depth, extra) {
   let d = depth;
   while (d >= 4) {
     let r; try { r = await nodeCmd(`coins address:${address} simplestate:true${extra || ""} order:desc depth:${d}`); } catch (e) { readFailed = true; return null; }
-    if (r && Array.isArray(r.response)) { passServed = Math.min(passServed, d); lastServed = d; return r.response; }   // the depth the node really served
+    if (r && Array.isArray(r.response)) { passServed = Math.min(passServed, d); return r.response; }   // the depth the node really served
     d = Math.floor(d / 2);
   }
   readFailed = true;
@@ -447,24 +437,17 @@ async function scanOrders(depth, floor) {
   }
   return changed;
 }
-// Orders before payments (0.18.294): a payment is judged only when the orders that may go with it (mined up to its block + 3) are known
-// read. `ordersFrom`: the oldest block from which every order up to the tip has been read, this pass or earlier; a coin from below it
-// waits, not judged and not marked seen (a later read of that range judges it). A pass whose orders read failed judges no payment.
-async function scanPayments(depth, tip, ordersFrom) {
-  const every = payAddresses(), addrs = every.filter(a => !skipping(a)); if (!addrs.length) return false;
-  let partial = addrs.length < every.length;   // a payout address not read this pass (skipped as not valid): no waiting coin is said as gone (0.18.299)
+async function scanPayments(depth) {
+  const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   const listed = [], have = new Set();
-  let missed = false;   // a payout address the node did not answer for: what was read is judged, but no coin is said as judged (0.18.293)
-  let reach = depth;    // the shallowest depth a payout address was served: blocks from tip - reach up are read whole (0.18.299)
   for (const a of addrs) {   // every published payout address (0.18.205), one coin once
     const before = readFailed, got = await coinsAt(a, depth, " relevant:true");
     if (!got && badAddress(a)) {   // not a node error: this address can never be read (0.18.227)
-      readFailed = before; skippedPay.set(a, Date.now() + SKIP_MS); partial = true;
+      readFailed = before; skippedPay.set(a, Date.now() + SKIP_MS);
       console.error("[miniMall] the payout address " + a + " is not a valid Minima address, so payments to it are not read (looked at again in 5 minutes). Correct it in miniMall Studio (the shop's payout address).");
       continue;
     }
-    if (!got) { missed = true; continue; }
-    reach = Math.min(reach, lastServed);
+    if (!got) continue;
     for (const c of got) if (c && c.coinid && !have.has(c.coinid)) { have.add(c.coinid); listed.push(c); }
   }
   capSeen();
@@ -473,16 +456,6 @@ async function scanPayments(depth, tip, ordersFrom) {
   const coins = listed.map((c, i) => ({ c, i })).sort((a, b) => (Number(a.c.created) || 0) - (Number(b.c.created) || 0)
     || (b.c.amount != null && a.c.amount != null ? (Number(coinAmount(b.c)) - Number(coinAmount(a.c))) : 0) || (b.i - a.i)).map(x => x.c);
   let changed = false;
-  const kept = store.getMeta("payWait"), waits = new Map((Array.isArray(kept) ? kept : []).filter(e => e && typeof e.coin === "string" && typeof e.ref === "string").map(e => [e.coin, e]));
-  let waitsChanged = false;
-  // one problem of each kind per order (as OLDER_PAYMENT, 0.18.290); an order already paid is left as it is
-  const flagPay = (e, kind) => { const o = store.order(e.ref); if (o && !o.paid && !(o.problems || []).some(p => String(p).endsWith(kind))) store.flagDuplicate(e.ref, "payment coin " + e.coin + " seen at block " + e.block + " " + kind); };
-  const hold = (id, pb, o) => {
-    if (waits.has(id)) return;
-    waits.set(id, { coin: id, block: pb, ref: o.ref }); waitsChanged = true;
-    if (waits.size > PAY_WAIT_MAX) { const e = waits.values().next().value; waits.delete(e.coin); flagPay(e, LOST_PAY); }
-  };
-  const judged = (id) => { if (waits.delete(String(id))) waitsChanged = true; };
   const judge = (c) => {
     const id = c.coinid; if (!id || seenPayCoins.has(id)) return "";
     let ref = "";
@@ -491,7 +464,7 @@ async function scanPayments(depth, tip, ordersFrom) {
       seenPayCoins.delete(id);
       const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
       if (n < JUDGE_TRIES) { console.error("[miniMall] payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
-      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id)); judged(id);
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id));
       console.error("[miniMall] payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
       try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { console.error("[miniMall] the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
       return "";
@@ -505,37 +478,26 @@ async function scanPayments(depth, tip, ordersFrom) {
     const pay = store.payee(ref, statePort(c, 2)), o = pay.order && !pay.order.paid ? pay.order : null;
     if (!o && !pay.unproven.length) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
-    if (known && pb < (ordersFrom || 0)) { if (o) hold(String(id), pb, o); return ""; }   // its orders are not read yet (0.18.294)
-    // not judged, not marked seen, until the tip reaches the allowance (0.18.289; pb + 3 itself since 0.18.293): read again on a later pass
-    if (known && tip < pb + PAY_BEFORE_ORDER) { if (o) { const w = waitingPay.get(o.ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(o.ref, { coin: String(id), block: pb }); hold(String(id), pb, o); } return ""; }
     // an order with a secret is paid only by coins proving it (0.18.297): a coin that pays no order at all is one problem on each such order
     // with its reference, once per order, never on one already paid by its proof (a coin counted for another order is that order's)
     if (!pay.order) for (const u of pay.unproven) if (!u.paid && !(u.problems || []).some(p => String(p).startsWith(NO_PROOF)))
       store.flagDuplicate(u.ref, NO_PROOF + " (payment coin " + String(id) + "): check by hand");
     if (!o) return "";   // counted for no order, and not marked seen: the order it proves may still be read
-    seenPayCoins.add(id); judged(id);
+    seenPayCoins.add(id);
     // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
     // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
     // one such problem per order (0.18.290): each old coin added a line (its id made the text new) and a write of shop.json
     // not for a coin that proves the order's secret (0.18.297): only that order's buyer could have made it
     if (!o.commit && o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
       store.flagDuplicate(o.ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
-    const outcome = store.recordPayment(o.ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
+    const outcome = store.recordPayment(o.ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id), known ? pb : 0);   // its block: how long the order settles (0.18.300)   // the store counts each coin once, across restarts
     if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref: o.ref, paid: outcome }); }
     return outcome || "";
   };
   // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
-  if (!missed) judgedTip = tip;   // the "waiting" line stays until a read that covered the coin judged it (0.18.293)
   const dust = coins.filter(c => judge(c) === "DUST");
   if (changed && dust.length) for (const c of dust) judge(c);
-  // a waiting coin this read should list and does not (0.18.299): only after a read of every payout address that covered its block
-  for (const e of [...waits.values()]) {
-    const o = store.order(e.ref);
-    if (!o || o.paid) { waits.delete(e.coin); waitsChanged = true; continue; }
-    if (!missed && !partial && tip >= e.block + PAY_BEFORE_ORDER && tip - e.block <= reach && !have.has(e.coin)) { flagPay(e, GONE_PAY); waits.delete(e.coin); waitsChanged = true; changed = true; }
-  }
-  if (waitsChanged) store.setMeta("payWait", [...waits.values()]);
   return changed;
 }
 async function scanOnce() {
@@ -551,11 +513,12 @@ async function scanOnce() {
     passServed = depth; readFailed = false; judgeFailed = [];
     const stuck = () => readFailed || judgeFailed.length > 0;   // a coin that could not be judged moves nothing either (0.18.295)
     const a = await scanOrders(depth).catch(failed);
-    // complete enough (0.18.294): the orders read reached the last pass's tip, so with what earlier passes read (down to a pending
-    // backfill's floor) every order up to the tip is known; cut above it, only what this read reached. A failed one: no payment judged.
+    // what a payment's verdict waits for (0.18.300, store.settleBlock): this pass's orders read reached the tip, and with what earlier passes
+    // read (down to a pending backfill's floor) every order from `from` up to the tip is known; cut above it, only what this read reached. A
+    // failed one: none. Payments are read and counted in every pass whatever the orders read did (as released 0.18.286).
     const reach = tip - passServed, f0 = Number(store.getMeta("bfFloor")) || 0, t0 = Number(store.getMeta("bfTarget")) || 0;
-    const fromRecent = !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0;
-    const b = readFailed ? false : await scanPayments(depth, tip, fromRecent).catch(failed);
+    store.setOrdersRead(!readFailed && tip ? { tip, from: !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0 } : null);
+    const b = await scanPayments(depth).catch(failed);
     let changed = a || b;
     const recentFailed = readFailed;   // a backfill step's failure below is said as such, not as the recent window's (0.18.277)
     if (tip && !stuck() && prev && tip < prev) {
@@ -578,10 +541,8 @@ async function scanOnce() {
         // each read's own cut (0.18.283: the payments read's depth stood for both, so a cut orders read ended at once with the wrong cause);
         // a read the reply cap cut is tried on two more passes, as a backfill step is
         const ordersCut = ordersServed < NODE_TREE_MOST, stallNext = (Number(store.getMeta("bfStall")) || 0) + 1;
-        // the root read judges what it lists (orders past the tree cannot be read); while a cut orders read is still tried again, the coins
-        // below what it reached wait (0.18.294), and the try that ends the backfill judges them
-        const payFrom = ordersCut && stallNext < 3 ? tip - ordersServed : 0;
-        passServed = ROOT_DEPTH; const d = readFailed ? false : await scanPayments(ROOT_DEPTH, tip, payFrom).catch(failed); const root = passServed >= ROOT_DEPTH;
+        // the root read counts what it lists (orders past the tree cannot be read)
+        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH).catch(failed); const root = passServed >= ROOT_DEPTH;
         changed = changed || c || d;
         const stall = ordersCut || !root ? stallNext : 0;
         if (stuck()) { /* a failed read moves nothing: the same reads are tried on the next pass */ }
@@ -595,10 +556,9 @@ async function scanOnce() {
       } else if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, NODE_TREE_DEPTH);   // never past what the tree surely holds (0.18.277)
         passServed = deep;
-        const c = await scanOrders(deep, floor).catch(failed), stepReach = tip - passServed;
-        // payments: no floor (0.18.282); judged down to what the orders read reached, with what was read above the floor (0.18.294)
-        const payFrom = stepReach <= target ? 0 : Math.min(stepReach, floor);
-        const d = readFailed ? false : await scanPayments(deep, tip, payFrom).catch(failed);
+        const c = await scanOrders(deep, floor).catch(failed);
+        // payments: no floor (0.18.282)
+        const d = await scanPayments(deep).catch(failed);
         changed = changed || c || d;
         const reached = tip - passServed;
         if (stuck()) { /* nothing moves: the same step is tried on the next pass */ }
@@ -669,10 +629,9 @@ function orderDetail(ref) {
   // 0.18.297: not for a copy with a secret (its payments prove it and are counted on it), and the order the coins without a proof go to
   const first = o.wireRef && !o.commit ? store.payee(o.wireRef, "").order : null;
   const sharedRef = first && first !== o ? { ref: first.ref, received: first.paidAmount || "0" } : null;
-  // a payment with this order's reference that waits for the allowance (0.18.289): said, never as "not paid"
-  const w = o.role === "sell" && !o.paid ? waitingPay.get(ref) : null;
-  const waiting = w && judgedTip < w.block + PAY_BEFORE_ORDER ? { coin: w.coin, block: w.block, after: w.block + PAY_BEFORE_ORDER - 1 } : null;   // counted at tip block + 3 (0.18.293)
-  return Object.assign({ order: o, chat: store.chat(ref), sharedRef, waiting }, payState(o));
+  // a paid order without a secret that is still settling (0.18.300): said, with the block it is held until
+  const hold = o.role === "sell" ? store.settleBlock(o) : 0;
+  return Object.assign({ order: o, chat: store.chat(ref), sharedRef, settling: hold ? { block: hold } : null }, payState(o));
 }
 /** The buyer checked their History and the uncertain payment was not sent (0.18.217): Retry is offered again. */
 function paymentNotSent(ref) {

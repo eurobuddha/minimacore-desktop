@@ -239,7 +239,7 @@ function settleDust(o, ref) {
   PENDING_DUST.delete(ref);
   return countCoins(o, ref, [...pend.coins.entries()], o.tokenid);
 }
-function recordPayment(ref, paidAmount, paidTokenid, coinid) {
+function recordPayment(ref, paidAmount, paidTokenid, coinid, block) {
   ensureLoaded(); const o = order(ref); if (!o) return null;
   if (o.paid) return "ALREADY";
   // A coin is counted once, for one order, across restarts (0.18.163). No coin id: nothing can be told apart, so nothing is counted.
@@ -248,6 +248,8 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   if (has(mem.counted, cid) || (o.coins || []).includes(cid)) return "ALREADY";
   ensureChecked(o);
   const rightToken = String(paidTokenid).toLowerCase() === String(o.tokenid).toLowerCase();
+  // the newest block of a coin that may pay it (0.18.300): an order without a secret settles from there (settleBlock); counted dust included
+  if (rightToken && Number.isSafeInteger(block) && block > (o.coinBlock || 0)) o.coinBlock = block;
   // Dust (0.18.181) never fills the order's 1000-coin list, so a flood of tiny coins cannot block a later real payment.
   // It is NOT remembered on disk (0.18.185): what is dust depends on what is still due, so the same coin is judged again
   // later; it is gathered in memory and counted with the order's other dust once together they cover what is still due
@@ -292,11 +294,26 @@ function handCheck(ref) {
   if (!o || o.role !== "sell") return false;
   // an order an older version counted money for can be checked by hand too, and one whose older verdict was kept but that is
   // not paid (0.18.218: confirmed by an older version without a payment, it could never move on)
-  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid)) return false;
+  // and a paid order that is still settling (0.18.300)
+  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid) && !settleBlock(o)) return false;
   o.handChecked = true; flush(); return true;
 }
-/** May the vendor confirm / ship / deliver this order? Paid by the listing's figure, or checked by hand. */
-function mayAdvance(o) { return !!(o && (o.paid || o.handChecked)); }
+/** Settling (0.18.300). A payment is counted the first time it is read (as released 0.18.286), but an order paid without a proof of its secret
+ *  (no secret, or stored before 0.18.297) may be a copier's, paid by another buyer's coin whose real order is mined up to 3 blocks after it.
+ *  Such an order, paid, is held until a pass whose orders read succeeded has reached the block of the newest coin counted for it + 3 with
+ *  every order from that coin's block up known read: by then a second order with its reference would have been read and held both
+ *  (flagDuplicate). The block it is held until, or 0 when it is not held (not paid, paid by its proof, checked by hand, a coin of unknown
+ *  block, or settled). `ordersRead` is the last pass's, in memory only: after a restart a paid order settles on the first good pass. */
+const PAY_SETTLE = 3;
+let ordersRead = null;   // { tip, from }: the last pass's orders read reached `tip`, every order from block `from` up is known; null: it failed
+function setOrdersRead(r) { ordersRead = r && Number.isSafeInteger(r.tip) ? { tip: r.tip, from: Number(r.from) || 0 } : null; }
+function settleBlock(o) {
+  if (!o || o.role !== "sell" || !o.paid || o.commit || o.handChecked || !Number.isSafeInteger(o.coinBlock) || o.coinBlock <= 0) return 0;
+  const n = o.coinBlock + PAY_SETTLE;
+  return ordersRead && ordersRead.tip >= n && ordersRead.from <= o.coinBlock ? 0 : n;
+}
+/** May the vendor confirm / ship / deliver this order? Paid by the listing's figure and settled, or checked by hand. */
+function mayAdvance(o) { return !!(o && (o.handChecked || (o.paid && !settleBlock(o)))); }
 function markOrderRead(ref) { ensureLoaded(); const o = order(ref); if (o && o.unread) { o.unread = false; persistSoon(); return true; } return false; }
 function setMeta(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 function setMetaSync(k, v) { ensureLoaded(); mem.meta[k] = v; flush(); }   // fund-relevant flags (unpaid/ambiguous) must survive a crash
@@ -311,7 +328,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, ensureChecked,
+  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, settleBlock, setOrdersRead, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
   _money: { decCmp, decGte, decAdd, decSub, payableTotal }, PENDING_MAX,
   _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }

@@ -2893,12 +2893,11 @@ async function renderShopOrderDetail(ref) {
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
       ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "Your listing says nothing is due for this order, so it is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Received so far: " + esc(o.paidAmount || "0")}</div>` : ""}
-      ${isSell && d.waiting ? `<div class="view__desc" style="overflow-wrap:anywhere">A payment with this order's reference has arrived (payment coin <span class="mono">${esc(d.waiting.coin)}</span> at block ${esc(String(d.waiting.block))}). It is counted after block ${esc(String(d.waiting.after))}, so that another order with the same reference is seen first.</div>` : ""}
       ${(!isSell && d.sending) ? `<div class="view__desc" style="margin-top:8px">The payment is being sent to the node now. Wait for its answer before you do anything else with this order.</div>` : ""}
       ${(!isSell && d.ambiguous && !o.paid) ? `<div class="shop-warn" style="margin-top:8px">⚠ This payment may already have gone through (the node did not answer, or the app closed while it was being sent). Check your Balance and History before you pay again, so you do not pay twice.
         <button class="btn btn--outline btn--full" id="shopNotSent" style="margin-top:8px">I checked my History: it was not sent</button></div>` : ""}
       ${(!isSell && d.unpaid && !d.ambiguous && !o.paid) ? `<button class="btn btn--primary btn--full" id="shopRetry" style="margin-top:8px">Retry payment</button>` : ""}
-      ${isSell ? shopAdvanceRow(o) : ""}
+      ${isSell ? shopAdvanceRow(o, d) : ""}
     </div>
     <div class="card"><div class="card__title">Messages</div><div class="mail-thread" style="max-height:200px;overflow:auto">${chat || '<div class="empty">No messages yet.</div>'}</div>
       <div class="row" style="margin-top:8px;gap:6px"><input class="field__input" id="shopMsg" placeholder="Message the ${isSell ? "buyer" : "vendor"}…" style="flex:1" autocomplete="off"/><button class="btn btn--outline btn--sm" id="shopSend">Send</button></div>
@@ -2916,6 +2915,7 @@ async function renderShopOrderDetail(ref) {
   el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {
     const yes = await showConfirm("Checked by hand?", ((o.problems || []).length ? "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
+      : d.settling ? "Paid. Held until block " + d.settling.block + " in case another order with the same reference arrives."
       : o.legacyVerdict && !o.legacyPaid ? "An older version of this app moved this order on (" + String(o.status).toLowerCase() + ") without a payment this version can see."
       : "An older version of this app recorded " + o.legacyPaid + " " + ShopRules.cur(o.currency) + " received for this order; the coins the node shows now come to " + (o.paidAmount || "0") + ".")
       + "\n\nThe buyer's total: " + o.amount + " " + ShopRules.cur(o.currency) + " (their own figure)\nReceived so far: " + (o.paidAmount || "0") + " " + ShopRules.cur(o.currency)
@@ -2942,8 +2942,11 @@ function shopCheckBlock(o) {
       <div style="white-space:pre-wrap;overflow-wrap:anywhere">${(o.problems || []).map(p => "• " + esc(p)).join("\n")}</div>
       ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>`;
 }
-function shopAdvanceRow(o) {
+function shopAdvanceRow(o, d) {
   if (o.status === "INQUIRY") return "";
+  // paid, still settling (0.18.300): no confirm yet; it can be checked by hand
+  if (d && d.settling && !o.handChecked) return `<div class="view__desc" style="margin-top:8px">Paid. Held until block ${esc(String(d.settling.block))} in case another order with the same reference arrives.</div>
+      <button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`;
   if (!o.paid && !o.handChecked) return `<div class="view__desc" style="margin-top:8px">${(o.problems || []).length ? "Check this order by hand before you can confirm it." : "Awaiting payment before you can confirm."}</div>`;
   const flow = ["CONFIRMED", "SHIPPED", "DELIVERED"], rank = { PAID: -1, CONFIRMED: 0, SHIPPED: 1, DELIVERED: 2 };
   const cur = rank[o.status] != null ? rank[o.status] : -1, next = flow[cur + 1];
