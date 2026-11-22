@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.371] — miniMall: a paid order keeps the note that another buyer's order has its reference (as Minima Core Desktop 0.18.315)
+
+- Once an order with a secret was paid in full by its proved coins, every note on it was dropped (0.19.368), also the sentence that another buyer's order without a secret has its reference and was paid (0.19.366). So when a copier's order without a secret was paid by the real buyer's coin without its proof, and the real buyer then also paid with the proof, both orders ended PAID and neither said anything about the clash (review-desktop-r6 H4N1). Only the note of a coin without the order's proof is dropped now (it begins "a payment with this order's reference does not carry this order's proof"); the duplicate sentence stays.
+- main/shop-store.js changes: its pin in scripts/apps-money.test.cjs is updated on purpose.
+- Tests (scripts/shop-store-test.cjs): N1 now wants the duplicate sentence kept on the real order once its proved coin pays it, the copier's order still paid (changed on purpose: it wanted the note gone; fails on 0.19.370); an order with only a no-proof note still loses it once paid in full (unchanged).
+
 ## [0.19.370] — miniMall: coins of two worthless tokens taking turns no longer write the store once per coin (as Minima Core Desktop 0.18.314)
 
 - The store was written whenever a coin of another token changed the token paid or the order's status, so coins of two worthless tokens taking turns wrote shop.json once per coin: 2000 such coins with an order's reference wrote it about 1000 times (0.8 MB each with a 400-order store), and again after every restart, as such coins are not remembered (review-desktop-r6 H5d). It is now written only when the order's status changes. The token paid is not shown anywhere.

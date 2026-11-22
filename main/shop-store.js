@@ -225,14 +225,16 @@ function remainingOf(o) {
   if (!d || d[0] <= 0n || o.problems.length) return null;
   const dp = Math.max(d[1], p[1]); return [d[0] * 10n ** BigInt(dp - d[1]) - p[0] * 10n ** BigInt(dp - p[1]), dp];
 }
+const NO_PROOF_NOTE = "a payment with this order's reference does not carry this order's proof";   // main/shop.js NO_PROOF: how its note begins
 /** The order's verdict after a count: PAID locks it; the status only advances (never back from a vendor's). */
 function judge(o) {
   const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") { o.paid = true; o.settled = false; }   // settles from here (0.19.358: settleBlock, latchSettled)
-  // paid in full by its proved coins (0.19.368, as Minima Core Desktop 0.18.311; review-desktop-r5): its note (a coin without its proof, or another order
-  // with its reference) is dropped, since a note says "check by hand" and a paid order has nothing left to check. Notes are only ever on orders with
-  // a secret, which only proved coins pay.
-  if (outcome === "PAID" && o.commit) delete o.notes;
+  // paid in full by its proved coins (0.19.368, as Minima Core Desktop 0.18.311; review-desktop-r5): its note of a coin without its proof is dropped, since
+  // that coin is answered: the order is paid by its own. Notes are only ever on orders with a secret, which only proved coins pay. The note that another
+  // buyer's order without a secret has its reference and was paid stays (0.19.371, as Minima Core Desktop 0.18.315; review-desktop-r6 H4N1): that clash
+  // is not answered by this order's own payment.
+  if (outcome === "PAID" && o.commit && Array.isArray(o.notes)) { o.notes = o.notes.filter(n => !String(n).startsWith(NO_PROOF_NOTE)); if (!o.notes.length) delete o.notes; }
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+
   return outcome;
 }

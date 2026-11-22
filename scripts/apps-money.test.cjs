@@ -414,7 +414,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // both again in 0.19.368 (review-desktop-r5: the no-proof note's amount and token; a paid order drops its note)
   // both again in 0.19.369 (comments: as Minima Core Desktop 0.18.30x, not as released)
   // main/shop-store.js again in 0.19.370 (review-desktop-r6 H5d: a wrong-token coin writes only when the status changes)
-  for (const [f, want, ver] of [["main/shop.js", "b7bc940ec16aed78eeadf8bda8a9bb2d2df1f9c1abd3959c653e126094aa370a", "0.19.369"], ["main/shop-store.js", "896e316315440b4d5f2164e96dbe506e0fe52c513d4f57e6cc5015688085387a", "0.19.370"],
+  // main/shop-store.js again in 0.19.371 (review-desktop-r6 H4N1: a paid order keeps the duplicate note)
+  for (const [f, want, ver] of [["main/shop.js", "b7bc940ec16aed78eeadf8bda8a9bb2d2df1f9c1abd3959c653e126094aa370a", "0.19.369"], ["main/shop-store.js", "a6a47e402c3ad6cfa3136caada7e242d9b31d657bacfac35c8c4bc3cb6ba4488", "0.19.371"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

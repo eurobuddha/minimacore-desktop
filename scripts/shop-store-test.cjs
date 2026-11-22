@@ -1400,7 +1400,7 @@ test("the Inbox's list says a settling order is held", async () => {
 // ---- 0.19.366 (as Minima Core Desktop 0.18.309): a newcomer with a secret that leaves a PAID order without one as it is says so in one note
 // (review-desktop-r5 N1). It was kept silent: PENDING, nothing said, and a check by hand refused, so when its buyer paid outside the app without
 // the proof (that coin paid the other order) the vendor could neither see the clash nor act on the real order ----
-test("N1: the real order with a secret, after a copier's order without one was paid by a coin without a proof, carries the duplicate sentence as a note and can be checked by hand; N1b: paid by its own proved coin, nothing changes", async () => {
+test("N1: the real order with a secret, after a copier's order without one was paid by a coin without a proof, carries the duplicate sentence as a note and can be checked by hand, and keeps it once its proved coin pays it (H4N1); N1b: paid by its own proved coin, nothing changes", async () => {
   await copyRig(async (st) => { const S = newSecret(); st.pay.push(sPay("ORD-V", 1010, undefined, "0xFE01")); st.msg.push(sOrder(ATK, "ORD-V", 1011, "COPIER"));
     await walkTo(st, 1001, 1011); st.msg.push(sOrder(VICTIM, "ORD-V", 1012, "VICTIM", S)); await walkTo(st, 1012, 1016);
     const c = store.order("ORD-V"), v = store.order("ORD-V~" + VICTIM);
@@ -1409,7 +1409,8 @@ test("N1: the real order with a secret, after a copier's order without one was p
     assert.equal(store.mayAdvance(v), false); assert.deepEqual(shop.vendorCheck(v.ref), { ok: true }, "and it can be checked by hand"); assert.equal(store.mayAdvance(store.order(v.ref)), true);
     st.pay.push(sPay("ORD-V", 1017, proofT(S), "0xFE02")); await walkTo(st, 1017, 1018);
     assert.equal(store.order(v.ref).paid, true, "its own proved coin still pays it"); assert.deepEqual(store.order(v.ref).coins, ["0xfe02"]);
-    assert.equal(store.order(v.ref).notes, undefined, "paid in full by its proved coin: the note goes (0.19.368)"); });
+    assert.deepEqual(store.order(v.ref).notes, [DUPV], "paid in full by its proved coin: the duplicate sentence stays (0.19.371, review-desktop-r6 H4N1; only a no-proof note goes)");
+    assert.equal(store.order("ORD-V").paid, true, "the copier's order stays paid: the note is all that says the two clash"); });
   await copyRig(async (st) => { const S = newSecret(); st.pay.push(sPay("ORD-V", 1010, proofT(S), "0xFE01")); st.msg.push(sOrder(ATK, "ORD-V", 1011, "COPIER"));
     await walkTo(st, 1001, 1011); st.msg.push(sOrder(VICTIM, "ORD-V", 1012, "VICTIM", S)); await walkTo(st, 1012, 1016);
     const c = store.order("ORD-V"), v = store.order("ORD-V~" + VICTIM);
