@@ -712,8 +712,20 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function part(tab) {
     if (!D || !D.running()) return "";
     if (!S.st || !S.st.ready) return tab === "activity" ? `<div class="dx-day">${th("POOL OPERATIONS · ② POOLS")}</div><div class="dx-state dx-state--note" role="status">${th("PandaPools has not started yet, so your pool operations could not be checked. They are listed here when it has.")}</div>` : "";
-    const now = Date.now(), rows = (S.acts || []).filter((a) => a.type !== "STATUS").map((a) => actItem(a, now)), list = tab === "history" ? rows.filter((x) => x.done) : rows.slice().sort((a, b) => a.done - b.done);
+    if (tab === "activity") return "";   // the rows are in Activity's one mixed list (activityItems)
+    const now = Date.now(), list = (S.acts || []).filter((a) => a.type !== "STATUS").map((a) => actItem(a, now)).filter((x) => x.done);
     return list.length ? `<div class="dx-day">${th("POOL OPERATIONS · ② POOLS")}</div>` + list.slice(0, 60).map(itemHtml).join("") : "";
+  }
+  /** PandaPools' rows of the shared Activity's ONE list (0.19.384; dexicon-ui.js mixes them by time with DexCore.activityMix):
+   *  the 60 newest and every one not finished, each with its whole card. block: the block the node's own check found the
+   *  transaction in (pp_txproof inclusionblock), when it found it; pending: not failed and not found in a block yet. */
+  function activityItems() {
+    if (!up()) return [];
+    const now = Date.now();
+    return (S.acts || []).filter((a) => a.type !== "STATUS").map((a, i) => {
+      const it = actItem(a, now), block = Number(a.verifiedDepth) >= 0 && Number(a.inclusionBlock) > 0 ? Number(a.inclusionBlock) : 0;
+      return { kind: "pool", key: "pp:" + i, ts: Number(a.ts) || 0, block, pending: !a.failed && !block, tag: th("POOL"), html: itemHtml(it), keep: i < 60 || !it.done };
+    }).filter((x) => x.keep);
   }
   /** the shared screens ask for PandaPools' part of their data: at once when one opens, then once a minute */
   function shared(force) { if (!D || (!force && Date.now() - S.sharedAt < 60000)) return; S.sharedAt = Date.now(); (async () => { S.st = await api().ppStatus().catch(() => null); if (up()) S.acts = await api().ppActivity().catch(() => S.acts); })().then(D.redraw, D.redraw); }
@@ -898,5 +910,5 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (ds.ppclose) { const p = pool(ds.ppclose); return p ? act(() => Act.withdraw(api(), ui, p)) : say(I18N.t("That pool is no longer in the list. Nothing was sent."), "note"); }
   }
 
-  return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick, part, shared }, core);
+  return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick, part, activityItems, shared }, core);
 });

@@ -424,6 +424,20 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   /** "TODAY · 19 NOV" / "18 NOV" (local time), for the day headers of History and Activity */
   function dayLabel(ms, nowMs) { const d = new Date(ms), n = new Date(nowMs), t = d.getDate() + " " + MONTHS[d.getMonth()]; return (d.toDateString() === n.toDateString() ? (I18N.t("TODAY ·") + " ") : "") + t + (d.getFullYear() === n.getFullYear() ? "" : " " + d.getFullYear()); }
+  /** Activity's ONE list (0.19.384, owner: "They should all be together in chronological order, mixed."): the FAST,
+   *  on-chain, pool and AtomiX rows, each { kind, key, ts, block }, newest first. A row a block holds (block > 0) is
+   *  ordered among those rows by its block (a later block first; in one block the later ts first); every other row
+   *  (still pending, failed, an AtomiX swap, which spans two chains) by its ts, the time it was sent or recorded; the
+   *  two runs are then interleaved by ts, and at an equal ts the row in a block goes first. Last tie-break: kind, then
+   *  key, so the order never changes between two draws. Nothing is dropped. */
+  function activityMix(rows) {
+    const n = (v) => { const x = Number(v); return isFinite(x) && x > 0 ? x : 0; };
+    const byTs = (a, b) => n(b.ts) - n(a.ts) || String(a.kind).localeCompare(String(b.kind)) || String(a.key).localeCompare(String(b.key));
+    const mined = rows.filter(r => n(r.block)).sort((a, b) => n(b.block) - n(a.block) || byTs(a, b)), rest = rows.filter(r => !n(r.block)).sort(byTs), out = [];
+    let i = 0, j = 0;
+    while (i < mined.length || j < rest.length) out.push(j >= rest.length || (i < mined.length && n(mined[i].ts) >= n(rest[j].ts)) ? mined[i++] : rest[j++]);
+    return out;
+  }
   /** How long ago, in whole units cut down (Util.ago) */
   function ago(ms) { const s = Math.floor(Math.max(0, ms) / 1000); if (s < 60) return I18N.t("{s}s ago", { s: s }); const m = Math.floor(s / 60); const rel = (v, unit) => new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "always" }).format(-v, unit);   // "1 minute ago", "3 hours ago", worded in the language on show
     if (m < 60) return rel(m, "minute"); const h = Math.floor(m / 60); if (h < 24) return rel(h, "hour"); return rel(Math.floor(h / 24), "day"); }
@@ -450,6 +464,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function driveCall(id, act, args) { if (!ACTS.includes(act)) throw new Error("not an action of the Exchange screens: " + act); return { dxRoom: 1, drive: { id, act, args: args || {} } }; }
 
   return { dec, zero, add, sub, cmp, mul, min, down, up, div, str, fmt, fmtBal, fmtPrice, fmtDown, MIN_REM, floorTake, GROUPS, GROUP_LABELS, ladder, rows, amountText,
-    funds, freeFor, crossing, chainCrosses, chainWhy, chainLimit, sweepSplit, sweepAvg, decideBoth, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
+    funds, freeFor, crossing, chainCrosses, chainWhy, chainLimit, sweepSplit, sweepAvg, decideBoth, plan, percent, review, expectOf, tradeBook, levelTotal, entryProblem, pageSays, refusal, feedbackKind, priceName, pageStep, PAGE_LOAD_MS, PAGE_FAILED, fillUsd, fillState, netSettled, CSV_HEADER, csv, dayLabel, activityMix, ago, relayProblem, ACTS, OPS, bridgeCall, driveCall,
     ROOMS, SHARED, TAB_LABEL, gate, storeError, SET_ASIDE, PUT_BACK, money, roomOfView, load, save, pickRoom, pickTab, tabOf, toggleTheme, followApp, strip };
 });

@@ -709,6 +709,57 @@ test("Activity uses the engine's own stage machine: posted, co-signed or in a sh
   assert.match(fs.readFileSync(path.join(__dirname, "../renderer/index.html"), "utf8"), /<script src="dexicon\/lib\/activity\.js"><\/script>/);
 });
 
+// 0.19.384, owner: "They should all be together in chronological order, mixed." (a FAST fill could not be found among
+// the separate AtomiX, pool and Exchange sections of Activity)
+test("0.19.384: Activity is one list: block order where a block holds the row, else its time; the runs interleaved by time; nothing dropped", () => {
+  const T = 1763800000000, row = (kind, key, ts, block) => ({ kind, key, ts, block });
+  const pool = row("pool", "pp:0", T, 2417290), fast = row("fast", "dx:t1", T + 60000, 2417300), ax = row("atomix", "ax:h", T + 30000, 0), chain = row("chain", "dx:s1", T + 120000, 0);
+  const input = [pool, ax, fast, chain], copy = input.slice();
+  assert.deepEqual(C.activityMix(input).map(r => r.key), ["dx:s1", "dx:t1", "ax:h", "pp:0"], "the pending on-chain fill (newest), the FAST fill (its block), the AtomiX swap (its time), the pool swap (its block)");
+  assert.deepEqual(input, copy, "the rows given are not reordered");
+  assert.deepEqual(C.activityMix([row("pool", "a", T + 5000, 10), row("fast", "b", T, 11)]).map(r => r.key), ["b", "a"], "two rows in blocks: the later block first, whatever their times say");
+  assert.deepEqual(C.activityMix([row("fast", "a", T, 10), row("pool", "b", T + 1, 10)]).map(r => r.key), ["b", "a"], "in one block: the later time first");
+  assert.deepEqual(C.activityMix([row("pool", "z", T, 10), row("fast", "y", T, 10)]).map(r => r.key), ["y", "z"], "same block, same time: by kind, so two draws never swap them");
+  assert.deepEqual(C.activityMix([row("atomix", "p", T, 0), row("pool", "m", T, 10)]).map(r => r.key), ["m", "p"], "a row in a block and a row without one at the same time: the one in a block first");
+  assert.deepEqual(C.activityMix([row("chain", "x", "junk", "junk"), row("fast", "w", T, -4)]).map(r => r.key), ["w", "x"], "no number: placed last, still listed");
+  assert.deepEqual(C.activityMix([]), []);
+});
+
+test("0.19.384: the Activity screen draws the Exchange's rows (with the maker's FAST fill), AtomiX's swaps and pool operations as one list, each marked with its kind", async () => {
+  const vm = require("node:vm"), T = 1763800000000, H = (c) => "0x" + c.repeat(64);
+  const TAKER = { id: "t1", route: "FAST", role: "taker", side: "buy", amount: "500", price: "0.0031", txpowid: H("A"), orderId: H("B"), counterparty: H("C"), stage: "COSIGNED", block: 2417300, ts: T + 60000, outs: [H("D")] };
+  const MAKER_FILL = { txpowid: H("E"), role: "maker", side: "sell", filled: "200", price: "0.0032", received: "0.64", taker: H("F"), orderId: H("1"), coins: [H("2")], status: "posted", ts: (T + 120000) / 1000 };
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, showModal() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
+  const els = {}, item = (kind, key, ts, block, pending, tag, html) => ({ kind, key, ts, block, pending, tag, html });
+  const win = { DexCore: C, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date: class extends Date { static now() { return T + 180000; } },
+    DexPools: { tick() {}, render() {}, shared() {}, part: () => "", activityItems: () => [item("pool", "pp:0", T, 2417290, false, "POOL", '<div class="pp-act" id="PPROW"></div>')] },
+    DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false, activityItems: () => [item("atomix", "ax:h", T + 30000, 0, true, "ATOMIX · USDT ⇄ MxUSD", '<div class="ax-swap" id="AXROW"></div>')] },
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener() {} };
+  win.window = win;
+  win.mcd = { dxStatus: async () => ({ version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {}, block: 2417310 }), onDexicon() {}, clip: async () => true,
+    dxBook: async () => ({ fast: [], book: [], poolAsks: [], poolBids: [], pools: [] }), dxMine: async () => ({ orders: [], pending: [] }), cmd: async () => ({ status: true, response: [] }),
+    dxCommand: async (a) => ({ status: true, rows: /fill_%/.test(a.query) ? [{ K: "fill_" + MAKER_FILL.txpowid, V: JSON.stringify(MAKER_FILL) }] : [{ K: "activity", V: JSON.stringify([TAKER]) }] }) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
+  vm.createContext(win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/lib/activity.js"), "utf8"), win);   // window.AX.activity, as index.html loads it
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
+  win.document.getElementById("shell").dataset.mode = "dex";
+  win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+  win.DexUI.paint("dexicon"); win.DexUI.pickTab("activity"); await settle();
+  const html = els.dxBody.innerHTML, at = (s) => html.indexOf(s);
+  const where = ['data-act="0"', 'data-act="1"', 'id="AXROW"', 'id="PPROW"'].map(at);
+  assert.ok(where.every(i => i >= 0), "every row is drawn: the maker's FAST fill, the taker's FAST fill, the AtomiX swap, the pool swap " + JSON.stringify(where));
+  assert.deepEqual(where.slice().sort((a, b) => a - b), where, "newest first, all kinds mixed: maker fill (pending, newest), taker fill (block 2417300), AtomiX (its time), pool (block 2417290)");
+  const kinds = [...html.matchAll(/<div class="dx-mix" data-kind="(\w+)"><div class="dx-mix__k"( data-pending)?>([^<]*)<\/div>/g)].map(m => [m[1], m[3], !!m[2]]);
+  assert.deepEqual(kinds, [["fast", "fast book · PENDING", true], ["fast", "fast book", false], ["atomix", "ATOMIX · USDT ⇄ MxUSD · PENDING", true], ["pool", "POOL", false]], "each row marked with its kind; not in a block yet: PENDING");
+  assert.ok(!/ATOMIX SWAPS|POOL OPERATIONS/.test(html), "no separate sections");
+  let shown = null; els.shell.appendChild = (d) => { shown = d; };
+  await els.dxBody.onclick({ target: { closest: (sel) => (sel === "button" ? { dataset: { act: "0" } } : null) } });
+  assert.ok(shown && shown.innerHTML.includes(MAKER_FILL.txpowid) && shown.innerHTML.includes(MAKER_FILL.taker) && shown.innerHTML.includes(MAKER_FILL.coins[0]), "the maker's row opens its facts with every identifier whole");
+});
+
 test("Settings: a relay the desktop cannot reach is refused before anything is saved", () => {
   assert.equal(C.relayProblem("https://relay.example/dex-relay"), "");
   assert.equal(C.relayProblem("https://relay.example:9602"), "");

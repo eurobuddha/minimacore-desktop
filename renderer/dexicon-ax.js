@@ -872,13 +872,20 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   // ---- AtomiX's part of the shared screens (dexicon-ui.js places them): Activity, History, Assets, Settings ----
   const ABOUT = L_("Swap MINIMA or MxUSD ⇄ Ethereum USDT trustlessly across chains: no middleman ever holds your funds. Both sides lock their funds in a time-locked contract; a swap that stalls is refunded by itself at its deadline.\n\nYour keys are derived from this node's seed, so it is the same wallet and identity on any device running AtomiX on this node's seed.\n\nRoom ① has Swap (a quick trade), Market (the order book and your own offer) and OTC (private negotiated deals). Your swaps are in Activity and History, your Ethereum wallet in Assets.\n\nAtomiX trades on the same on-chain books as the AtomiX phone app and MiniDapp.");
   const up = () => D.running() && S.st.ready;
+  /** AtomiX's rows of the shared Activity's ONE list (0.19.384; dexicon-ui.js mixes them by time with DexCore.activityMix):
+   *  every swap not hidden, each with its whole card. A swap spans two chains, so it has no one block: it is placed by the
+   *  time it was created, and is pending until it has finished. */
+  function activityItems() {
+    if (!up()) return [];
+    const tag = tr("ATOMIX · USDT ⇄ {c}", { c: esc(ccy()) });
+    return (S.swaps || []).filter((x) => !S.hidden.has(x.hash)).map((x) => ({ kind: "atomix", key: "ax:" + x.hash, ts: Number(x.created) || 0, block: 0, pending: !terminal(x), tag, html: swapCard(x, true) }));
+  }
   function part(tab, sub) {
     if (!up()) return tab === "assets" ? `<div class="dx-card"><div class="dx-label">${th("ETHEREUM")}</div><div class="dx-sub dx-sub--sans">${D.running() ? th("AtomiX is still starting: the Ethereum wallet appears when it is ready.") : th("The node is stopped. The Ethereum wallet appears when it runs.")}</div></div>` : "";
     const c = ccy(), swaps = S.swaps || [];
     if (tab === "activity") {
       if (sub === 1) { const rec = (S.mh && S.mh.recent) || []; return rec.length ? `<div class="dx-day">${tr("ATOMIX · USDT ⇄ {c}", { c: esc(c) })}</div>` + rec.map((t) => `<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline">${fmtPx(t.price)} USDT</span><span class="dx-chip" data-tone="${t.status === "EXECUTED" ? "ok" : t.status === "REFUNDED" ? "bad" : "live"}">${t.status === "EXECUTED" ? th("FILLED") : t.status === "REFUNDED" ? th("REFUNDED") : th("OPEN")}</span></div><div class="dx-sub">${tr("{sizeMinima} {c} · block {createdBlock}", { sizeMinima: esc(t.sizeMinima), c: esc(c), createdBlock: esc(t.createdBlock) })}</div></div>`).join("") : ""; }
-      const list = swaps.filter((x) => !S.hidden.has(x.hash)).sort((a, b) => (terminal(a) - terminal(b)) || (b.created - a.created));
-      return list.length ? `<div class="dx-day">${tr("ATOMIX SWAPS · USDT ⇄ {c}", { c: esc(c) })}</div>` + list.map((x) => swapCard(x, true)).join("") : "";
+      return "";   // My activity: the swaps are rows of the one mixed list (activityItems)
     }
     if (tab === "history") { const list = historyList(swaps, S.hidden); return list.length ? `<div class="dx-day">${tr("ATOMIX SWAPS · USDT ⇄ {c}", { c: esc(c) })}</div>` + list.map((x) => swapCard(x, false, S.hidden.has(x.hash))).join("") : ""; }
     if (tab === "assets") {
@@ -946,6 +953,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     const b = body(); if (b && SCREENS[S.tab] && b.dataset.tab === S.tab) { b.innerHTML = ""; render(S.tab, b); } else load("").then(D.repaintStrip, D.repaintStrip);
   }
 
-  return Object.assign({ Act, init: (deps) => { D = deps; api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, render, onUpdate, reset, tick, click, switchCurrency, part, shared,
+  return Object.assign({ Act, init: (deps) => { D = deps; api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, render, onUpdate, reset, tick, click, switchCurrency, part, activityItems, shared,
     pill: () => ({ text: "⇄  " + (S.switching ? I18N.t("Switching…") : ccy()), currency: S.st.currency || "", busy: !!S.switching, label: I18N.t("Trading {ccy}. Activate to switch to {currency}.", { ccy: ccy(), currency: (S.st.currency === "minima" ? "MxUSD" : "MINIMA") }) }) }, core);
 });

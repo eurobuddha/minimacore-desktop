@@ -171,6 +171,9 @@ button.dx-pill { cursor: pointer; }
 .dx-net[data-tone="in"] { color: var(--dx-in); } .dx-net[data-tone="out"] { color: var(--dx-red); }
 .dx-counts { margin-top: 2px; font: 400 11.5px/16px var(--dx-sans); color: var(--dx-dim2); }
 .dx-day { margin: 14px 4px 6px; font: 700 10.5px/15px var(--dx-sans); color: var(--dx-dim); letter-spacing: .08em; }
+/* Activity's one mixed list (0.19.384): each row's kind sits just above its own card, PENDING in the accent colour */
+.dx-mix__k { margin: 0 4px 3px; font: 700 9.5px/13px var(--dx-sans); color: var(--dx-dim); letter-spacing: .06em; text-transform: uppercase; }
+.dx-mix__k[data-pending] { color: var(--dx-accent); }
 .dx-led { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; cursor: pointer; }
 .dx-led__ic { flex: 0 0 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 400 13px/1 var(--dx-sans); --c: var(--dx-accent); color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); }
 .dx-led__ic[data-tone="ok"] { --c: var(--dx-in); } .dx-led__ic[data-tone="bad"] { --c: var(--dx-red); }

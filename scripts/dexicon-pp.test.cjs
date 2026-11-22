@@ -822,3 +822,22 @@ test("the PandaPools Wallet tab uses the Wallet's own functions, passed by app.j
   assert.ok(/const iconCell = tokIconHtml\(tid, b\.token\);/.test(app) && /const heroIcon = tokIconHtml\(tid, b\.token, true\);/.test(app), "the Wallet's rows and its token dialog draw with the same function");
   for (const f of ["dexicon-ax.js", "dexicon-ui.js", "dexicon-core.js"]) assert.ok(!/<img|identiconDataUri/.test(fs.readFileSync(path.join(R, f), "utf8")), f + " draws no token image (names only, by id)");
 });
+
+// 0.19.384: pool operations are rows of the shared Activity's ONE list (dexicon-ui.js mixes them with DexCore.activityMix)
+test("0.19.384: PandaPools' Activity rows: the block the node's check found, pending until found or failed, the card with its whole id, no STATUS note", async () => {
+  // the screens are defined only where there is a document: the file as the window loads it, in a context of its own
+  const ctx = Object.assign({ console, setTimeout, setImmediate, Promise, DexCore: C, localStorage: { getItem: () => null, setItem() {} }, document: { getElementById: () => null, querySelectorAll: () => [] } }, require("./i18n-plain.cjs").globals());
+  ctx.window = ctx; vm.createContext(ctx); vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-pp.js"), "utf8"), ctx);
+  const M = ctx.DexPools;
+  const T = 1763800000000, acts = [{ type: "STATUS", summary: "Transaction storage read failed" },
+    { type: "SWAP", summary: "Sold 100 MINIMA for 0.31 MxUSD", txpowid: PK("C1"), ts: T, verifiedDepth: 12, inclusionBlock: 2417290, verifiedAt: T, confirmed: true, statusText: "12 confirmations · on-chain" },
+    { type: "CREATE", summary: "x", txpowid: PK("C2"), ts: T - 1000, verifiedDepth: -1, verifiedAt: 0, statusText: "Waiting for node check" },
+    { type: "ADD", summary: "y", txpowid: "", ts: T - 2000, failed: true, failMsg: "Could not identify the input signing key." }];
+  M.init({ api: { ppStatus: async () => ({ ready: true }), ppActivity: async () => acts }, running: () => true, redraw() {} });
+  M.shared(true); for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+  const items = M.activityItems();
+  assert.deepEqual(items.map((x) => [x.kind, x.ts, x.block, x.pending]), [["pool", T, 2417290, false], ["pool", T - 1000, 0, true], ["pool", T - 2000, 0, false]]);
+  assert.ok(items[0].html.includes(PK("C1")) && items[1].html.includes(PK("C2")), "each card carries its transaction id whole");
+  assert.ok(items.every((x) => x.tag === "POOL"));
+  assert.equal(M.part("activity"), "", "no separate pool section any more");
+});

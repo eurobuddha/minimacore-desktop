@@ -153,7 +153,7 @@ const DexUI = (() => {
 
   // ---- room 3, Exchange: the Android screens over the engine's read model ----
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-  const X = { kv: {}, takes: {}, mm: {}, acts: [], sub: 0, asub: 0, open: {}, book: null, mine: { orders: [], pending: [] }, orders: [], fills: [], bal: null, balErr: "", svc: {}, buy: true, group: 0, fundsBig: false, said: null, loaded: false };
+  const X = { kv: {}, takes: {}, mm: {}, acts: [], actRows: [], sub: 0, asub: 0, open: {}, book: null, mine: { orders: [], pending: [] }, orders: [], fills: [], bal: null, balErr: "", svc: {}, buy: true, group: 0, fundsBig: false, said: null, loaded: false };
   try { X.group = Math.min(3, Math.max(0, Number(localStorage.getItem("dexicon_group")) || 0)); X.fundsBig = localStorage.getItem("dexicon_funds_big") === "1"; } catch (e) {}
   const pref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
@@ -568,7 +568,7 @@ const DexUI = (() => {
     if (ds.fill != null) return void dialog(I18N.t("Trade"), fillFacts(X.fills[Number(ds.fill)]), "");
     if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say(I18N.t("Saved {fills} fills.", { fills: X.fills.length }), "note"); } catch (err) { say(err && err.message); } return; }
     if (ds.asub != null) { X.asub = Number(ds.asub); return draw(); }
-    if (ds.act != null) return void dialog(I18N.t("Activity"), actFacts(X.acts[Number(ds.act)]), "");
+    if (ds.act != null) return void dialog(I18N.t("Activity"), actFacts(X.actRows[Number(ds.act)]), "");
     if (ds.ainfo) return void dialog(I18N.t("Activity"), ACT_INFO, "");
     if (ds.asset) { X.open[ds.asset] = !X.open[ds.asset]; return draw(); }
     if (ds.room != null) return opts.go(C.ROOMS[Number(ds.room)].view);
@@ -591,7 +591,7 @@ const DexUI = (() => {
   }
 
   // ---- Activity (ActivityTab.java), Assets (AssetsTab.java), Settings (RelaysTab.java): shared by the rooms ----
-  const ACT_INFO = L_("Every BUY and SELL you make and every fill your node co-signs, newest first, with its live progress. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. AtomiX swaps are listed first, each with its steps, Check now and, when one is due, Refund now; a swap is never cancelled by hand: one that stalls is refunded by itself at its deadline. Pool operations (swaps against pools, creating, adding, migrating and closing a pool) follow, each with its transaction id whole; room ② Activity has the same list and every pool's transactions.");
+  const ACT_INFO = L_("Every BUY and SELL you make, every fill your node co-signs, every AtomiX swap and every pool operation, together in one list, newest first, each line marked with its kind (fast book, on-chain, AtomiX, pool) and its live progress. Lines a block holds are in block order; a line not in a block yet is marked PENDING and placed by the time it was sent. A trade is DONE (FAST) or CONFIRMED (on-chain) only when a block holds its output coin and three more blocks are on top; until then the line says where it stands. Click a line for its facts and identifiers. Market history is every fill this node saw on the book. An AtomiX swap shows its steps, Check now and, when one is due, Refund now; a swap is never cancelled by hand: one that stalls is refunded by itself at its deadline. A pool operation (a swap against a pool, creating, adding, migrating or closing a pool) shows its transaction id whole; room ② Activity has your pool operations and every pool's transactions.");
   const A = () => (window.AX && window.AX.activity) || null;   // the engine's own stage machine and wording (dexicon/lib/activity.js, verbatim)
   function activityHtml() {
     const out = [`<div class="dx-title"><h2>${th("Activity")}</h2><button class="dx-info" data-ainfo="1" aria-label="${th("About Activity")}">i</button></div>`,
@@ -600,15 +600,26 @@ const DexUI = (() => {
     const now = Date.now(), tip = (st && st.block) || 0, hm = (ms) => { const t = new Date(ms); return String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0"); };
     let day = "";
     if (X.asub === 0) {
-      if (!X.acts.length && !ax) out.push(`<div class="dx-card dx-none"><b>${X.loaded || axRoom() ? th("Nothing yet") : "…"}</b><span>${th("Every BUY and SELL you make, every fill your node co-signs, every AtomiX swap and every pool operation shows its live progress here.")}</span></div>`);
-      X.acts.forEach((a, i) => {
-        const ms = Number(a.ts) || 0, d = C.dayLabel(ms, now), buy = a.side === "buy" || a.buy === true, m = A();
+      // ONE list (0.19.384, owner: "They should all be together in chronological order, mixed."): the Exchange's rows,
+      // AtomiX's swaps and PandaPools' operations, newest first (DexCore.activityMix), each marked with its kind.
+      // The Exchange's rows are the page's own merge (AX.activity.merge, ui/activity.js all()): the activity rows plus every
+      // FAST fill that has no row of its own (the maker's side), as the page's and the phone's Activity show them.
+      const m = A(), rows = X.actRows = m ? m.merge(X.acts, X.fills) : X.acts.slice();
+      const items = C.activityMix(rows.map((a, i) => {
+        const ms = Number(a.ts) || 0, buy = a.side === "buy" || a.buy === true, fast = a.route === "FAST";
         const chip = m ? m.chip(a, tip) : String(a.stage || ""), status = m ? m.status(a, tip, now) : String(a.stage || ""), tone = /DONE|CONFIRMED/.test(chip) ? "ok" : /FAILED|REFUSED|DROPPED|LOST/.test(chip) ? "bad" : "live";
+        const block = Number(a.block) > 0 ? Number(a.block) : 0;
+        return { kind: fast ? "fast" : "chain", key: "dx:" + (a.id || i), ts: ms, block, pending: !block && !(m && m.failedTerminal(a)), tag: fast ? th("fast book") : th("on-chain"),
+          html: `<button class="dx-card dx-led" data-act="${i}"><span class="dx-led__ic" data-tone="${tone}">${tone === "ok" ? "✓" : tone === "bad" ? "!" : "…"}</span><span class="dx-led__m"><b>${tone === "ok" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))} MINIMA</b>`
+            + `<span class="dx-led__a">${tr("{minima} MINIMA @ {price}", { minima: esc(a.amount || a.minima || ""), price: esc(a.price || "") })}</span><span class="dx-led__s">${stamp(ms)} · ${fast ? th("fast book") : th("on-chain")} · ${esc(status)}</span></span>`
+            + `<span class="dx-led__r"><span class="dx-chip" data-tone="${tone}">${esc(I18N.t(chip))}</span><span class="dx-led__t">▸</span></span></button>` };
+      }).concat(DexAx.activityItems(), DexPools.activityItems()));
+      if (!items.length && !ax) out.push(`<div class="dx-card dx-none"><b>${X.loaded || axRoom() ? th("Nothing yet") : "…"}</b><span>${th("Every BUY and SELL you make, every fill your node co-signs, every AtomiX swap and every pool operation shows its live progress here.")}</span></div>`);
+      for (const it of items) {
+        const d = C.dayLabel(Number(it.ts) || 0, now);
         if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
-        out.push(`<button class="dx-card dx-led" data-act="${i}"><span class="dx-led__ic" data-tone="${tone}">${tone === "ok" ? "✓" : tone === "bad" ? "!" : "…"}</span><span class="dx-led__m"><b>${tone === "ok" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))} MINIMA</b>`
-          + `<span class="dx-led__a">${tr("{minima} MINIMA @ {price}", { minima: esc(a.amount || a.minima || ""), price: esc(a.price || "") })}</span><span class="dx-led__s">${stamp(ms)} · ${a.route === "FAST" ? th("fast book") : th("on-chain")} · ${esc(status)}</span></span>`
-          + `<span class="dx-led__r"><span class="dx-chip" data-tone="${tone}">${esc(I18N.t(chip))}</span><span class="dx-led__t">▸</span></span></button>`);
-      });
+        out.push(`<div class="dx-mix" data-kind="${it.kind}"><div class="dx-mix__k"${it.pending ? " data-pending" : ""}>${it.tag}${it.pending ? " · " + th("PENDING") : ""}</div>${it.html}</div>`);
+      }
     } else {
       const tape = X.svc && Array.isArray(X.svc.tape) ? X.svc.tape : [];
       if (!tape.length && !ax) out.push(`<div class="dx-card dx-none"><b>${th("No trades seen yet")}</b><span>${th("Fills this node sees on the on-chain book are listed here. There is no server and no back-fill.")}</span></div>`);

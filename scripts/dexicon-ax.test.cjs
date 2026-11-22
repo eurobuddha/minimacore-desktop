@@ -758,3 +758,20 @@ test("abbrev and ax6 cut from the exact decimal text: 0.29 stays 0.29; thousands
   assert.equal(AX.abbrev(56789), "56.7k"); assert.equal(AX.abbrev(0), "—"); assert.equal(AX.abbrev(-1), "—"); assert.equal(AX.abbrev("x"), "—");
   assert.equal(AX.ax6(0.29), "0.29"); assert.equal(AX.ax6(1.0000009), "1"); assert.equal(AX.ax6(0.1234567), "0.123456"); assert.equal(AX.ax6(0), ""); assert.equal(AX.ax6(NaN), "");
 });
+
+// 0.19.384: AtomiX's swaps are rows of the shared Activity's ONE list (dexicon-ui.js mixes them with DexCore.activityMix)
+test("0.19.384: AtomiX's Activity rows: every swap not hidden, placed by its created time, pending until it has finished, its whole card", async () => {
+  // the screens are defined only where there is a document: the file as the window loads it, in a context of its own
+  const ctx = Object.assign({ console, setTimeout, setImmediate, Promise, DexCore: C, localStorage: { getItem: () => null, setItem() {} }, document: { getElementById: () => null, querySelectorAll: () => [] } }, require("./i18n-plain.cjs").globals());
+  ctx.window = ctx; vm.createContext(ctx); vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ax.js"), "utf8"), ctx);
+  const M = ctx.DexAx;
+  const sw = (n, status, created) => ({ hash: PK(n), role: "INITIATOR", direction: "ERC20_TO_MINIMA", status, selltoken: "USDT", sellamount: "40", buytoken: AX.MXUSD, buyamount: "39.6", created, counterparty: PK("D1"), contractId: PK("F9") });
+  const swaps = [sw("A1", "STARTED", 3000), sw("A2", "COMPLETE", 2000), sw("A3", "REFUNDED", 1000), Object.assign(sw("A4", "ERROR", 500), { inWindow: true })];
+  M.init({ api: { axStatus: async () => ({ ready: true, currency: "mxusdt" }), axSwaps: async () => swaps, axMarketHistory: async () => ({}), axWallet: async () => null }, running: () => true, repaintStrip() {}, redraw() {} });
+  M.shared(true); for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+  const items = M.activityItems();
+  assert.deepEqual(items.map((x) => [x.key, x.ts, x.block, x.pending]), [["ax:" + PK("A1"), 3000, 0, true], ["ax:" + PK("A2"), 2000, 0, false], ["ax:" + PK("A3"), 1000, 0, false], ["ax:" + PK("A4"), 500, 0, true]], "an error still inside its refund window is not finished");
+  assert.ok(items.every((x) => x.kind === "atomix" && x.tag === "ATOMIX · USDT ⇄ MxUSD"), "marked with its kind and its market");
+  assert.ok(items[0].html.includes(PK("A1")) && items[0].html.includes(PK("F9")) && items[0].html.includes('data-axhide="' + PK("A1") + '"'), "the swap's own card, ids whole, still hideable");
+  assert.equal(M.part("activity", 0), "", "no separate AtomiX section any more");
+});
