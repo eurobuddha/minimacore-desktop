@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.357] — Dexicon lanes test: the queue behind two held posts is bounded above too
+
+- The lanes test asked only that at least 34 requests wait behind the two held WORK places (32 refusals, the order and the take; 0.19.348 allowed the engine's one periodic read as a 35th). Nothing bounded it above, so a queue that grew past what is expected passed unseen. It now asks for 34 or 35, with 6 dropped. A test change only.
+
 ## [0.19.356] — miniMall: a payment coin given up on is no longer said once its order is checked by hand (as released 0.18.302)
 
 - A coin whose judging threw three times is left for a check by hand (0.19.350): a problem on its order and "Payment coin <id> could not be judged: check by hand." on the Inbox. The line stayed for the rest of the session even after the vendor checked that order by hand. The coin is now kept with the order it flagged, and checking that order by hand takes it off the Inbox. main/shop.js pin updated on purpose.

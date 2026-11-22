@@ -883,7 +883,8 @@ test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an 
   const take = host.command({ op: "net", method: "POST", url: "https://eurobuddha.com/dex-relay/dex/msg", body: "take" });
   // changed on purpose (0.19.348): the engine's own periodic read may queue behind the two held posts (35 then); what matters is that the
   // order and the take wait and nothing more was dropped
-  assert.ok(host._lanes().workWaiting >= 34, "not dropped although 32 refusals wait (" + host._lanes().workWaiting + " waiting)"); assert.equal(host._lanes().dropped, 6, "no refusal dropped for them");
+  // bounded above too (0.19.357): 32 refusals + the order + the take, and at most the engine's one periodic read; never more
+  const ww = host._lanes().workWaiting; assert.ok(ww >= 34 && ww <= 35, "not dropped although 32 refusals wait, and nothing else queued (" + ww + " waiting)"); assert.equal(host._lanes().dropped, 6, "no refusal dropped for them");
   // both WORK places are held: a long poll still goes out (its own lane), a plain read waits
   const n = net.calls.length;
   vm.runInContext(`MDS.net.GET("https://eurobuddha.com/dex-relay/dex/inbox?pk=0x00&since=0&hold=8", function (r) { __done.push(["poll", r.status]); }); MDS.net.GET("https://eurobuddha.com/dex-relay/dex/book?market=x&since=0&hold=0", function (r) { __done.push(["read", r.status]); })`, ctx);
