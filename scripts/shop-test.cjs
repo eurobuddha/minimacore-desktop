@@ -1584,3 +1584,25 @@ test("N1: the real order with a secret, after a copier's order without one was p
     assert.equal(c.paid, false); assert.equal(c.problems[0], DUPV, "the copier's unpaid order is held as before");
     assert.equal(v.paid, true, "paid by its own proved coin"); assert.deepEqual(v.coins, ["0xfe01"]); assert.deepEqual(v.problems, []); assert.equal(v.notes, undefined, "no note: no paid order without a secret was left as it is"); }
 });
+
+// ---- 0.18.309: a coin given up on and counted after all (review-desktop-r5 R6): after 3 passes that threw, its problem held the order; after a
+// restart the coin was judged and counted, and the problem still held it (UNCHECKED, never PAID). Released 0.18.286 paid it ----
+test("R6: a coin given up on that is counted after a restart takes its own problem away: the order is paid; a second problem, or a listing that no longer matches, still holds it", async () => {
+  const run = async (name, between) => { const t = await setupS(name); t.st.msg = [await sealS(t, t.victim, "ORD-V", 1001, "VICTIM")]; t.st.pay = [payS("ORD-V", 1002, undefined, "0xFEab06")];
+    const real = t.m.store.recordPayment; let bad = true; t.m.store.recordPayment = function () { if (bad) throw new Error("transient"); return real.apply(this, arguments); };
+    const err = console.error; console.error = () => {};
+    try { await walk(t, 1005, 1007); bad = false; await walk(t, 1008, 1010); } finally { console.error = err; t.m.store.recordPayment = real; }
+    const o = t.m.store.order("ORD-V"); assert.deepEqual(o.problems, ["payment coin 0xFEab06 could not be judged: check by hand"], name); assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED");
+    if (between) await between(t);
+    const m = await t.reopen(); for (let x = 1011; x <= 1016; x++) { t.st.tip = x; await m.shop.scanOnce(); }
+    return [m, m.store.order("ORD-V")]; };
+  { const [m, o] = await run("r6");
+    assert.equal(o.paid, true, JSON.stringify(o.problems)); assert.equal(o.status, "PAID"); assert.deepEqual(o.problems, []); assert.equal(o.due, "1", "what is due, from the listing as for a fresh order"); assert.equal(o.paidAmount, "1");
+    assert.deepEqual(o.coins, ["0xfeab06"]); assert.equal(m.store.mayAdvance(o), true); }
+  { const [m, o] = await run("r6dup", async (t) => { t.st.msg.push(await sealS(t, t.atk, "ORD-V", 1010, "COPIER")); await walk(t, 1010, 1010); });
+    assert.equal(o.paid, false, "a second, unrelated problem still holds it"); assert.equal(o.status, "UNCHECKED"); assert.deepEqual(o.problems, [DUPV]); assert.equal(o.paidAmount, "1", "the coin is counted");
+    assert.equal(m.store.mayAdvance(o), false); }
+  { const [m, o] = await run("r6list", async (t) => { const s = t.m.store.shop("r6list"); s.products[0].price = "2"; t.m.store.saveShop(s); });
+    assert.equal(o.paid, false, "checked again against the listing as it is now: it no longer matches"); assert.equal(o.status, "UNCHECKED"); assert.equal(o.due, "");
+    assert.deepEqual(o.problems, ["\"Tea\": the order's price 1 is not your price 2"]); assert.equal(m.store.mayAdvance(o), false); }
+});

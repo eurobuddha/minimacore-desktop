@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.310] — miniMall: a coin given up on and counted after all no longer holds its order
+
+- A payment coin whose judging threw on three passes is given up on and leaves "payment coin <id> could not be judged: check by hand" on its order (0.18.295). After a restart the coin is judged again and counted, but that problem still held the order: UNCHECKED, never PAID (review-desktop-r5 R6; the released app paid it). When a coin is counted for an order, that order's problem for exactly that coin now goes; when no problem is left, the order is checked against the listing again exactly as a fresh order is (what is due, and any way it departs from the listing, which still holds it), so it is paid as before. Any other problem on it still holds it.
+- Tests (scripts/shop-test.cjs): R6 (paid after the restart); the same with a second buyer's order with the reference (still held, the coin counted); the same with the listing's price changed meanwhile (held by the listing check). R6 fails on 0.18.309.
+
 ## [0.18.309] — miniMall: a newcomer with a secret that leaves a paid order without one as it is says so in a note
 
 - Since 0.18.306 a second buyer's order WITH a secret leaves a PAID order without one as it is. That newcomer was kept silent: PENDING, nothing said, and a check by hand was refused (review-desktop-r5 N1). When its buyer had paid outside the app without the proof, that coin paid the other order, and the vendor could neither see the clash nor act on the real order (the released app put the duplicate problem on it, so it could be checked by hand). It now carries the duplicate sentence as ONE note: "another buyer sent an order with the same reference …: a payment with it cannot be told apart, so check both orders by hand". A note holds nothing (its own proved coin still pays it), and an unpaid order with a note can be checked by hand.

@@ -269,6 +269,14 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid, block) {
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
     flush(); return "WRONG_TOKEN";
   }
+  // a coin given up on (main/shop.js JUDGE_TRIES) and counted after all, e.g. after a restart (0.18.309, review-desktop-r5 R6): its problem on this
+  // order goes; with no problem left the order is checked against the listing again exactly as a fresh order is (what is due, and any mismatch,
+  // which still holds it), so it can be paid as the released app paid it. Any other problem still holds it.
+  const gave = "payment coin " + cid + " could not be judged: check by hand";
+  if (o.problems.some(p => String(p).toLowerCase() === gave)) {
+    o.problems = o.problems.filter(p => String(p).toLowerCase() !== gave);
+    if (!o.problems.length) { delete o.problems; ensureChecked(o); if (!o.problems.length && o.status === "UNCHECKED") o.status = "PENDING"; }
+  }
   pendDelete(ref, cid);
   let outcome = countCoins(o, ref, [[cid, String(paidAmount)]], paidTokenid);
   if (outcome === "UNDERPAID") outcome = settleDust(o, ref) || outcome;   // the gathered dust may now cover what is left
