@@ -72,7 +72,8 @@ function asyncStandard(h, cs, opts) {
     if (q === 'checkmode') return reply(good({ writemode: true, dblocked:false }));
     if (q === 'status') return reply(good({ megammr: false }));
     if (q === 'keys' || q.startsWith('keys action:list')) return reply(good([{ publickey: opk, uses: 846, modifier: '0x40' }]));
-    if (q.startsWith('scripts address:')) return reply(good({ address: q.split(':')[1], simple: true, publickey: opk }));
+    // As the real node: a script row is found only by the address exactly as the coins carry it (case-SENSITIVE lookup).
+    if (q.startsWith('scripts address:')) { const a = q.slice('scripts address:'.length); return reply(cs.concat(o.wallet || []).some(x => x.address === a) ? good({ address: a, simple: true, publickey: opk }) : { status: false, error: 'Script with that address not found' }); }
     if (q.startsWith('runscript ')) return reply(good({ parseok: true, script: { address: addr } }));
     if (q.startsWith('newscript ')) return reply(good({ address: addr }));
     if (q.startsWith('getaddress')) return reply(good({ address: hash(500) }));
