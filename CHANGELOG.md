@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.313] — comments: no shortened address
+
+- main/nodelog.js's header quoted the node's log line with the AtomiX HTLC address shortened; it now names it whole: 0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A. main/atomix.js's comment on the publish pin named the PandaPools beacon address shortened; it now names it whole, 0x50414E4441504F4F4C53 ("PANDAPOOLS", main/pandapools/service.js SENTINEL). Comments only; nothing in the app changes.
+
 ## [0.18.312] — miniMall: coins of another token never fill an order's coin list
 
 - A coin of another token with an order's reference went into the order's coin list (as a WRONG_TOKEN coin), and that list holds at most 1000 coins (ORDER_COINS_MAX). On an order without a secret, 2000 worthless-token coins with its reference in the block of the real payment filled it, and the real payment was never counted (review-desktop-r5 N2c2; not new in this series). As Pandamonium Desktop has it, a coin of another token is now never counted and never kept: the order still says WRONG_TOKEN with the token paid, as before, and a wrong coin seen again changes nothing and writes nothing (it wrote shop.json once per coin).

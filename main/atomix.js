@@ -68,7 +68,7 @@ function log(line) {
 
 // The order book publishes / tombstones by SENDing a 1-nano MINIMA coin that carries the signed order in state.
 // On a SHARED node the wallet also holds anyone-can-spend sentinel/beacon dust (e.g. PandaPools 1-nano coins at
-// 0x50414E…="PANDAPOOLS") that has NO private key. The node's `send` auto-selects the SMALLEST coin first → it
+// 0x50414E4441504F4F4C53 = "PANDAPOOLS", main/pandapools/service.js SENTINEL) that has NO private key. The node's `send` auto-selects the SMALLEST coin first → it
 // grabs that beacon dust → txnsign NPEs ("KeyRow.getPrivateKey() null") and the publish/withdraw fails. Fix:
 // pin these sends to the smallest SIMPLE (wallet-signable) MINIMA coin via `fromaddress:` so an unsignable coin
 // can never be selected. checkaddress → {simple:true} is the reliable signable test (beacon addrs return {}).
