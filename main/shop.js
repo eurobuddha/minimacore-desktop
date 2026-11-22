@@ -499,7 +499,10 @@ async function scanPayments(depth) {
     // with its reference, the first coin's id whole (0.18.304: it was a problem, which held the order, so a stranger's coin with the reference,
     // a worthless token or dust, stopped the proved payment from paying it). The note holds nothing: the order is paid by its proved coins as
     // ever, and an unpaid one with a note can be checked by hand (a buyer who paid by hand without the proof).
-    if (!pay.order) for (const u of pay.unproven) store.noteNoProof(u.ref, NO_PROOF + " (payment coin " + String(id) + "): check by hand");
+    // With the coin's amount as the node gave it (never rounded) and its token id whole, or Minima (0.18.311, review-desktop-r5): a stranger's dust
+    // or worthless token is told apart from a buyer's real payment made without the proof.
+    const token = !c.tokenid || c.tokenid === MINIMA_TOKEN ? "Minima" : String(c.tokenid);
+    if (!pay.order) for (const u of pay.unproven) store.noteNoProof(u.ref, NO_PROOF + " (payment coin " + String(id) + ", amount " + String(coinAmount(c)) + ", token " + token + "): check by hand");
     if (!o) return "";   // counted for no order, and not marked seen: the order it proves may still be read
     seenPayCoins.add(id);
     // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
