@@ -62,7 +62,7 @@ function stateProblem(coin) {
   for (const p of [2, 3, 4]) if (!NUM.test(String(stateVar(coin, p)))) return "state " + p + " is not a plain number";
   for (const p of [5, 6, 7, 8]) { const v = String(stateVar(coin, p)); if (v !== "" && !(V.isBareValue(v) && v.length <= 64)) return "state " + p + " is not a bare value"; }
   if (!V.isHexId(String(stateVar(coin, 199)))) return "the vest id is not hex";
-  if (!V.isHexId(String(coin.coinid || "")) || !V.isTokenid(coin.tokenid) || !NUM.test(coinAmount(coin))) return "the coin itself is not readable";
+  if (!V.isHexId(String(coin.coinid || "")) || !V.isTokenid(coin.tokenid) || !NUM.test(coinAmount(coin)) || !/^\d{1,20}$/.test(String(coin.created))) return "the coin itself is not readable";
   return "";
 }
 /** a - b on plain decimal strings, exactly (0.18.209: the collected figure was a double); "" when either cannot be read. */
@@ -73,6 +73,21 @@ function decSub(a, b) {
   const t = d.toString().padStart(dp + 1, "0"), i = t.slice(0, t.length - dp), f = dp ? t.slice(t.length - dp).replace(/0+$/, "") : "";
   return f ? i + "." + f : i;
 }
+/**
+ * Blocks still to wait before the covenant's grace line lets a collect through (0.18.291). The covenant refuses while
+ * `@COINAGE LT minblockwait`, and @COINAGE is read at the block that mines the collect: the next block at the earliest, so
+ * the age that counts is tip + 1 - created. A collect valid in the next block is not refused. A contract at or past its final
+ * block (at the tip, where the payout is worked out: the whole coin, the covenant's first branch) never waits. CHECK_MATHS's
+ * own mustwait reads the tip's age and is FALSE at age 0 (`(@BLOCK - @COINAGE) GT "0"`), so it decides nothing here, and the
+ * list's Collect button reads this same figure.
+ */
+function graceWait(coin, tp) {
+  const created = Number(coin.created), minwait = Number(stateVar(coin, 4)), final = Number(stateVar(coin, 3));
+  if (![created, minwait, final, tp].every(Number.isFinite)) return Infinity;
+  return tp >= final ? 0 : Math.max(0, minwait - (tp + 1 - created));
+}
+// Coins this session collected (0.18.291): refused a second time while the node still lists them as unspent and not in its mempool.
+const collectedHere = new Set();
 async function tip() { const r = await runner("block").catch(() => null); return r && r.response && (parseInt(r.response.block) || 0) || 0; }
 async function runScriptVars(script, prevstate, globals) {
   const cmd = 'runscript script:"' + script + '" prevstate:' + JSON.stringify(prevstate) + " globals:" + JSON.stringify(globals);
@@ -116,7 +131,7 @@ async function contractFromCoin(coin, tp) {
   const cancollect = String(v.cancollect != null ? v.cancollect : "0");
   const expired = String(v.contractexpired) === "TRUE" || tp >= endBlock;
   const cliffed = String(v.cliffed) === "TRUE" || tp < startBlock;
-  const mustwait = String(v.mustwait) === "TRUE";
+  const wait = tp ? graceWait(coin, tp) : 0, mustwait = wait > 0;   // the figure collect() refuses by (0.18.291), not CHECK_MATHS's mustwait
   const collected = decSub(total, amount);
   const pct = num(total) > 0 ? Math.max(0, Math.min(100, Math.round((num(total) - num(amount)) / num(total) * 100 + (num(cancollect) / num(total)) * 100))) : 0;
   return {
@@ -124,16 +139,18 @@ async function contractFromCoin(coin, tp) {
     beneficiary: stateVar(coin, 0), total, amount, collected,
     startBlock, endBlock, graceHours: /^\d{1,6}$/.test(String(stateVar(coin, 7))) ? Number(stateVar(coin, 7)) : 0, graceLabel: graceLabel(stateVar(coin, 7)),
     startMs: parseInt(stateVar(coin, 6)) || 0, endMs: parseInt(stateVar(coin, 8)) || 0, createdMs: parseInt(stateVar(coin, 5)) || 0,
-    cancollect, change: String(v.change != null ? v.change : "0"), mustwaitblocks: String(v.mustwaitblocks || "0"),
-    cliffed, expired, mustwait, canCollectNow: !cliffed && !mustwait && num(cancollect) > 0,
+    cancollect, change: String(v.change != null ? v.change : "0"), mustwaitblocks: String(mustwait ? wait : 0),
+    cliffed, expired, mustwait, canCollectNow: !!tp && !cliffed && !mustwait && V.isAmount(cancollect),
     pctVested: expired ? 100 : pct
   };
 }
 async function list() {
   await init();
   const tp = await tip();
-  const r = await runner("coins address:" + scriptAddress + " relevant:true").catch(() => null);
+  // checkmempool:true (0.18.291): a coin a collect is spending (being mined here, or in the mempool) is not listed
+  const r = await runner("coins address:" + scriptAddress + " relevant:true checkmempool:true").catch(() => null);
   const coins = (r && Array.isArray(r.response)) ? r.response : [];
+  if (r && Array.isArray(r.response)) for (const id of collectedHere) if (!coins.some(c => c && String(c.coinid).toLowerCase() === id)) collectedHere.delete(id);   // gone from the node's list
   const out = [];
   for (const c of coins) {
     if (!stateVar(c, 199)) continue;
@@ -196,11 +213,16 @@ async function collect(coinid, burn) {
   await init();
   if (!V.isHexId(coinid)) throw new Error("Invalid coin id");
   if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
-  const cr = await runner("coins coinid:" + coinid).catch(() => null);
+  // checkmempool:true (0.18.291): a coin a collect already spends is not found, so a second collect before the first is mined is not built
+  const cr = await runner("coins coinid:" + coinid + " checkmempool:true").catch(() => null);
   const coin = cr && Array.isArray(cr.response) && cr.response[0];
-  if (!coin) throw new Error("Contract coin not found (already collected?)");
+  const key = String(coinid).toLowerCase();
+  if (!coin) { if (cr && Array.isArray(cr.response)) collectedHere.delete(key); throw new Error("Contract coin not found (already collected?)"); }
+  if (collectedHere.has(key)) throw new Error("This contract coin was collected a moment ago and the node still lists it. Wait until it is gone from the list before you collect again. Nothing was sent.");
+  // the order of refusals (0.18.291): the coin's shape, the tip, nothing available, then the grace wait
   const bad = stateProblem(coin); if (bad) throw new Error("This contract coin cannot be collected: " + bad + ".");
   const tp = await tip();
+  if (!tp) throw new Error("The node's block height could not be read, so nothing was built. Nothing was sent.");
   const v = await runScriptVars(CHECK_MATHS,
     { 1: stateVar(coin, 1), 2: stateVar(coin, 2), 3: stateVar(coin, 3), 4: stateVar(coin, 4), 5: stateVar(coin, 5) },
     { "@AMOUNT": coinAmount(coin), "@BLOCK": tp, "@COINAGE": coin.created });
@@ -208,11 +230,10 @@ async function collect(coinid, burn) {
   // after the final block it said "collect 100, change 1" for a 100 coin: outputs above the input, a transaction txnpost takes
   // and the chain drops while the app said collected. The payout is the node's cancollect; the change is the coin less the
   // payout, exactly, as the covenant computes it (none once the whole coin is paid out). Within the grace wait the covenant
-  // refuses (@COINAGE LT minblockwait), so nothing is built.
+  // refuses (@COINAGE LT minblockwait), so nothing is built (graceWait: the age at the next block, the earliest that mines it).
   const amount = coinAmount(coin), cancollect = String(v.cancollect != null ? v.cancollect : "0");
-  if (!(tp >= Number(stateVar(coin, 3))) && (String(v.mustwait) === "TRUE" || !(tp - Number(coin.created) >= Number(stateVar(coin, 4)))))
-    throw new Error("The grace period of this contract is still running, so nothing can be collected yet. Nothing was sent.");
   if (!V.isAmount(cancollect)) throw new Error("Nothing available to collect yet");   // the node's figure, a plain number above 0
+  if (graceWait(coin, tp) > 0) throw new Error("The grace period of this contract is still running, so nothing can be collected yet. Nothing was sent.");
   if (decSub(cancollect, amount) !== "0") throw new Error("The node's figure to collect is more than this contract coin holds. Nothing was sent.");
   const change = decSub(amount, cancollect);   // payout + change = the coin, exactly
   const withdrawalAddress = stateVar(coin, 0), tokenid = coin.tokenid;
@@ -223,16 +244,27 @@ async function collect(coinid, burn) {
   cmds.push("txnoutput id:" + id + " address:" + withdrawalAddress + " amount:" + cancollect + " tokenid:" + tokenid + " storestate:false");
   if (change !== "0") cmds.push("txnoutput id:" + id + " address:" + CONTRACT + " amount:" + change + " tokenid:" + tokenid + " storestate:true");
   for (const p of [0, 1, 2, 3, 4, 5, 6, 7, 8, 199]) cmds.push("txnstate id:" + id + " port:" + p + " value:" + stateVar(coin, p));
+  cmds.push("txncheck id:" + id);   // the node judges the built transaction before anything is posted (0.18.291)
   cmds.push("txnpost id:" + id + (burn && Number(burn) > 0 ? " burn:" + burn : ""));
+  // txncheck runs the script with @BLOCK = the tip (TxPoWChecker.checkTxPoWScripts(tip.getMMR(), txpow, tip.getTxPoW()); @COINAGE =
+  // tip - created), one block before the earliest that can mine the collect. A collect that passes the grace line only from the next
+  // block (its age at the tip one short of minblockwait) fails `@COINAGE LT minblockwait` there and returns before any output check, so
+  // for it scripts:false is expected; the amounts, the basic checks and the MMR proofs must still be valid.
+  const edge = !(tp >= Number(stateVar(coin, 3))) && tp - Number(coin.created) < Number(stateVar(coin, 4));
+  const judged = (r) => { const R = r.response || {}, ok = R.valid || {};
+    return R.validamounts === true && ok.basic === true && ok.mmrproofs === true && (R.validtransaction === true || (edge && ok.scripts === false)); };
   try {
     // every step must say status true (0.18.209: an empty or unreadable reply counted as success); the post is the one
     // step that cannot be called failed when there is no answer, because the transaction may have gone
     for (const c of cmds) {
       const post = c.startsWith("txnpost");
       let r; try { r = await runner(c); } catch (e) { r = undefined; }
-      if (post && (!r || typeof r !== "object")) throw new Error("The collect may have been posted (the node did not answer). Check your History and wait for the list to refresh before you collect again.");
-      if (!r || (r.status !== true && r.pending !== true)) throw new Error("collect step failed: " + ((r && r.error) || c.split(" ")[0]) + ". Nothing was collected.");
+      if (post && (!r || typeof r !== "object")) { collectedHere.add(key); throw new Error("The collect may have been posted (the node did not answer). Check your History and wait for the list to refresh before you collect again."); }
+      // status true only (0.18.291): a pending reply (waiting for someone's approval) is not a collect
+      if (!r || r.status !== true) throw new Error("collect step failed: " + ((r && r.error) || c.split(" ")[0]) + ". Nothing was collected.");
+      if (c.startsWith("txncheck") && !judged(r)) throw new Error("The node checked this collect and judged it invalid, so it was not sent. Nothing was collected.");
     }
+    collectedHere.add(key);
     emitter.emit("update");
     return { ok: true, collected: cancollect, tokenid };
   } finally { await runner("txndelete id:" + id).catch(() => {}); }

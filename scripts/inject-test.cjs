@@ -147,6 +147,7 @@ test("Web Wallet: a failed key list or a locked vault refuses the send instead o
   assert.ok(sent.some(c => c.startsWith("sendfrom")));
 });
 
+const TXNCHECK_OK = { status: true, response: { validamounts: true, validtransaction: true, valid: { basic: true, mmrproofs: true, scripts: true } } };   // CHANGED on purpose (0.18.291): a collect is posted only after txncheck says valid
 // ---- 0.18.209: Vestr reads a contract coin's state strictly and never calls an unanswered send failed ----
 test("Vestr: state checked before use; collected exact; cadence a whole count; every collect step must say true; no answer is 'may have been sent'", async () => {
   const vestr = require("../main/vestr"), B = "0x" + "BE".repeat(32);
@@ -162,6 +163,7 @@ test("Vestr: state checked before use; collected exact; cadence a whole count; e
     if (k === "coins") return { status: true, response: coins };
     if (k === "runscript") return { status: true, response: { variables: { cancollect: "0.2", change: "0.1" } } };
     if (k === "checkaddress") return { status: true, response: { "0x": B } };
+    if (k === "txncheck") return TXNCHECK_OK;
     return { status: true, response: {} }; });
   const l = await vestr.list();
   assert.deepEqual(l.map(v => v.coinid), ["0xC0"], "only the coin with a readable state is shown");
@@ -171,8 +173,12 @@ test("Vestr: state checked before use; collected exact; cadence a whole count; e
   // every step must answer true
   step = { txnoutput: null }; await assert.rejects(vestr.collect("0xC0"), /collect step failed: txnoutput\. Nothing was collected/, "an empty reply is not success");
   step = { txninput: { status: false, error: "busy" } }; await assert.rejects(vestr.collect("0xC0"), /busy\. Nothing was collected/);
-  step = { txnpost: "throw" }; await assert.rejects(vestr.collect("0xC0"), /may have been posted/);
   step = {}; assert.equal((await vestr.collect("0xC0")).ok, true);
+  // CHANGED on purpose (0.18.291): a coin this session collected is refused again until it is gone from the node's list
+  await assert.rejects(vestr.collect("0xC0"), /^Error: This contract coin was collected a moment ago and the node still lists it\. Wait until it is gone from the list before you collect again\. Nothing was sent\.$/);
+  const all = coins; coins = all.filter(x => x.coinid !== "0xC0"); await vestr.list(); coins = all;   // gone from the list once
+  step = { txnpost: "throw" }; await assert.rejects(vestr.collect("0xC0"), /may have been posted/);
+  step = {}; await assert.rejects(vestr.collect("0xC0"), /collected a moment ago/, "a collect that may have been posted is not built again");
   // create
   const base = { tokenid: "0x00", amount: "5", beneficiary: "Mx" + "A".repeat(50), startMs: Date.now() + 1e6, endMs: Date.now() + 2e6 };
   for (const g of ["1e3", "-24", "2.5", "abc", 1.5, -1]) await assert.rejects(vestr.create(Object.assign({}, base, { graceHours: g })), /whole number of hours/, String(g));
@@ -373,17 +379,19 @@ test("Vestr collect: an expired contract pays the whole coin with no change outp
     if (c === "block") return { status: true, response: { block: String(block) } };
     if (c.startsWith("coins coinid:")) return { status: true, response: [coin] };
     if (c.startsWith("runscript")) return { status: true, response: { variables: vars } };
+    if (c.startsWith("txncheck")) return TXNCHECK_OK;
+    if (c.startsWith("coins address:")) return { status: true, response: [] };
     return { status: true, response: {} };
   });
   const run = async (st, amount, created, tip, v) => {
     coin = { coinid: COIN, tokenid: "0x00", amount, created: String(created), address: vestr.CONTRACT, state: st.map(([port, data]) => ({ port, data })) };
-    block = tip; vars = v; sent = [];
+    block = tip; vars = v; await vestr.list(); sent = [];   // CHANGED on purpose (0.18.291): the list read forgets a collected coin no longer listed
     const r = await vestr.collect(COIN, "");
     return { r, txn: sent.filter(c => /^txn/.test(c)).map(c => c.replace(/vc\d+/, "ID")) };
   };
   const states = (st) => st.map(([p, d]) => "txnstate id:ID port:" + p + " value:" + d);
   const whole = (st, tip) => ["txncreate id:ID", "txninput id:ID coinid:" + COIN + " scriptmmr:true",
-    "txnoutput id:ID address:" + UNLOCK + " amount:100 tokenid:0x00 storestate:false", ...states(st), "txnpost id:ID", "txndelete id:ID"];
+    "txnoutput id:ID address:" + UNLOCK + " amount:100 tokenid:0x00 storestate:false", ...states(st), "txncheck id:ID", "txnpost id:ID", "txndelete id:ID"];
   // at the final block CHECK_MATHS says cancollect 100 AND change 1 (its change is worked out before the expiry raises cancollect)
   for (const [tip, change] of [[1000004, "1"], [1000078, "0"]]) {
     const { r, txn } = await run(owner, "100", 1000002, tip, { cancollect: "100", change, mustwait: "FALSE", contractexpired: "TRUE" });
@@ -400,7 +408,7 @@ test("Vestr collect: an expired contract pays the whole coin with no change outp
   assert.deepEqual(txn, ["txncreate id:ID", "txninput id:ID coinid:" + COIN + " scriptmmr:true",
     "txnoutput id:ID address:" + UNLOCK + " amount:380 tokenid:0x00 storestate:false",
     "txnoutput id:ID address:" + vestr.CONTRACT + " amount:495.5 tokenid:0x00 storestate:true",
-    ...states(part), "txnpost id:ID", "txndelete id:ID"], "380 out, the exact 495.5 back to the contract keeping every port (SAMESTATE(0 8), PREVSTATE(199) EQ STATE(199))");
+    ...states(part), "txncheck id:ID", "txnpost id:ID", "txndelete id:ID"], "380 out, the exact 495.5 back to the contract keeping every port (SAMESTATE(0 8), PREVSTATE(199) EQ STATE(199))");
   // the grace wait in force: 40 blocks old and the node says wait; 0 blocks old, where the node's mustwait is FALSE and the covenant still refuses
   const graced = part.map(([p, d]) => [p, p === 4 ? "1728" : d]);
   for (const [created, mustwait] of [[999988, "TRUE"], [1000028, "FALSE"]]) {
@@ -411,4 +419,78 @@ test("Vestr collect: an expired contract pays the whole coin with no change outp
   await assert.rejects(run(part, "875.5", 999988, 1000028, { cancollect: "875.6", change: "0", mustwait: "FALSE", contractexpired: "FALSE" }), /^Error: The node's figure to collect is more than this contract coin holds\. Nothing was sent\.$/);
   assert.ok(!sent.some(c => /^txn/.test(c)), "nothing built for a payout above the coin");
   vestr._setRunner(() => { throw new Error("no node in a test"); });
+});
+
+// ---- 0.18.291: Vestr never builds a second collect of a coin already being collected; the node judges every collect before it is posted;
+// the refusals come in the order shape, tip, nothing available, grace; the grace wait counts the age at the next block ----
+const vestrRig = () => {
+  const vestr = require("../main/vestr");
+  const COIN = "0x9A0F5C6E1D2B3A4958677685A4B3C2D1E0F9A8B7C6D5E4F3A2B1C0D9E8F7A6B5", UNLOCK = "0x" + "5E".repeat(32);
+  const st = (o) => [[0, UNLOCK], [1, "1000"], [2, "100"], [3, "1100"], [4, "10"], [5, "1"], [6, "1"], [7, "0"], [8, "2"], [199, "0xAB"]].map(([port, data]) => ({ port, data: o && o[port] != null ? o[port] : data }));
+  const R = { vestr, COIN, st, sent: [], listed: true };
+  vestr._setRunner(async (c) => {
+    R.sent.push(c);
+    if (c.startsWith("newscript")) return { status: true, response: { address: vestr.CONTRACT } };
+    if (c === "block") { if (R.tip === "throw") throw new Error("timed out"); return R.tip; }
+    if (c.startsWith("coins coinid:") || c.startsWith("coins address:")) return { status: true, response: R.listed ? [R.coin] : [] };   // a node that still lists the coin (as one without the mempool flag)
+    if (c.startsWith("runscript")) return { status: true, response: { variables: R.vars } };
+    if (c.startsWith("txncheck")) return R.txncheck;
+    if (c.startsWith("txnpost")) return R.post;
+    return { status: true, response: {} };
+  });
+  R.OK = { status: true, response: { validamounts: true, validtransaction: true, valid: { basic: true, mmrproofs: true, scripts: true } } };
+  R.SCRIPTS_FALSE = { status: true, response: { validamounts: true, validtransaction: false, valid: { basic: true, mmrproofs: true, scripts: false } } };
+  R.reset = async (o) => { R.listed = false; await vestr.list(); R.coin = Object.assign({ coinid: COIN, tokenid: "0x00", amount: "900", created: "100", address: vestr.CONTRACT, state: st() }, o);
+    R.listed = true; R.tip = { status: true, response: { block: "600" } }; R.vars = { cancollect: "400", change: "500", mustwait: "FALSE", contractexpired: "FALSE" }; R.txncheck = R.OK; R.post = { status: true, response: {} }; R.sent = []; };
+  R.txns = () => R.sent.filter(c => /^txn/.test(c)).map(c => c.split(" ")[0]);
+  R.collect = () => vestr.collect(COIN, "");
+  R.done = () => vestr._setRunner(() => { throw new Error("no node in a test"); });
+  return R;
+};
+test("Vestr collect (V1): both reads send checkmempool:true; a coin collected in this session is refused again, nothing built, while the node still lists it", async () => {
+  const R = vestrRig();
+  await R.reset(); assert.equal((await R.collect()).ok, true);
+  assert.ok(R.sent.includes("coins coinid:" + R.COIN + " checkmempool:true"), R.sent.join(" | ")); await R.vestr.list(); assert.ok(R.sent.includes("coins address:" + R.vestr.CONTRACT + " relevant:true checkmempool:true"));
+  R.sent = []; await assert.rejects(R.collect(), /^Error: This contract coin was collected a moment ago and the node still lists it\. Wait until it is gone from the list before you collect again\. Nothing was sent\.$/);
+  assert.deepEqual(R.txns(), [], "nothing built"); R.listed = false; await assert.rejects(R.collect(), /not found/, "hidden by checkmempool: not found");
+  R.done();
+});
+test("Vestr collect (V2): txncheck after the build and before txnpost; anything but a valid verdict is refused, deleted, never posted", async () => {
+  const R = vestrRig();
+  for (const bad of [{ status: true, response: { validamounts: false, validtransaction: false, valid: { basic: false, mmrproofs: true, scripts: true } } }, R.SCRIPTS_FALSE, { status: true, response: {} }]) {
+    await R.reset(); R.txncheck = bad;
+    await assert.rejects(R.collect(), /^Error: The node checked this collect and judged it invalid, so it was not sent\. Nothing was collected\.$/, JSON.stringify(bad));
+    assert.deepEqual(R.txns().slice(-2), ["txncheck", "txndelete"], "no txnpost");
+  }
+  await R.reset(); R.txncheck = { status: false, error: "Transaction not found" }; await assert.rejects(R.collect(), /collect step failed: Transaction not found\. Nothing was collected/); assert.ok(!R.txns().includes("txnpost"));
+  await R.reset(); assert.equal((await R.collect()).ok, true); assert.deepEqual(R.txns().slice(-3), ["txncheck", "txnpost", "txndelete"]);
+  R.done();
+});
+test("Vestr collect (V3): the coin's shape, then the tip, then nothing available, then the grace wait, counted at the next block (valid there: not refused)", async () => {
+  const R = vestrRig();
+  await R.reset({ state: R.st({ 4: "abc" }) }); R.tip = "throw"; await assert.rejects(R.collect(), /cannot be collected: state 4 is not a plain number/, "the shape first, whatever the tip");
+  await R.reset(); R.tip = "throw"; await assert.rejects(R.collect(), /^Error: The node's block height could not be read, so nothing was built\. Nothing was sent\.$/);
+  await R.reset(); R.tip = { status: false, error: "busy" }; await assert.rejects(R.collect(), /block height could not be read/); assert.ok(!R.sent.some(c => c.startsWith("runscript")), "no maths without a tip");
+  await R.reset({ created: "595" }); R.vars = { cancollect: "0", change: "900", mustwait: "TRUE", contractexpired: "FALSE" };   // young, and nothing vested yet
+  await assert.rejects(R.collect(), /^Error: Nothing available to collect yet$/, "nothing available before the grace wait");
+  // minblockwait 10, created 100; the collect is mined at tip + 1 at the earliest: tip 108 (age 9 there) waits, tip 109 (age 10 there) goes,
+  // although txncheck, which runs the script at the tip (age 9), says scripts:false for it; at tip 110 a script failure is a failure
+  await R.reset(); R.tip = { status: true, response: { block: "108" } }; await assert.rejects(R.collect(), /grace period of this contract is still running/); assert.deepEqual(R.txns(), []);
+  await R.reset(); R.tip = { status: true, response: { block: "109" } }; R.vars.mustwait = "TRUE"; R.txncheck = R.SCRIPTS_FALSE;
+  assert.equal((await R.collect()).ok, true, "valid in the next block: not refused"); assert.ok(R.txns().includes("txnpost"));
+  await R.reset(); R.tip = { status: true, response: { block: "110" } }; R.txncheck = R.SCRIPTS_FALSE; await assert.rejects(R.collect(), /judged it invalid/);
+  R.done();
+});
+test("Vestr: the list's Collect button agrees with collect() at coin age 0 (CHECK_MATHS's mustwait is FALSE there, the covenant refuses)", async () => {
+  const R = vestrRig();
+  await R.reset({ created: "600", state: R.st({ 4: "1728" }) });
+  let [v] = await R.vestr.list(); assert.equal(v.canCollectNow, false); assert.equal(v.mustwait, true); assert.equal(v.mustwaitblocks, "1727");
+  await assert.rejects(R.collect(), /grace period/);
+  await R.reset({ created: "600", state: R.st({ 4: "1" }) }); [v] = await R.vestr.list(); assert.equal(v.canCollectNow, true, "minblockwait 1 at age 0: mined at age 1"); assert.equal((await R.collect()).ok, true);
+  R.done();
+});
+test("Vestr collect (V5): a pending reply to txnpost is not 'collected'", async () => {
+  const R = vestrRig();
+  await R.reset(); R.txncheck = R.OK; R.post = { pending: true, status: false }; await assert.rejects(R.collect(), /collect step failed/);
+  R.done();
 });

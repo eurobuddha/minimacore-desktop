@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.291] — Vestr: no second collect of a coin being collected; the node judges every collect before it is posted
+
+- Both reads of contract coins (the list's `coins address:… relevant:true` and the collect's `coins coinid:`) send `checkmempool:true`: the node then leaves out a coin it is mining a transaction for or that a transaction in its mempool spends (`coins` → `TxPoWMiner.checkForMiningCoin` and `TxPoWDB.checkMempoolCoins`, one look through the mempool's inputs per coin listed). A second Collect before the first was mined was built, posted and reported as collected again. The app also keeps the ids of the coins it collected in this session and refuses a second collect of one while the node still lists it: "This contract coin was collected a moment ago and the node still lists it. Wait until it is gone from the list before you collect again. Nothing was sent."
+- `txncheck` runs after the transaction is built and before `txnpost`: it goes on only when the node says the amounts, the basic checks and the MMR proofs are valid and `validtransaction` is true; otherwise the transaction is deleted and "The node checked this collect and judged it invalid, so it was not sent. Nothing was collected." `txncheck` runs the covenant with `@BLOCK` = the tip (and `@COINAGE` = tip − created), one block before the earliest block that can mine the collect, so for a collect that passes the grace line only from the next block its `scripts:false` is expected and accepted (the other checks must still pass).
+- Refusals come in this order: the coin's shape, then the tip (a tip that could not be read is refused: "The node's block height could not be read, so nothing was built. Nothing was sent."), then "Nothing available to collect yet", then the grace wait. The grace wait counts the coin's age at the next block (tip + 1 − created): the covenant refuses while `@COINAGE LT minblockwait`, and a collect valid in the next block is not refused. The list's Collect button reads the same figure, so at coin age 0 (where the contract maths' own mustwait is FALSE) it no longer offers a collect that the app then refuses.
+- A pending reply to a collect step is no longer taken as success.
+
 ## [0.18.290] — miniMall: one "older than the order" problem per order; a re-sent order keeps its oldest block
 
 - Each old payment coin carrying an order's reference added its own "a payment with this order's reference is older than the order" problem (the coin id made each text new) and a synchronous rewrite of `shop.json`: 2000 coins gave 2001 problems, 3001 rewrites and 1.35 s of blocked main thread. Now an order gets that problem once, naming the first coin whole, and a coin that adds nothing writes nothing.
