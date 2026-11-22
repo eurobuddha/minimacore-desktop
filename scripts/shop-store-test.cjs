@@ -786,3 +786,32 @@ test("vendor: a payment left waiting is judged on a later pass after a restart; 
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes('${d.waiting ? `<div class="mm-hint" style="overflow-wrap:anywhere">${tr("A payment with this order\'s reference has arrived (payment coin {coin} at block {block}). It is counted after block {after}, so that another order with the same reference is seen first.", { coin: esc(d.waiting.coin)'), "the vendor is told the payment waits");
 });
+
+// ---- 0.19.345 (as released 0.18.290): one "older than the order" problem per order and no write for a coin that changes nothing (2000 coins
+// made 2001 problems and 3001 rewrites); the same buyer's order sent again: its block is its oldest coin's, never a copier's ----
+test("vendor: 2000 old coins with an order's reference: one 'older than the order' problem, the first coin's id whole, and the writes bounded by the order's coin list", async () => {
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-F", 1500));
+    for (let i = 0; i < 2000; i++) st.pay.push(jPay("ORD-F", 1001 + (i ? 1 + (i % 400) : 0), { coinid: "0xFB" + (0x10000 + i).toString(16) }));
+    let writes = 0; const real = fs.renameSync; fs.renameSync = function () { writes++; return real.apply(this, arguments); };
+    try { jTip(st, 1510); await shop.scanOnce(); } finally { fs.renameSync = real; }
+    const o = store.order("ORD-F"), older = o.problems.filter(p => p.startsWith("a payment with this order's reference is older than the order"));
+    assert.equal(older.length, 1, o.problems.length + " problems");
+    assert.equal(older[0], "a payment with this order's reference is older than the order (payment coin 0xFB10000 at block 1001, the order at block 1500): check by hand");
+    assert.ok(writes <= store.MAX_PAY_COINS + 4, writes + " writes: the order, its problems, and each coin counted on its list (at most MAX_PAY_COINS)"); assert.equal(o.paid, false);
+  });
+});
+test("vendor: the same buyer's order sent again: a payment between the two copies pays it (the order's block is its oldest copy's); a copier's lower coin never moves another buyer's order's block", async () => {
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-R", 1010, { coinid: "0xJOR2" }), jOrder("ORD-R", 1000, { coinid: "0xJOR1" }));   // the node lists newest first
+    st.pay.push(jPay("ORD-R", 1001)); jTip(st, 1020); await shop.scanOnce();
+    const o = store.order("ORD-R"); assert.equal(o.orderBlock, 1000, "lowered to the oldest copy"); assert.equal(o.paid, true, o.problems.join(" | "));
+  });
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-R", 1010), atkOrder("ORD-R", 1000));
+    st.pay.push(jPay("ORD-R", 1003)); jTip(st, 1020); await shop.scanOnce();
+    const o = store.order("ORD-R"), c = store.order("ORD-R~" + ATK);
+    assert.equal(o.counterparty, BUYER); assert.equal(o.orderBlock, 1010, "not moved by another sender's coin"); assert.equal(c.orderBlock, 1000, "the copier's order is a second buyer's");
+    assert.equal(o.paid, false); assert.equal(store.mayAdvance(o), false); assert.equal(store.mayAdvance(c), false);
+  });
+});

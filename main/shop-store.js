@@ -236,9 +236,11 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
   if (o.coins.includes(id)) return null;
   ensureChecked(o);
   if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {   // never counted, so never kept: a wrong coin seen again changes nothing
+    const was = o.paidTokenid + "/" + o.status;   // no write for a coin that changes nothing (0.19.345)
     if (!o.paidAmount) o.paidTokenid = paidTokenid;   // shown only while no coin of the right token has come
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
-    flush(); return "WRONG_TOKEN";
+    if (o.paidTokenid + "/" + o.status !== was) flush();
+    return "WRONG_TOKEN";
   }
   // Dust (0.19.200, as released 0.18.181 / 0.18.185) is not counted, not kept and not saved: it never fills the order's
   // MAX_PAY_COINS list, so a flood of tiny coins cannot push a later real payment past the cap, and it costs no disk write.
@@ -251,9 +253,11 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid) {
     return "DUST";
   }
   if (o.coins.length >= MAX_PAY_COINS) {
+    const was = o.status + "/" + o.problems.length;   // no write for a coin past the cap that changes nothing (0.19.345: 2000 old coins rewrote shop.json 1500 more times)
     if (!o.problems.includes(TOO_MANY_COINS)) { o.problems.push(TOO_MANY_COINS); o.due = ""; }
     if ((STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED) o.status = "UNCHECKED";   // from any state before PAID; never back from a vendor's
-    flush(); return "UNCHECKED";
+    if (o.status + "/" + o.problems.length !== was) flush();
+    return "UNCHECKED";
   }
   pendDelete(ref, id); o.coins.push(id);
   o.paidAmount = decAdd(o.paidAmount || "0", paidAmount); o.paidTokenid = paidTokenid; o.paidAt = Date.now();
