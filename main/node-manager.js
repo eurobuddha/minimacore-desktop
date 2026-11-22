@@ -454,6 +454,7 @@ class NodeManager extends EventEmitter {
     this.lastError = null;
     this.fatalHint = "";
     this.parlons = { ready: false, error: "", version: "", cape: false };
+    this.megammrBroken = false;   // this start's boot said its MegaMMR does not fit its chain (nodeLine)
     this.keyModeChecked = false; this.keyModeTries = 0; this.polled = false; this.carry = { out: "", err: "" }; this.cont = { out: null, err: null };
     if (this.keyModeAlert) { this.lastError = this.keyModeAlert; this.log("[app] node NOT started: " + this.keyModeAlert); this.setState("error"); return; }
     // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
@@ -771,7 +772,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megammrBroken: !!this.megammrBroken,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
@@ -828,6 +829,10 @@ class NodeManager extends EventEmitter {
     // and from then on the `keys` shape check (verifyKeyMode) is the authority.
     if (!this.polled && this.proc && !this.keyModeAlert && BLOCK_BOOT_LINE.test(l) && config.load().keyMode !== "block")
       this.keyModeMismatch("The node started in block key mode", config.load().keyMode, true);
+    // A MegaMMR that does not end where the chain tree starts (core/minima-core MinimaDB.java loadAllDB: "Your MEGAMMR is BROKEN …
+    // please 'reset' your node"; with -mobile the node goes on with a start-up error). A stale MegaMMR file can do it. Said to the user
+    // by Backup & Recovery (main.js mcd:importMegammr, the Turn MegaMMR off page); believed only from the node's boot, as the block line.
+    if (!this.polled && this.proc && /Your MEGAMMR is BROKEN/.test(l)) { this.megammrBroken = true; this.emit("status", this.snapshot()); }
     // The two boot-time deaths a person cannot read out of a stack trace: another node still holds
     // the H2 databases, or the port. Say so in the Node tab, in words, with the way out. (A hint only: it is shown
     // when the node has died by itself, and changes nothing else.)

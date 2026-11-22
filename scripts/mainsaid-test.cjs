@@ -239,7 +239,10 @@ test("A file the node is told to read (main/importfile.js): every refusal, said 
     const why = (kind, p) => { try { F.check(kind, p, fs); } catch (e) { return e.message; } assert.fail("expected a refusal: " + p); };
     check(F.pathProblem("/a;b.bak", "darwin")); check(why("backup", dir)); check(why("backup", path.join(dir, "missing.bak")));
     check(why("backup", f("a.txt", 100))); check(why("backup", f("b.bak", 3))); check(why("megammr", f("c.bak", 5000))); check(why("megammr", f("d.mmr", 10)));
-    check(F.KINDS.backup.large); check(F.NEEDS_MEGAMMR);
+    check(F.KINDS.backup.large); check(F.ON_FAILED);
+    const G = 1024 * 1024 * 1024;
+    check(F.roomProblem({ size: 1.6 * G, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: 100 * G })); check(F.roomProblem({ size: 0.45 * G, heapMb: 3072, ramBytes: 3 * G, freeDiskBytes: 100 * G }));
+    check(F.roomProblem({ size: 0.45 * G, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: 0.5 * G }));
     check(await rejected(Promise.resolve().then(() => F.create({ fs, showOpen: async () => ({ canceled: true }) }).confirm("backup", "/x.bak"))));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   for (const c of MS.codes().filter(c => /^IMPORT_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js: " + c);

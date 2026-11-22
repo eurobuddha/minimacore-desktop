@@ -529,7 +529,7 @@ function ipcError(e) { return MainSaid.say(ipcRaw(e)); }
 // ---- Backup & Recovery (the phone's BackupActivity hub, over the backup, resync, restore and vault commands
 // the Settings cards ran). One view; BK_PAGE says which of the phone's screens it shows ("" = the hub).
 let BK_PAGE = "";
-const BK_TITLE = { "": N_("Backup & Recovery"), create: N_("Create backup"), restore: N_("Restore from file"), megafile: N_("Resync from a MegaMMR file"), resync: N_("Resync node"), keys: N_("Private keys") };   // translated where shown
+const BK_TITLE = { "": N_("Backup & Recovery"), create: N_("Create backup"), restore: N_("Restore from file"), megafile: N_("Resync from a MegaMMR file"), megaoff: N_("Turn MegaMMR off"), resync: N_("Resync node"), keys: N_("Private keys") };   // translated where shown
 function bkOpen(page) { BK_PAGE = page; el("barPage").textContent = t(BK_TITLE[page]); el("main").scrollTop = 0; renderBackup(); }
 /**
  * megammrsync, built in ONE place for every screen that runs it (chain resync, rebuild from a phrase, the
@@ -597,8 +597,9 @@ function renderBackup() {
       ["chat", t("Chat backup"), t("Save or restore your keets chat address, contacts and messages.")],
       ["mail", t("Mail backup"), t("Save or restore your MinimaMail identity, contacts and messages.")],
       ["resync", t("Resync node"), t("Rebuild this node's chain from a MegaMMR node. Your wallet and seed phrase are not touched.")],
-      ["megafile", t("Resync from a MegaMMR file"), t("Rebuild this node's chain from a MegaMMR file on this computer. Your wallet and seed phrase are not touched.")],
+      ["megafile", t("Resync from a MegaMMR file"), t("Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.")],
       ["keys", t("Private keys"), t("Seed phrase, or rebuild this wallet from a phrase.")]];
+    if ((CFG.params || {}).megammr) rows.splice(rows.findIndex(r => r[0] === "megafile") + 1, 0, ["megaoff", t("Turn MegaMMR off"), t("Go back to a light node. The node's MegaMMR file is deleted.")]);
     host.innerHTML = head(t("Backup & Recovery"), t("Save a copy of this node, put it back, or rebuild it from another node.")) + (running ? "" : stopped) +
       `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
     host.querySelectorAll(".bk-row").forEach(b => b.onclick = () => {
@@ -686,12 +687,26 @@ function renderBackup() {
   }
 
   if (BK_PAGE === "megafile") {
-    host.innerHTML = head(t("Resync from a MegaMMR file"), t("Rebuild this node's chain from a MegaMMR file on this computer. Your wallet and seed phrase are not touched.")) + filePick(t("MegaMMR file")) +
+    host.innerHTML = head(t("Resync from a MegaMMR file"), t("Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.")) + filePick(t("MegaMMR file")) +
       `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Import")}">${th("Import")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
     wirePick("megammr");
     $("bkGo").onclick = () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
-      run("bkGo", t("Import"), { host: CFG.megammrHost, exec: () => api.importMegammr(f) }, t("Import this MegaMMR file?"),
-      t("Minima will replace this node's chain with the one in {f}, then restart.\n\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• A large file needs a lot of memory (Settings, Parlons Node memory). If the import stops part way, resync the node from a MegaMMR node (Resync node).", { f: f }), t("Import")); };
+      // the main process switches a light node to MegaMMR mode first, imports, and restarts (main.js mcd:importMegammr)
+      const exec = async () => { const j = await api.importMegammr(f); if (j && j.status === true && j.broken) setTimeout(megammrBrokenNotice, 0); return j; };
+      run("bkGo", t("Import"), { host: CFG.megammrHost, exec }, t("Import this MegaMMR file?"),
+      t("Minima will replace this node's chain with the one in {f}.\n\n• A light node is switched to MegaMMR mode first and restarted. It then uses up to 3 GB of memory (more for a large file) and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• The node restarts at the end.", { f: f }), t("Import")); };
+    return;
+  }
+
+  if (BK_PAGE === "megaoff") {
+    host.innerHTML = head(t("Turn MegaMMR off"), t("Go back to a light node. The node's MegaMMR file is deleted.")) + `<div class="ps-tile ps-tile--strong" style="white-space:pre-wrap">${th(MEGAMMR_OFF_WARNING)}</div>
+      <button class="btn btn--danger ps-btn ps-btn--main ps-btn--go" id="bkGo">${th("Turn MegaMMR off")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    $("bkGo").onclick = async () => {
+      if (!await showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true)) return;
+      $("bkGo").disabled = true; $("bkStatus").textContent = "";
+      try { await api.megammrOff(); CFG = await api.getConfig(); toast(t("MegaMMR is off. The node is restarting as a light node."), "ok"); bkOpen(""); }
+      catch (e) { $("bkStatus").textContent = ipcError(e); $("bkGo").disabled = false; }
+    };
     return;
   }
 
@@ -716,6 +731,14 @@ function renderBackup() {
     const seed = await resolveSeed(words); if (!seed) return;
     run("bkGo", t("Rebuild"), built({ host: $("bkHost").value, phrase: seed, anyphrase: true, keyuses: $("bkUses").value, needPhrase: true }), t("Rebuild this wallet?"),
     t("Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds."), t("Rebuild")); };
+}
+
+// What turning MegaMMR off does (core/minima-core MinimaDB.java loadAllDB: a start without -megammr deletes databases/megammr.mmr).
+const MEGAMMR_OFF_WARNING = N_("The node restarts as a light node.\n\n• Its MegaMMR file (megammr.mmr, in the node's data folder) is DELETED at that restart. Turning MegaMMR on again needs a MegaMMR file to import.\n• The Web Wallet tab needs MegaMMR and stops working.\n• Your wallet, keys and funds are not touched.");
+/** After an import, the node said its MegaMMR does not end where its chain begins (main/node-manager.js megammrBroken). */
+function megammrBrokenNotice() {
+  showActionSheet(t("This node's MegaMMR does not fit its chain"), [{ label: t("Turn MegaMMR off"), danger: true, onclick: () => bkOpen("megaoff") }],
+    t("The node started, but says its MegaMMR does not end where its chain begins (\"MEGAMMR is BROKEN\"): the file was older than, or from another chain than, the chain imported with it. Your wallet, keys and funds are not touched: nothing of the wallet was replaced.\n\nTo go back to a light node: Turn MegaMMR off (the MegaMMR file is deleted at that restart). If the node is then behind, use Resync node to catch up from a MegaMMR node."));
 }
 
 // ---- starting / progress screen ---------------------------------------------

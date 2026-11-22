@@ -35,7 +35,26 @@ const BAD_PATH = "The file's path holds a character the node cannot be given saf
 const NOT_PLAIN = "Not a plain file: choose the file itself, not a folder, a link or a device. Nothing was sent.";
 const UNREADABLE = "The file could not be read ({error}). Nothing was sent.";
 const CHOOSE_FIRST = "Choose the file first (Choose…). Nothing was sent.";
-const NEEDS_MEGAMMR = "This node does not keep the MegaMMR, so it cannot import a MegaMMR file. Switch on MegaMMR mode in Startup Params (the node then needs more memory; a large file needs a lot: Settings, Parlons Node memory), then try again. Nothing was sent.";
+// Room for a MegaMMR import (owner, 2026-11-22). The node refuses a file larger than its free heap and holds the whole MegaMMR in memory
+// (megammr.java pre-flight); it writes it to <data>/…/databases/megammr.mmr and rebuilds the chain beside it.
+const ROOM_HEAP = "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.";
+const ROOM_RAM = "This computer has {ram} MB of memory, and the node would use up to {heap} MB of it for the MegaMMR, which leaves too little for everything else. Nothing was changed.";
+const ROOM_DISK = "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.";
+const ON_FAILED = "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back to a light node. Look at the Logs, and start the node again from the Node tab if it is stopped.";
+const MB = 1024 * 1024;
+/** The node's memory in MegaMMR mode: the app's own rule (main/node-manager.js buildParlonsArgs): the setting, else 3072 MB. */
+const megammrHeapMb = (heapMb) => (parseInt(heapMb, 10) > 0 ? parseInt(heapMb, 10) : 3072);
+/** Why there is no room for this import ("" = there is). o = { size (bytes), heapMb (the node's heap in MegaMMR mode), ramBytes, freeDiskBytes (null: not known) }. */
+function roomProblem(o) {
+  // ponytail: about three times the file plus 1 GB, fitted to two files (the 460 MB snapshot runs in the default 3072 MB; the 1.6 GB
+  // unpruned one needs about 6 GB); measure again if a file is refused that the node would have taken
+  const file = Math.ceil(o.size / MB), need = file * 3 + 1024, heap = o.heapMb;
+  if (heap < need) return say(ROOM_HEAP, { file, need, heap });
+  if (o.ramBytes < (heap + 1024) * MB) return say(ROOM_RAM, { ram: Math.floor(o.ramBytes / MB), heap });
+  const disk = file * 2 + 512;   // the megammr.mmr the node writes, and the chain it rebuilds beside it
+  if (o.freeDiskBytes != null && o.freeDiskBytes < disk * MB) return say(ROOM_DISK, { free: Math.floor(o.freeDiskBytes / MB), need: disk });
+  return "";
+}
 
 /** Why the node cannot be given this path ("" = it can, in double quotes). */
 function pathProblem(p, platform) {
@@ -95,4 +114,4 @@ function create(deps) {
   };
 }
 
-module.exports = { pathProblem, check, fileValue, megammrImportCommand, create, KINDS, BAD_PATH, NOT_PLAIN, UNREADABLE, CHOOSE_FIRST, NEEDS_MEGAMMR };
+module.exports = { pathProblem, check, fileValue, megammrImportCommand, create, roomProblem, megammrHeapMb, KINDS, BAD_PATH, NOT_PLAIN, UNREADABLE, CHOOSE_FIRST, ON_FAILED };

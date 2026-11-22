@@ -1,4 +1,4 @@
-// A file the node is told to read (0.19.386): a backup for Restore from file, a MegaMMR file for Resync from a MegaMMR file.
+// A file the node is told to read (0.19.386; MegaMMR turned on by the import, and off again, 0.19.387): a backup for Restore from file, a MegaMMR file for Resync from a MegaMMR file.
 // The path comes only from the system's open dialog (main/importfile.js), is checked, kept in main and given to the node in quotes.
 // What reaches the node is read here the way the bundled node reads it (core/minima-core, block line 1.1.2.31-euro14,
 // CommandRunner.java runMultiCommand / getCommand / splitStringJSON / splitterQuotedPattern / getParamValue): a stand-in node.
@@ -152,38 +152,78 @@ test("the password never reaches a log line: the node log redacts it as typed an
   assert.ok(!/\blog\(|console\./.test(src), "neither module logs");
 });
 
-test("Resync from a MegaMMR file: refused unless the node keeps the MegaMMR; asks the stop guard; the node gets one import of exactly the chosen file", async () => {
-  const ts = require("typescript"), src = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), calls = {};
-  let keeps = "";
+test("Resync from a MegaMMR file turns MegaMMR on: room checked first; the setting saved BEFORE the restart; then one import of exactly the chosen file; a failed switch is put back", async () => {
+  const ts = require("typescript"), src = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), calls = {}, decl = [];
   const walk = (n) => {
     if (ts.isCallExpression(n) && n.expression.getText(sf) === "ipcMain.handle" && ts.isStringLiteral(n.arguments[0])) calls[n.arguments[0].text] = n.getText(sf);
-    if (ts.isVariableStatement(n) && /^const nodeKeepsMegammr = /.test(n.getText(sf))) keeps = n.getText(sf);
+    if ((ts.isVariableStatement(n) && /^const (nodeKeepsMegammr|sleepMs|freeDisk) = /.test(n.getText(sf))) || (ts.isFunctionDeclaration(n) && n.name && n.name.text === "nodeUp")) decl.push(n.getText(sf));
     ts.forEachChild(n, walk);
   };
   walk(sf);
-  assert.ok(keeps && calls["mcd:pickImport"] && calls["mcd:importMegammr"]);
-  const mega = file("downloads/mega 19 Nov.mmr", 8192);
-  for (const [megammr, allow] of [[false, true], [true, false], [true, true]]) {
-    const did = [], h = {}, imports = picker([mega]), env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, requireRunning: () => {}, importfile: F, imports, process: { platform: "darwin" },
-      rpc: { rpcCall: async (port, secret, c) => { did.push("ask " + c); return { status: true, response: { megammr } }; } }, node: { rpcPort: () => 1 }, config: { rpcSecret: () => "s" },
-      mayStop: async () => { did.push("guard"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); }, held: (op) => op(),
-      runResync: async (c) => { did.push(c); return { status: true, command: "megammr", params: { action: "import", file: mega } }; } };
-    new Function("env", "with (env) { " + keeps + "; " + calls["mcd:pickImport"] + "; " + calls["mcd:importMegammr"] + "; }")(env);
-    if (!megammr) {
-      picker.last = null; await assert.rejects(h["mcd:pickImport"](null, "megammr"), { message: F.NEEDS_MEGAMMR }); assert.equal(picker.last, null, "no dialog opened");
-      await assert.rejects(h["mcd:importMegammr"](null, mega), { message: F.NEEDS_MEGAMMR });
-      assert.deepEqual(did, ["ask status", "ask status"], "no dialog, no guard, no import"); continue;
-    }
+  assert.equal(decl.length, 4); assert.ok(calls["mcd:pickImport"] && calls["mcd:importMegammr"] && calls["mcd:megammrOff"]);
+  const mega = file("downloads/mega 19 Nov.mmr", 8192), G = 1024 * 1024 * 1024, cmd = `megammr action:import file:"${mega}"`;
+  /** one world: the node's megammr answers in turn, the guard's answer, the heap setting, broken after the import */
+  const world = async (o) => {
+    const did = [], h = {}, answers = o.megammr.slice(), params = { megammr: o.megammr[0], isclient: true };
+    const node = { state: "running", megammrBroken: false, rpcPort: () => 1, dataDir: () => DIR, log: () => {}, snapshot: () => ({}), restart: async () => { did.push("restart with megammr:" + params.megammr); } };
+    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, requireRunning: () => {}, importfile: F, imports: picker([mega]), process: { platform: "darwin" }, node,
+      fs: Object.assign({}, fs, { statfsSync: () => ({ bavail: o.disk == null ? 100 * G : o.disk, bsize: 1 }) }), require: (m) => (m === "os" ? { totalmem: () => o.ram || 16 * G } : require(m)),
+      rpc: { rpcCall: async (port, secret, c) => { const m = answers.length > 1 ? answers.shift() : answers[0]; did.push("status megammr:" + m); return { status: true, response: { megammr: m } }; } },
+      config: { rpcSecret: () => "s", load: () => ({ heapMb: o.heapMb || 0, params: Object.assign({}, params) }), save: (p) => { Object.assign(params, p.params); did.push("save megammr:" + p.params.megammr); } },
+      mayStop: async () => { did.push("guard"); if (o.refuse) throw new Error("The node keeps running: nothing was stopped."); }, held: (op) => op(),
+      runResync: async (c) => { did.push(c); node.megammrBroken = !!o.broken; return { status: true, command: "megammr", params: { action: "import", file: mega } }; } };
+    new Function("env", "with (env) { " + decl.join("\n") + "\n" + calls["mcd:pickImport"] + "; " + calls["mcd:importMegammr"] + "; " + calls["mcd:megammrOff"] + "; }")(env);
     await assert.rejects(h["mcd:importMegammr"](null, mega), { message: F.CHOOSE_FIRST }, "nothing chosen yet");
-    assert.deepEqual(await h["mcd:pickImport"](null, "megammr"), { path: mega, size: 8192 });
+    assert.deepEqual(await h["mcd:pickImport"](null, "megammr"), { path: mega, size: 8192 }, "a light node may choose a file too");
+    did.length = 0;
     const r = await h["mcd:importMegammr"](null, mega).catch(e => e.message);
-    const cmd = `megammr action:import file:"${mega}"`;
-    assert.deepEqual(did, allow ? ["ask status", "ask status", "ask status", "guard", cmd] : ["ask status", "ask status", "ask status", "guard"]);
-    assert.deepEqual(r, allow ? { status: true } : "The node keeps running: nothing was stopped.");
-    assert.deepEqual(nodeRead(cmd), [{ verb: "megammr", params: { action: "import", file: mega } }]);
-    assert.ok(restore.stopsNode(cmd) && !restore.loadsBackupFile(cmd) && !restore.replacesKeysElsewhere(cmd), "a stop, and not a wallet replacement");
-    assert.equal(rpc._timeoutFor(cmd), 60 * 60 * 1000, "a long import is not cut at 3 minutes");
+    return { did, r, params, h };
+  };
+  // a light node: switched on (saved, then restarted), asked again, guarded again, imported
+  let w = await world({ megammr: [false, true] });
+  assert.deepEqual(w.did, ["status megammr:false", "guard", "save megammr:true", "restart with megammr:true", "status megammr:true", "guard", cmd]);
+  assert.deepEqual(w.r, { status: true, broken: false, on: true }); assert.equal(w.params.megammr, true, "kept on: the restart after the import must not delete the MegaMMR");
+  // the switch did not take: nothing imported, the setting put back (a light node has no MegaMMR to lose)
+  w = await world({ megammr: [false, false] });
+  assert.deepEqual(w.did, ["status megammr:false", "guard", "save megammr:true", "restart with megammr:true", "status megammr:false", "save megammr:false"]);
+  assert.equal(w.r, F.ON_FAILED); assert.equal(w.params.megammr, false);
+  // already a MegaMMR node: no switch; the guard says no: nothing sent
+  w = await world({ megammr: [true], refuse: true }); assert.deepEqual(w.did, ["status megammr:true", "guard"]); assert.equal(w.r, "The node keeps running: nothing was stopped.");
+  w = await world({ megammr: [true] }); assert.deepEqual(w.did, ["status megammr:true", "guard", cmd]);
+  // the restarted node said its MegaMMR does not fit its chain
+  w = await world({ megammr: [true], broken: true }); assert.deepEqual(w.r, { status: true, broken: true, on: true });
+  // no room: refused before the guard, before any setting changes
+  for (const [o, re] of [[{ heapMb: 1024 }, /needs about 1027 MB of node memory, and the node is set to 1024 MB/], [{ ram: 2 * G }, /This computer has 2048 MB of memory/], [{ disk: 100 * 1024 * 1024 }, /has 100 MB free, and this import needs about 514 MB/]]) {
+    w = await world(Object.assign({ megammr: [false] }, o));
+    assert.match(w.r, re); assert.deepEqual(w.did, ["status megammr:false"], "nothing changed"); assert.equal(w.params.megammr, false);
   }
+  // Turn MegaMMR off: the guard, then the setting saved, then the restart (at which the node deletes megammr.mmr)
+  w = await world({ megammr: [true] }); w.did.length = 0; await w.h["mcd:megammrOff"](); assert.deepEqual(w.did, ["guard", "save megammr:false", "restart with megammr:false"]);
+  assert.deepEqual(nodeRead(cmd), [{ verb: "megammr", params: { action: "import", file: mega } }]);
+  assert.ok(restore.stopsNode(cmd) && !restore.loadsBackupFile(cmd) && !restore.replacesKeysElsewhere(cmd), "a stop, and not a wallet replacement");
+  assert.equal(rpc._timeoutFor(cmd), 60 * 60 * 1000, "a long import is not cut at 3 minutes");
+});
+
+test("room for a MegaMMR import: the 460 MB snapshot fits the default 3072 MB; the 1.6 GB file needs about 6 GB", () => {
+  const M = 1024 * 1024, G = 1024 * M, roomy = { ramBytes: 16 * G, freeDiskBytes: 100 * G };
+  assert.equal(F.megammrHeapMb(0), 3072); assert.equal(F.megammrHeapMb("6144"), 6144);
+  assert.equal(F.roomProblem(Object.assign({ size: 460 * M, heapMb: 3072 }, roomy)), "");
+  assert.match(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 3072 }, roomy)), /needs about 5617 MB of node memory, and the node is set to 3072 MB/);
+  assert.equal(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 6144 }, roomy)), "");
+  assert.match(F.roomProblem({ size: 460 * M, heapMb: 3072, ramBytes: 4 * G - 1, freeDiskBytes: 100 * G }), /This computer has 4095 MB/);
+  assert.equal(F.roomProblem({ size: 460 * M, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: null }), "", "free disk not known: not refused on it");
+});
+
+test("the node's boot line \"Your MEGAMMR is BROKEN\" is noticed during the boot only, and starts clear at every start", () => {
+  const NM = require("../main/node-manager.js"), C = { prototype: Object.getPrototypeOf(NM) };
+  const nm = Object.create(C.prototype); nm.logs = []; nm.cont = { out: null, err: null }; nm.parlons = { ready: true }; nm.emit = () => {}; nm.snapshot = () => ({}); nm.log = () => {}; nm.proc = {}; nm.polled = false;
+  nm.nodeLine("Minima @ 22/11/2026 10:00:00 [ 120.5 MB ] : java.lang.Exception: Your MEGAMMR is BROKEN (does not start 2426000 where tree ends 2426100).. please 'reset' your node.");
+  assert.equal(nm.megammrBroken, true);
+  const later = Object.create(C.prototype); Object.assign(later, { logs: [], cont: { out: null, err: null }, parlons: { ready: true }, emit() {}, snapshot: () => ({}), log() {}, proc: {}, polled: true, megammrBroken: false });
+  later.nodeLine("Your MEGAMMR is BROKEN"); assert.equal(later.megammrBroken, false, "not believed after the boot");
+  const src = fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8");
+  assert.ok(/this\.megammrBroken = false;[^\n]*\n\s*this\.keyModeChecked = false; this\.keyModeTries = 0; this\.polled = false;/.test(src), "reset at every start");
+  assert.ok(/megammrBroken: !!this\.megammrBroken/.test(src), "in the node's snapshot");
 });
 
 test("the screens: a file is chosen, never typed; each import asks first, saying what is replaced, and only then runs", () => {
@@ -195,7 +235,12 @@ test("the screens: a file is chosen, never typed; each import asks first, saying
   assert.ok(!/id="bkFile"[^>]*>|field\("bkFile"/.test(restorePage) && !/<input[^>]*bkFile/.test(body), "no text field for a path");
   assert.ok(restorePage.includes("The keys and coins this node holds now are GONE unless they are also in that backup."));
   const megaPage = body.slice(body.indexOf('if (BK_PAGE === "megafile")'), body.indexOf("// Private keys"));
-  assert.ok(/run\("bkGo", t\("Import"\), \{ host: CFG\.megammrHost, exec: \(\) => api\.importMegammr\(f\) \}, t\("Import this MegaMMR file\?"\)/.test(megaPage), "through the shared question");
+  assert.ok(/const exec = async \(\) => \{ const j = await api\.importMegammr\(f\); if \(j && j\.status === true && j\.broken\) setTimeout\(megammrBrokenNotice, 0\); return j; \};\s*run\("bkGo", t\("Import"\), \{ host: CFG\.megammrHost, exec \}, t\("Import this MegaMMR file\?"\)/.test(megaPage), "through the shared question");
+  assert.ok(megaPage.includes("A light node is switched to MegaMMR mode first and restarted.") && megaPage.includes("Turn MegaMMR off goes back, and deletes the MegaMMR file."));
+  const offPage = body.slice(body.indexOf('if (BK_PAGE === "megaoff")'), body.indexOf("// Private keys"));
+  assert.ok(offPage.indexOf('await showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true)') < offPage.indexOf("api.megammrOff()"), "Turn MegaMMR off asks first");
+  assert.ok(/MEGAMMR_OFF_WARNING = N_\("The node restarts as a light node\.\\n\\n• Its MegaMMR file \(megammr\.mmr, in the node's data folder\) is DELETED at that restart\./.test(app), "and says the file is deleted");
+  assert.ok(/if \(\(CFG\.params \|\| \{\}\)\.megammr\) rows\.splice/.test(body), "offered on a MegaMMR node only");
   assert.ok(megaPage.includes("Your wallet and seed phrase are not touched.") && megaPage.includes("Any transaction still waiting to be mined is dropped."));
   assert.ok(/\["megafile", t\("Resync from a MegaMMR file"\)/.test(body), "listed in Backup & Recovery");
   const pre = fs.readFileSync(path.join(ROOT, "main", "preload.js"), "utf8");
