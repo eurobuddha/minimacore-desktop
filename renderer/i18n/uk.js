@@ -5556,3 +5556,16 @@
   "This wallet's count for this key has reached the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved.",
   "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). It can be at most 10000: a large figure would bring the wallet's keys near their limit of 262144 one-time uses, after which they sign with one-time keys they have already used, which can lose funds. Nothing was run."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "This node's wallet is locked: unlock it and try again. Nothing was sent.": "Гаманець цього вузла заблоковано: розблокуйте його й спробуйте знову. Нічого не надіслано.",
+  "PandaPools could not check the node's write permission, so nothing was sent.": "PandaPools не вдалося перевірити право запису на вузлі, тому нічого не надіслано.",
+  "PandaPools may not write on this node, so nothing was sent.": "PandaPools не може виконувати запис на цьому вузлі, тому нічого не надіслано.",
+  "PandaPools is paused: this node's wallet is locked, so your pools are not being kept fresh. Unlock the wallet and it goes on by itself.": "PandaPools призупинено: гаманець цього вузла заблоковано, тому ваші пули не підтримуються в актуальному стані. Розблокуйте гаманець, і він продовжить сам.",
+  "PandaPools is paused ({why}), so your pools are not being kept fresh. It tries again at every block.": "PandaPools призупинено ({why}), тому ваші пули не підтримуються в актуальному стані. Він пробує знову на кожному блоці."
+}, { review: [
+  "This node's wallet is locked: unlock it and try again. Nothing was sent.",
+  "PandaPools could not check the node's write permission, so nothing was sent.",
+  "PandaPools may not write on this node, so nothing was sent.",
+  "PandaPools is paused: this node's wallet is locked, so your pools are not being kept fresh. Unlock the wallet and it goes on by itself.",
+  "PandaPools is paused ({why}), so your pools are not being kept fresh. It tries again at every block."
+] });

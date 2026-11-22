@@ -18,6 +18,9 @@ const desktop = process.env.PP_DESKTOP_ROOT || path.resolve(__dirname, '..');
 const loader = require(path.join(desktop, 'main/pandapools/loader.js'));
 const { makeSqlShim } = require(path.join(desktop, 'main/pandapools/sqlshim.js'));
 
+// The desktop host answers `checkmode` itself (0.19.377): the node jars it runs have no such command. Its answer is LIFTED from
+// the shipped main/pandapools.js (checkmodeReply), and the stand-in node below answers `checkmode` as those jars do.
+const hostCheckmode = new Function('node', fs.readFileSync(path.join(desktop, 'main/pandapools.js'), 'utf8').match(/\nfunction checkmodeReply\(\)[^\n]*/)[0] + '; return checkmodeReply;')({ health: { locked: false } });
 const hash = n => '0x' + n.toString(16).padStart(64, '0');
 const addr = hash(100), opk = hash(101), oadr = hash(102), tok = hash(103);
 const good = response => ({ status: true, response });
@@ -38,7 +41,7 @@ async function harness() {
   const mds = {
     poolDesktop:true,
     sql: (q, cb) => sql.sql(q, cb),
-    cmd: (q, cb) => { trace.push(q); const r = responder(q, cb); if (r !== undefined && cb) cb(r); },
+    cmd: (q, cb) => { if (/^checkmode\b/.test(q)) { if (cb) cb(hostCheckmode()); return; } trace.push(q); const r = responder(q, cb); if (r !== undefined && cb) cb(r); },
     log() {}, init() {}, historyPageMax: 512,
     persistRecovery: cb => cb(sql.flushChecked()),
     archiveGET: (_u, cb) => cb(null),
@@ -69,7 +72,7 @@ function asyncStandard(h, cs, opts) {
     // Some engine calls are fire-and-forget (e.g. MDS.cmd("txndelete id:…") with no callback).
     const reply = (r) => { if (cb) setTimeout(() => cb(r), 0); };
     if (q === 'txnlist') return reply(good([]));
-    if (q === 'checkmode') return reply(good({ writemode: true, dblocked:false }));
+    if (q === 'checkmode') return reply({ status: false, pending: false, error: 'Command not found' });   // as the block jars answer: never reached (the host answers it)
     if (q === 'status') return reply(good({ megammr: false }));
     if (q === 'keys' || q.startsWith('keys action:list')) return reply(good([{ publickey: opk, uses: 846, modifier: '0x40' }]));
     if (q.startsWith('scripts address:')) return reply(good({ address: q.split(':')[1], simple: true, publickey: opk }));

@@ -10,6 +10,8 @@ const test = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), vm = require("node:vm");
 const M = require("./dexicon-mock.cjs");   // FIRST
 const { createNodeRunner, SIGNING } = require("../main/noderun.js");
+// `checkmode` as the node jars this app runs answer it (0.19.377): the host shim answers it itself, so it never reaches these runners
+const NOT_FOUND = { status: false, pending: false, error: "Command not found" };
 const dirs = [], tmp = (n) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), n)); dirs.push(d); return d; };
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
 
@@ -58,7 +60,7 @@ test("PandaPools glue: a signer of the old engine queued at invalidate() is neve
   } };
   vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
   const api = sandbox.module.exports; api._setDataDir(dir);
-  api._setRunner((c, o) => (SIGNING.test(c) ? Q.run(c, o) : Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } } : { status: false })));
+  api._setRunner((c, o) => (SIGNING.test(c) ? Q.run(c, o) : Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? NOT_FOUND : { status: false })));
   try {
     await api.init();
     const old = mdsSeen[0], ask = (c) => new Promise(res => old.cmd(c, res));
@@ -118,7 +120,7 @@ test("PandaPools glue: held, no signing command reaches the node and no action s
   } };
   vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
   const api = sandbox.module.exports; api._setDataDir(dir);
-  api._setRunner((c) => { sent.push(c); return Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } } : SIGNING.test(c) ? { status: true, response: {} } : { status: false }); });
+  api._setRunner((c) => { sent.push(c); return Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? NOT_FOUND : SIGNING.test(c) ? { status: true, response: {} } : { status: false }); });
   try {
     await api.init();
     const mds = mdsSeen[0], ask = (c) => new Promise(res => mds.cmd(c, res));
@@ -187,7 +189,7 @@ test("PandaPools glue: createPool only for MxUSD with the node's decimals, swap 
   vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
   const api = sandbox.module.exports; api._setDataDir(dir);
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90"; let decimals = "8";
-  api._setRunner((c) => { sent.push(c); return Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } }
+  api._setRunner((c) => { sent.push(c); return Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? NOT_FOUND
     : c === "tokens tokenid:" + MXUSD ? (decimals == null ? { status: false, error: "no" } : { status: true, response: { tokenid: MXUSD, decimals } }) : { status: false }); });
   try {
     await api.init();
@@ -229,7 +231,7 @@ test("PandaPools glue: a throw inside the engine's later callback (a malformed a
   vm.runInNewContext(fs.readFileSync(path.join(M.root, "main/pandapools.js"), "utf8"), sandbox, { filename: "main/pandapools.js" });
   const api = sandbox.module.exports; api._setDataDir(dir);
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-  api._setRunner((c) => Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? { status: true, response: { writemode: true, dblocked: false } }
+  api._setRunner((c) => Promise.resolve(c === "block" ? { status: true, response: { block: 0 } } : c === "checkmode" ? NOT_FOUND
     : c === "tokens tokenid:" + MXUSD ? { status: true, response: { tokenid: MXUSD, decimals: "8" } } : { status: false }));
   const within = (p, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ": the slot never settled")), 1500))]);
   try {

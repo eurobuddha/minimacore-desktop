@@ -270,9 +270,21 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
    */
   /** sentNothing: the engine already knows nothing was sent (a failed Activity row): the last sentence says so instead of
    *  pointing at Activity. Chosen here, never by cutting words out of a (translated) sentence. */
+  /** The engine's write guard (main/pandapools/runtime-guard.js) refused before anything reached the node (its code at the
+   *  start of the error; main/pandapools.js keeps it as ppWhy() with guard: true): said in plain words. "" = not the guard. 0.19.377 */
+  function guardText(s) {
+    s = String(s || "");
+    if (/WALLET_LOCKED/.test(s)) return I18N.t("This node's wallet is locked: unlock it and try again. Nothing was sent.");
+    if (/MODE_UNAVAILABLE/.test(s)) return I18N.t("PandaPools could not check the node's write permission, so nothing was sent.");
+    if (/WRITE_REQUIRED/.test(s)) return I18N.t("PandaPools may not write on this node, so nothing was sent.");
+    return "";
+  }
   function failText(what, raw, node, since, sentNothing) {
     raw = bare(raw);
-    const said = node && node.error && Number(node.at) >= Number(since || 0) ? (" " + I18N.t("The node's last answer while this ran (its \"")) + node.verb + "\" command): " + mx(node.error).replace(/[.\s]+$/, "") + "." : "";
+    const fresh = node && node.error && Number(node.at) >= Number(since || 0);
+    const guard = guardText(raw) || (fresh && node.guard ? guardText(node.error) : "");
+    if (guard) return guard;   // the engine's own sentence ("could not get a payout address") is about a command that was never sent
+    const said = fresh && !node.guard ? (" " + I18N.t("The node's last answer while this ran (its \"")) + node.verb + "\" command): " + mx(node.error).replace(/[.\s]+$/, "") + "." : "";
     if (/BACKUP_REQUIRED/.test(raw)) return I18N.t("{what} was not done and no funds moved. Before another pool can be created or migrated, the encrypted backup of your pools and this node must be saved and checked. Open My LP, choose Back up / restore pools, save the backup, then try again.", { what: what });
     if (/could not mint an owner key/i.test(raw)) return I18N.t("{what} was not done and no funds moved: the node did not make the new key that would own the pool.{said} Check that the node is running and in sync, then try again.", { what: what, said: said });
     if (/Could not identify the input signing key/i.test(raw)) return I18N.t("{what} was not done and nothing was signed: the node could not say which key signs one of the coins it would spend.{said} Wait until the node has caught up with the chain, then try again.", { what: what, said: said });
@@ -468,7 +480,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     }
   };
 
-  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, noAnswer, failText, whereConfirm, backupEnd };
+  const core = { ACT_NAME, when, since, swapSummary, actItem, feedItem, walletCard, nodeCheck, STEPS, safeDec, createTokens, derive, createInfo, backupProblem, plainCode, cutNum, MIGRATE_AT, needsMigrate, lpSummary, lpRows, depositToken, poolIds, recoveryResult, MINIMA, MXUSD, isMxusd, tokLabel, pairName, skeleton, imitates, IMITATES, chosen, NONE, lostLine, mx, cut, whole, amountOk, plural, pairs, poolLine, sendable, balanceLine, marketLine, quoteRows, swapReview, poolsSummary, poolCard, combinedCard, bare, noAnswer, guardText, failText, whereConfirm, backupEnd };
   if (typeof document === "undefined") return Object.assign({ Act }, core);
 
   // ======================================================================== the screens
@@ -514,6 +526,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     else if (!S.st) out.push(`<div class="dx-state dx-state--note" role="status">${th("PandaPools could not be read just now. Nothing is lost: this screen tries again by itself.")}</div>`);
     else if (!S.st.ready && S.st.error) out.push(`<div class="dx-state dx-state--error" role="alert">${esc(C.storeError("PandaPools", "pool store", S.st.error, PP_AFTER))} <button class="dx-btn pp-inline" data-ppaside="1"${C.gate.on ? " disabled" : ""}>${th("Set the store aside and start empty")}</button></div>`);
     else if (!S.st.ready) out.push(`<div class="dx-state dx-state--note" role="status">${th("PandaPools is starting: it opens its saved pools and reads the pool registry from the node. Nothing can be sent yet.")}</div>`);
+    else if (S.st.paused) out.push(`<div class="dx-state dx-state--error" role="alert">${/WALLET_LOCKED/.test(S.st.paused) ? th("PandaPools is paused: this node's wallet is locked, so your pools are not being kept fresh. Unlock the wallet and it goes on by itself.") : th("PandaPools is paused ({why}), so your pools are not being kept fresh. It tries again at every block.", { why: S.st.paused })}</div>`);   // the engine's guard stopped its background service (main/pandapools.js setPaused)
     if (S.said) out.push(`<div class="dx-state dx-state--${S.said.kind}" role="alert">${esc(S.said.text)}</div>`);
     return out.join("");
   }

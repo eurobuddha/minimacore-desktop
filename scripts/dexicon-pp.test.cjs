@@ -230,6 +230,19 @@ test("a failed action: the engine's fixed sentences are said in plain words, wit
   } finally { I18N.set("en"); }
 });
 
+// 0.19.377: the engine's write guard refused before anything reached the node (main/pandapools.js keeps its reason with guard: true)
+test("a write the engine's guard refused: its reason in plain words, not the engine's sentence about a command that was never sent", () => {
+  const at = (error) => ({ verb: "", guard: true, error, at: 2000 });
+  assert.equal(PP.failText("The swap", "could not get a payout address", at("WALLET_LOCKED: Unlock your node wallet, then retry."), 1000), "This node's wallet is locked: unlock it and try again. Nothing was sent.");
+  assert.equal(PP.failText("The swap", "could not get a payout address", at("MODE_UNAVAILABLE: Cannot verify node permission and wallet lock state. Retry when the node is ready."), 1000), "PandaPools could not check the node's write permission, so nothing was sent.");
+  assert.equal(PP.failText("Creating the pool", "WRITE_REQUIRED: Enable PandaPools WRITE permission in MiniHub, then retry.", null, 0), "PandaPools may not write on this node, so nothing was sent.");
+  const old = PP.failText("The swap", "could not get a payout address", at("WALLET_LOCKED: x"), 3000);
+  assert.ok(!/locked/.test(old) && !/The node's last answer/.test(old), "an older refusal is not this action's reason, and a guard entry is never called the node's answer: " + old);
+  assert.equal(PP.guardText("Command not found"), "", "a node's own answer is not the guard");
+  const pp = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-pp.js"), "utf8");
+  assert.ok(/else if \(S\.st\.paused\)/.test(pp), "room ② says when the guard paused the background service (status().paused)");
+});
+
 // ---- 0.18.136: what is reviewed is what is sent ----
 test("Add liquidity: one MINIMA amount, the review states both sides as the engine will take them, and the result says what the engine took", async () => {
   // the engine's rule (poolmgr.js deposit): MINIMA × token reserve ÷ MINIMA reserve, cut to the token's decimals

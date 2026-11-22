@@ -5543,3 +5543,16 @@
   "This wallet's count for this key has reached the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved.",
   "keyuses: on restoresync is added to how many times every key in the backup has signed; the usual figure is small (the node's own default is 256). It can be at most 10000: a large figure would bring the wallet's keys near their limit of 262144 one-time uses, after which they sign with one-time keys they have already used, which can lose funds. Nothing was run."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This node's wallet is locked: unlock it and try again. Nothing was sent.": "此节点的钱包已锁定：请解锁后重试。未发送任何内容。",
+  "PandaPools could not check the node's write permission, so nothing was sent.": "PandaPools 无法检查节点的写入权限，因此未发送任何内容。",
+  "PandaPools may not write on this node, so nothing was sent.": "PandaPools 无权在此节点上写入，因此未发送任何内容。",
+  "PandaPools is paused: this node's wallet is locked, so your pools are not being kept fresh. Unlock the wallet and it goes on by itself.": "PandaPools 已暂停：此节点的钱包已锁定，因此您的池没有保持更新。解锁钱包后它会自行继续。",
+  "PandaPools is paused ({why}), so your pools are not being kept fresh. It tries again at every block.": "PandaPools 已暂停（{why}），因此您的池没有保持更新。它会在每个区块重试。"
+}, { review: [
+  "This node's wallet is locked: unlock it and try again. Nothing was sent.",
+  "PandaPools could not check the node's write permission, so nothing was sent.",
+  "PandaPools may not write on this node, so nothing was sent.",
+  "PandaPools is paused: this node's wallet is locked, so your pools are not being kept fresh. Unlock the wallet and it goes on by itself.",
+  "PandaPools is paused ({why}), so your pools are not being kept fresh. It tries again at every block."
+] });

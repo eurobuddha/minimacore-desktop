@@ -74,12 +74,34 @@ function noteFail(command, r) {
   if (error) lastFail = { verb: String(command).trim().split(/\s+/)[0].slice(0, 40), error: error, at: Date.now() };
 }
 function lastNodeFailure() { return lastFail; }
+// The engine's own write guard (pandapools/runtime-guard.js) refuses a write BEFORE it reaches the node and hands the
+// engine only {status:false, error}; the engine then says something unrelated ("could not get a payout address"). Its
+// reason is kept here as the newest failure (guard: true), so a screen can say it in plain words (renderer/dexicon-pp.js
+// guardText). 0.19.377.
+function noteGuard(error) { lastFail = { verb: "", guard: true, error: String(error || "").slice(0, 400), at: Date.now() }; }
+// checkmode (0.19.377) is an MDS command (a MiniDapp's MiniHub trust): the node jars this app runs do not have it and
+// answer "Command not found", so the guard refused EVERY write, unsent, and paused the background service at every
+// block. The node's own RPC is its admin interface, so write mode is true, as the Dexicon and P2P Chance hosts answer.
+// dblocked is the node's own `status` "locked" (the same !isBaseSeedAvailable() checkmode reports), from node-manager's
+// 10 s health poll; false while the node has not been read yet (a wallet locked since then fails at signing, in the
+// node's own words).
+function checkmodeReply() { let locked = false; try { locked = !!(node.health && node.health.locked === true); } catch (e) {} return { status: true, pending: false, response: { writemode: true, dblocked: locked } }; }
+// When the guard pauses the background service (its "PandaPools paused: …" line, which went to MDS.log, a no-op here),
+// pool upkeep (retrackOwn, keep-fresh, re-announce, rescue) stops: said in status() for the room and once in the node log.
+let paused = "";
+function setPaused(why) {
+  why = String(why || "").slice(0, 400);
+  if (why === paused) return;
+  paused = why;
+  try { if (typeof node.log === "function") node.log("[pandapools] " + (why ? "paused: " + why + " Pool upkeep (keep-fresh, re-announce, rescue) is not running." : "running again")); } catch (e) {}
+  emitter.emit("update");
+}
 /** For the screens: has the engine started (its saved pools open, the registry scan running)? Read only.
  *  error (0.18.137): why the last start failed, in the engine's or the store's own words ("" = it did not fail, or it
  *  has started since); waitedMs: how long it has been trying. A damaged pandapools.sqlite fails its integrity check on
  *  EVERY start, so without these the room said "starting" for ever and the restore gate never opened. */
 let initError = "", firstTry = 0;
-function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry,
+function status() { const up = !!(ready && ctx); return { ready: up, block: lastTip || 0, pools: POOLS.length, error: up ? "" : initError, waitedMs: up || !firstTry ? 0 : Date.now() - firstTry, paused: up ? paused : "",
   store: storeFile() }; }   // store: the whole path, for the set-aside dialog ("quit, then rename it back")
 function storeFile() { return path.join(dataDir || app.getPath("userData"), "pandapools.sqlite"); }
 /** A store that cannot be opened is MOVED ASIDE under a dated name (main/restore.js moveAside), never deleted, so the
@@ -105,6 +127,7 @@ function buildMds() {
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
     cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}
+      if(/^checkmode\b/.test(String(command))){const r=checkmodeReply();if(!r.response.dblocked)setPaused("");if(cb)cb(r);return;}   // answered here, never sent (above)
       if(held&&require("./noderun").SIGNING.test(String(command))){if(cb)cb({status:false,error:heldText()});return;}
       busy++;   // hold() waits for what is at the node
       runner(command,{signal:signal}).then(function (r) { busy--; noteFail(command, r); if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function (e) { busy--; noteFail(command, { status: false, error: (e && e.message) || String(e) }); if (cb) cb({ status: false }); }); },
@@ -118,7 +141,7 @@ function buildMds() {
     // body). So page far harder here; a backfill that takes hours at max:64 finishes in minutes at 512.
     historyPageMax: 512,
     notify: (msg) => { try { const { Notification } = require("electron"); if (Notification && Notification.isSupported()) new Notification({ title: "PandaPools", body: String(msg || "") }).show(); } catch (e) { /* headless/test context — the engine falls back to MDS.log */ } },
-    log: function () { /* console.log.apply(console, arguments); */ },
+    log: function (line) { if (epoch !== contextEpoch) return; const s = String(line == null ? "" : line), m = /^PandaPools paused: ([\s\S]*)$/.exec(s); if (m) setPaused(m[1]); else if (/^PandaPools service ready\b/.test(s)) setPaused(""); },
     init: function (cb) { serviceHandler = cb; },                    // capture — we drive the events ourselves
     net: { GET: function (url, cb) { if (cb) cb({ status: false }); } },   // MEXC ticker is optional; stubbed
   };
@@ -135,6 +158,7 @@ async function init() {
     if(epoch!==contextEpoch)throw new Error("Wallet identity changed during pool initialization.");
     sqlShim=storage;
     ctx = createContext(buildMds(), ALL_FILES);                     // loads all reused files; service.js registers via MDS.init
+    { const e0 = epoch; try { ctx.PoolRuntimeGuard.onBlocked(function (error) { if (e0 === contextEpoch) noteGuard(error); }); } catch (e) {} }   // the guard's refusal, kept for the screens (noteGuard)
     await new Promise(function (r) { ctx.Store.init(function () { r(); }); });
     await new Promise(function (resolve, reject) { ctx.ActivityChain.init(function (ok) { if (ok) resolve(); else reject(new Error("Pool transaction storage unavailable")); }); });
     if(epoch!==contextEpoch)throw new Error("Wallet identity changed during pool initialization.");
@@ -167,7 +191,7 @@ async function invalidate() {
   const old=ctx,storage=sqlShim;
   if(old&&old.ActivityChain)old.ActivityChain.stop();
   ready=false;ctx=null;serviceHandler=null;initPromise=null;
-  POOLS=[];lastTip=0;scanning=false;scanStartTs=0;lastQuotes={};lastFail=null;
+  POOLS=[];lastTip=0;scanning=false;scanStartTs=0;lastQuotes={};lastFail=null;paused="";
   if(storage){
     const r=storage.sql("UPDATE pp_ownpools SET signing_unverified=1");
     if(!r.status||!storage.flushChecked())throw new Error("Could not preserve pool signing holds. Pool engine stopped; resolve storage before restarting.");
