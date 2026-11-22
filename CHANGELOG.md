@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.370] — miniMall: coins of two worthless tokens taking turns no longer write the store once per coin (as Minima Core Desktop 0.18.314)
+
+- The store was written whenever a coin of another token changed the token paid or the order's status, so coins of two worthless tokens taking turns wrote shop.json once per coin: 2000 such coins with an order's reference wrote it about 1000 times (0.8 MB each with a 400-order store), and again after every restart, as such coins are not remembered (review-desktop-r6 H5d). It is now written only when the order's status changes. The token paid is not shown anywhere.
+- main/shop-store.js changes: its pin in scripts/apps-money.test.cjs is updated on purpose.
+- Tests (scripts/shop-store-test.cjs): H5d (2000 coins over two worthless tokens: at most 2 writes at first sight and at most 2 after a restart, WRONG_TOKEN, and the real payment still makes it PAID; 977 writes on 0.19.369).
+
 ## [0.19.369] — the settling question says the buyer's total and what was received; no "as released" for versions not released; no shortened address
 
 - miniMall: the check-by-hand question for a settling order did not say the buyer's total and what was received, which every other check-by-hand question here, and Minima Core Desktop's settling question, says. It now does: "The buyer's total: … (their own figure)" and "Received so far: …", before "Confirm only if …" (zh / ru / uk).

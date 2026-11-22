@@ -259,10 +259,10 @@ function recordPayment(ref, coinid, paidAmount, paidTokenid, block) {
   // the newest block of a coin that may pay it (0.19.354): an order without a secret settles from there (settleBlock); counted dust included
   if (String(paidTokenid).toLowerCase() === String(o.tokenid).toLowerCase() && Number.isSafeInteger(block) && block > (o.coinBlock || 0)) o.coinBlock = block;
   if (String(paidTokenid).toLowerCase() !== String(o.tokenid).toLowerCase()) {   // never counted, so never kept: a wrong coin seen again changes nothing
-    const was = o.paidTokenid + "/" + o.status;   // no write for a coin that changes nothing (0.19.345)
+    const was = o.status;   // no write for a coin that changes nothing (0.19.345); written only when the status changes (0.19.370, as Minima Core Desktop 0.18.314; review-desktop-r6 H5d: coins of two worthless tokens taking turns wrote shop.json once per coin)
     if (!o.paidAmount) o.paidTokenid = paidTokenid;   // shown only while no coin of the right token has come
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
-    if (o.paidTokenid + "/" + o.status !== was) flush();
+    if (o.status !== was) flush();
     return "WRONG_TOKEN";
   }
   // Dust (0.19.200, as released 0.18.181 / 0.18.185) is not counted, not kept and not saved: it never fills the order's

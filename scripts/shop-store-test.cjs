@@ -1458,3 +1458,22 @@ test("the no-proof note names the coin's amount exactly and its token id whole (
     st.pay.push(sPay("ORD-V", 1013, proofT(S), "0xFE01", "0.5")); await walkTo(st, 1013, 1016);
     assert.equal(store.order("ORD-V").status, "UNDERPAID"); assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xBAD7", "0.00000010", "Minima")], "part paid: the note stays"); });
 });
+
+// ---- 0.19.370 (as Minima Core Desktop 0.18.314): coins of two worthless tokens taking turns (review-desktop-r6 H5d) wrote shop.json once per coin,
+// since a write was made whenever the token paid or the status changed; and again after every restart, as such coins are not remembered. A write is
+// now made only when the order's status changes ----
+test("H5d: 2000 coins of two worthless tokens taking turns write shop.json at most twice, and at most twice after a restart; WRONG_TOKEN, and the real payment still pays it", async () => {
+  await copyRig(async (st) => {
+    const T1 = "0x" + "AB".repeat(32), T2 = "0x" + "CD".repeat(32), id = (s) => "0x" + nodeCrypto.createHash("sha256").update(s).digest("hex").toUpperCase();
+    st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM")); await walkTo(st, 1001, 1009);
+    for (let i = 0; i < 2000; i++) st.pay.push(Object.assign(sPay("ORD-V", 1010, undefined, id("junk " + i), "0.000000001"), { tokenid: i % 2 ? T1 : T2, tokenamount: "1000" }));
+    let w = 0; const wf = fs.writeFileSync; fs.writeFileSync = function (p) { if (/shop\.json/.test(String(p))) w++; return wf.apply(this, arguments); };
+    try {
+      await walkTo(st, 1010, 1010); assert.ok(w <= 2, "first sight: " + w + " writes"); assert.equal(store.order("ORD-V").status, "WRONG_TOKEN");
+      delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop"); shop._setRunner(javaNode(st)); await shop.init(); store.setOrdersRead(null);   // a restart: the seen sets are gone
+      w = 0; await walkTo(st, 1011, 1011); assert.ok(w <= 2, "after a restart: " + w + " writes"); assert.equal(store.order("ORD-V").status, "WRONG_TOKEN");
+      st.pay.push(sPay("ORD-V", 1012, undefined, id("real"))); await walkTo(st, 1012, 1016);
+      assert.equal(store.order("ORD-V").status, "PAID", "the right token still pays it"); assert.equal(store.order("ORD-V").paid, true);
+    } finally { fs.writeFileSync = wf; }
+  });
+});
