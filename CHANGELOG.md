@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.307] — miniMall: a check by hand made while an order settles does not outlast its hold
+
+- A settling order can be checked by hand to move it on before its hold runs out (0.18.300). That check made it immune to the second order its hold was waiting for: the vendor checked a copier's settling order, the real order without a secret came 2 blocks later, and the copier's order stayed PAID and confirmable (review-desktop-r4 S3). The check now keeps the block the hold would have run to; a second order without a secret mined up to that block still unpays the order and holds both for a check by hand, unless it was already confirmed or moved on. The check-by-hand question for a settling order now says so: "Another order with this reference can still arrive until block N; it will put both orders back on a check by hand."
+- Tests (scripts/shop-test.cjs): S3 with the real order at the hold's last two blocks (held; checked by hand again), one block later (the check stands), and after the vendor confirmed (left as it is); the question's sentence (fails on 0.18.306: the copier's order stays paid).
+
 ## [0.18.306] — miniMall: an order with a secret does not unpay a paid order without one
 
 - A PAID order without a secret (not moved on, not checked by hand) was unpaid and held for a check by hand (0.18.289) by any second buyer's order with its reference, also one that came with a secret (review-desktop-r4 S5; released 0.18.286 kept it PAID). An order without a secret is paid only by coins without a proof, and an honest buyer with a secret pays with its proof, so that newcomer cannot be the one whose coin paid it: the paid order now stays PAID, and the newcomer is kept as its own order and waits for its own proved coin. A newcomer without a secret, or with one that cannot be read, still holds the paid order, as does any newcomer an order stored before 0.18.297 (paid by any coin with its reference).

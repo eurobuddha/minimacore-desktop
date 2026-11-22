@@ -2915,7 +2915,7 @@ async function renderShopOrderDetail(ref) {
   el("shopSend").onclick = async () => { const t = el("shopMsg").value.trim(); if (!t) return; try { await api.shopReply(ref, t); } catch (e) { toast(e.message || "failed", "warn"); } renderShopOrderDetail(ref); };
   if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {
     const yes = await showConfirm("Checked by hand?", ((o.problems || []).length ? "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
-      : d.settling ? "Paid. Held until block " + d.settling.block + " in case another order with the same reference arrives."
+      : d.settling ? "Paid. Held until block " + d.settling.block + " in case another order with the same reference arrives.\n\nAnother order with this reference can still arrive until block " + d.settling.block + "; it will put both orders back on a check by hand."   // 0.18.306
       : (o.notes || []).length && !o.paid ? "This order is not paid yet:\n" + o.notes.map(p => "• " + p).join("\n")   // a coin without its proof (0.18.304)
       : o.legacyVerdict && !o.legacyPaid ? "An older version of this app moved this order on (" + String(o.status).toLowerCase() + ") without a payment this version can see."
       : "An older version of this app recorded " + o.legacyPaid + " " + ShopRules.cur(o.currency) + " received for this order; the coins the node shows now come to " + (o.paidAmount || "0") + ".")

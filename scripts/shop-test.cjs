@@ -1512,3 +1512,24 @@ test("S5: a PAID order without a secret stays paid when another buyer's order wi
     assert.equal(c.paid, false, tag); assert.equal(t.m.store.mayAdvance(c), false, tag);
   }
 });
+
+// ---- 0.18.306: a check by hand made while an order settles (only to move it on early) does not make it immune to a second order with its
+// reference mined before its hold would have run out (review-desktop-r4 S3: the vendor checked the copier's settling order, the real order
+// came 2 blocks later, and the copier's order stayed PAID and confirmable) ----
+test("S3: an order checked by hand while settling is still held by a second order without a secret mined up to the block its hold ran to; not after it, nor once confirmed", async () => {
+  const run = async (name, realAt, confirm) => { const t = await setupS(name); t.st.pay = [payS("ORD-V", 1010, undefined, "0xFE01")]; t.st.msg = [await sealS(t, t.atk, "ORD-V", 1011, "COPIER")];
+    await walk(t, 1001, 1011); assert.deepEqual(t.m.shop.orderDetail("ORD-V").settling, { block: 1013 });
+    t.m.shop.vendorCheck("ORD-V"); assert.equal(t.m.store.mayAdvance(t.m.store.order("ORD-V")), true, "checked by hand: it may move on");
+    if (confirm) await t.m.shop.advanceStatus("ORD-V", "CONFIRMED");
+    t.st.msg.push(await sealS(t, t.victim, "ORD-V", realAt, "VICTIM")); await walk(t, 1012, realAt + 4); return [t, t.m.store.order("ORD-V"), copyOf(t, t.victim)]; };
+  for (const at of [1012, 1013]) {
+    const [t, c, v] = await run("s3" + at, at);
+    assert.equal(c.paid, false, "real order at " + at); assert.equal(c.status, "UNCHECKED"); assert.equal(c.handChecked, undefined, "the check made while settling goes"); assert.equal(c.problems[0], DUPV);
+    assert.equal(t.m.store.mayAdvance(c), false); assert.equal(t.m.store.mayAdvance(v), false); await assert.rejects(t.m.shop.advanceStatus("ORD-V", "CONFIRMED"), /Check it by hand first/);
+    assert.equal(t.m.store.handCheck("ORD-V"), true, "and it can be checked by hand again");
+  }
+  { const [t, c] = await run("s3late", 1014); assert.equal(c.paid, true, "mined after the hold would have run out: the check stands"); assert.equal(t.m.store.mayAdvance(c), true); }
+  { const [t, c] = await run("s3conf", 1012, true); assert.equal(c.status, "CONFIRMED", "moved on: left as it is"); assert.equal(t.m.store.mayAdvance(c), true); }
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes("\\n\\nAnother order with this reference can still arrive until block \" + d.settling.block + \"; it will put both orders back on a check by hand.\""), "the question says so");
+});
