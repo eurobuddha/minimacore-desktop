@@ -415,7 +415,7 @@ async function scanPayments(depth) {
       seenPayCoins.delete(id);
       const n = (judgeTries.get(id) || 0) + 1, why = String((e && e.message) || e).slice(0, 300); judgeTries.set(id, n);
       if (n < JUDGE_TRIES) { store.log("miniMall: payment coin " + id + " could not be judged (try " + n + " of " + JUDGE_TRIES + "): " + why); if (!judgeFailed.includes(id)) judgeFailed.push(id); return ""; }
-      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.add(String(id));
+      judgeTries.delete(id); seenPayCoins.add(id); gaveUpPay.set(String(id), ref);
       store.log("miniMall: payment coin " + id + " could not be judged after " + JUDGE_TRIES + " tries, left for a check by hand: " + why);
       try { if (ref) store.flagDuplicate(ref, "payment coin " + id + " could not be judged: check by hand"); } catch (e2) { store.log("miniMall: the order " + ref + " could not be marked for a check by hand: " + String((e2 && e2.message) || e2).slice(0, 300)); }
       return "";
@@ -476,7 +476,7 @@ function proofOf(secret) {
 // with its error, and left for a check by hand (a problem on its order, and the Inbox). It stopped every newer coin for good: the loop rethrew and
 // the cursor never moved. The count is kept in memory, for this session: after a restart a coin gets JUDGE_TRIES passes again. One try per pass:
 // a coin that threw moves nothing, so no backfill read of the same pass judges it again.
-const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Set();   // coin id -> passes that threw; coin ids given up on
+const JUDGE_TRIES = 3, judgeTries = new Map(), gaveUpPay = new Map();   // coin id -> passes that threw; coin id given up on -> the order flagged (0.19.356)
 let judgeFailed = [], lastJudgeFailed = [];
 // What may not have been read below block N, and why (as released 0.18.283 / 0.18.286, the same words): "cap" (the node's answer was too
 // large) or the tree, + "Root" when the payments read reached the tree's root, where every unspent payment coin is kept whatever its age;
@@ -643,7 +643,8 @@ function paymentNotSent(ref) {
   emitter.emit("update"); return { ok: true };
 }
 /** The vendor checked an order that does not match the listing by hand (an explicit question on the screen). */
-function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); emitter.emit("update"); return { ok: true }; }
+// a coin given up on whose order the vendor has now checked by hand is no longer said on the Inbox (0.19.356, as released 0.18.302)
+function vendorCheck(ref) { if (!store.handCheck(ref)) throw new Error("Only an order that does not match your shop is checked by hand."); for (const [c, r] of gaveUpPay) if (r === ref) gaveUpPay.delete(c); emitter.emit("update"); return { ok: true }; }
 /** What the order scan could not read, for the Inbox's status line (0.19.249): the last pass failed (the node did not answer;
  *  read again on the next block), and the oldest block below which a long absence left orders and payments unread. */
 /** The vendor hid the Inbox's "may not have been read" notice (0.19.331): the log keeps it; a newer one is shown again (0.19.341). */
@@ -657,7 +658,7 @@ function scanState() {
   const shown = !!below && store.shops().length > 0 && below > (Number(store.getMeta("unread_dismissed")) || 0);
   return { readFailed: lastPassFailed, stepFailed: lastStepFailed, catchingUpTo: Number(store.getMeta("backfill_target_block")) || 0, unreadBelow: below, unreadShown: shown,
     unreadWhy: below ? why : "", unreadText: below ? unreadText(below, why) : "", skipped: [...skippedPay.keys()].filter(skipping),
-    judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay] };   // payment coins that could not be judged, ids whole (0.19.350)   // why and its sentence (0.19.338)
+    judgeFailed: lastJudgeFailed.slice(), gaveUp: [...gaveUpPay.keys()] };   // payment coins that could not be judged, ids whole (0.19.350)   // why and its sentence (0.19.338)
 }
 function newOrderCount() { return store.orders().filter(o => o.role === "sell" && o.unread).length; }
 

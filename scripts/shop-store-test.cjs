@@ -989,6 +989,8 @@ test("vendor: a payment coin whose judging always throws: an unrelated payment i
       assert.deepEqual([shop.scanState().judgeFailed, shop.scanState().gaveUp], [[], [p1.coinid]]);
       assert.ok(logs.some(l => l.includes(p1.coinid) && l.includes("poison") && /after 3 tries/.test(l)), logs.join(" | "));
       jTip(st, 1013); await shop.scanOnce(); assert.equal(calls, 3, "not judged again this session"); assert.equal(store.getMeta("scanned_tip_block"), 1013);
+      // 0.19.356: checked by hand, the coin is no longer said on the Inbox
+      shop.vendorCheck("ORD-P1"); assert.deepEqual(shop.scanState().gaveUp, [], "said until the vendor checked the order");
     } finally { store.recordPayment = real; }
   });
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");

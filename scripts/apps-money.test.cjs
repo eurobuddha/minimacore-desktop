@@ -403,7 +403,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // main/shop.js again in 0.19.353 (as released 0.18.298: the desktop buyer's order carries a secret and every payment of it, Retry included, carries its proof in port 2)
   // both again in 0.19.354 (as released 0.18.300: a payment counted the first time it is read again; an order without a proof of its secret settles until a good orders read is 3 blocks past its newest coin; the waiting machinery gone)
   // main/shop.js again in 0.19.355 (as released 0.18.301: a poll during a running pass no longer takes the new tip as scanned)
-  for (const [f, want, ver] of [["main/shop.js", "cfa9a57f81134eda2aa62d02e2ea3627dc4cbe1375331c5fdcd48fbf751e117d", "0.19.355"], ["main/shop-store.js", "66a0ad4be9cf81a925e09afa93a7dff9c46a68f65d2ff9ef855648fb6f100017", "0.19.354"],
+  // main/shop.js again in 0.19.356 (as released 0.18.302: a payment coin given up on is no longer said once its order is checked by hand)
+  for (const [f, want, ver] of [["main/shop.js", "d806c02b318b40a3e3f6a59b0ce4c9033837ee782f5335e4930b1c7502300cc6", "0.19.356"], ["main/shop-store.js", "66a0ad4be9cf81a925e09afa93a7dff9c46a68f65d2ff9ef855648fb6f100017", "0.19.354"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 
