@@ -33,7 +33,8 @@ async function harness(health) {
     if (q === 'block') return good({ block: 0 });
     if (q === 'getaddress') return good({ address: hash(500), publickey: hash(501), miniaddress: 'MxPAYOUT' });
     if (q.startsWith('coins relevant:true sendable:true')) return good(wallet);
-    if (q.startsWith('scripts address:')) return good({ address: q.split(':')[1] });
+    // As the real node: found only by the address exactly as the coins carry it (case-SENSITIVE lookup).
+    if (q.startsWith('scripts address:')) { const a = q.slice('scripts address:'.length); return wallet.some(c => c.address === a) ? good({ address: a, simple: true, publickey: hash(501) }) : { status: false, pending: false, error: 'Script with that address not found' }; }
     if (/^txn(create|input|output|state|delete|basics)/.test(q)) return good({});
     return { status: false, pending: false, error: 'stand-in: ' + q.split(' ')[0] };
   });

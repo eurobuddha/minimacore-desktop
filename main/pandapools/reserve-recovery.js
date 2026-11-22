@@ -462,7 +462,7 @@ var ReserveRecovery = (function () {
         if(!ids.length||ids.length>64||!(signer==="auto"||hash(signer))){cb("Invalid signing inputs.");return;}
         if(signer!=="auto")signers.push(signer);
         function input(i){
-            if(i===ids.length){script(Object.keys(addresses),0);return;}
+            if(i===ids.length){script(Object.keys(addresses).map(function(k){return addresses[k];}),0);return;}
             if(!hash(ids[i])){cb("Invalid signing input ID.");return;}
             call(local,"coins coinid:"+ids[i],function(j){var cs=rows(j),c=cs&&cs.length===1&&cs[0];
                 if(!c||c.spent!==false||key(c.coinid)!==key(ids[i])||!hash(c.address)){cb("Could not verify a current signing input.");return;}
@@ -471,7 +471,7 @@ var ReserveRecovery = (function () {
                     if(key(c.address)!==key(expected)||signer!==p.opk||["close","forward"].indexOf(recovery.stage)<0
                             || recovery.stage==="close"&&key(c.tokenid)!=="0x00"&&key(c.tokenid)!==key(p.tok)) {cb("Recovery input or signer changed. Nothing signed.");return;}
                 }
-                if(signer==="auto")addresses[key(c.address)]=true;input(i+1);
+                if(signer==="auto"&&!addresses[key(c.address)])addresses[key(c.address)]=c.address;input(i+1);
             });
         }
         function script(as,i){
@@ -486,8 +486,10 @@ var ReserveRecovery = (function () {
                 }
                 ensureKeys(signers,function(n,missing){cb(missing.length?"Owner signing is paused or the current signing key could not be verified.":null);});return;
             }
+            // The node looks script rows up case-SENSITIVELY (stored upper-case): send the address exactly as the
+            // coin row gave it; only the comparison of what comes back ignores case (native OwnerKeyRecovery).
             call(local,"scripts address:"+as[i],function(j){var r=j&&j.response;
-                if(!r||key(r.address)!==as[i]||typeof r.simple!=="boolean"){cb("Could not identify the input signing key.");return;}
+                if(!r||key(r.address)!==key(as[i])||typeof r.simple!=="boolean"){cb("Could not identify the input signing key.");return;}
                 if(r.simple){if(!hash(r.publickey)){cb("Invalid input signing key.");return;}if(signers.map(key).indexOf(key(r.publickey))<0)signers.push(r.publickey);}
                 script(as,i+1);
             });

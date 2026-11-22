@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.381] — A pool swap is no longer refused on every real node ("Script with that address not found")
+
+- Every PandaPools swap stopped before signing with "the node could not say which key signs one of the coins it would spend … (its "scripts" command): Script with that address not found". The engine's signing check (`ReserveRecovery.checkSignature`) asked the node `scripts address:` with each input's address lower-cased; the node looks script rows up case-sensitively (stored upper-case), so it never found one. Fixed at the source, PandaPools MiniDapp 0.6.45 (2c99fbb07c7d493e5ace025fe5284295b8e9cbc5): the address goes to the node exactly as the coin row carries it, and the reply is still compared ignoring case. `main/pandapools/reserve-recovery.js` re-vendored (the only engine file that changed), `scripts/pandapools-parity.manifest.json` re-pinned.
+- The stand-in nodes of the PandaPools tests echoed any address back, which is why the tests passed: `scripts address:` now answers case-sensitively, by the address exactly as the coins carry it, like the real node (scripts/pandapools-recovery.test.cjs, pandapools-signgate.test.cjs, pandapools-checkmode.test.cjs). New test in scripts/pandapools-recovery.test.cjs (fails on 0.19.380).
+
 ## [0.19.380] — PandaPools' Wallet tab draws coins as the Wallet does: their icons and the web-validation tick
 
 - Dexicon ② Pools › Wallet drew its own icons: the black Minima mark for Minima and an identicon for every other token (MxUSD included), with no web-validation tick, where the Wallet shows Minima's tile ticked and each token's own icon and tick. Each balance row now draws the Wallet's own tile (renderer/app.js `tokIconHtml`, lifted out of the Wallet's row and its token dialog, which now use it too) and enhances it with the Wallet's own `enhanceTokenIcons`, passed to DexPools.init: by TOKEN ID; the icon of the token's own on-chain description (inline data at once, a remote one only through the main process's guarded `api.tokenIcon`, never an <img> to the URL); the tick only when the node's `tokenvalidate` says valid; "could not be checked" shows no tick, as the Wallet; one shared ICON_CACHE, so the tab asks nothing the Wallet has not already asked for the same token.
