@@ -743,6 +743,30 @@ test("a payment coin whose judging threw is read again on the next pass, and the
     t.st.tip = 1021; await t.m.shop.scanOnce(); assert.equal(t.m.store.order("ORD-T").paid, true, "judged again, not skipped as seen");
   } finally { t.m.store.recordPayment = real; }
 });
+// 0.18.290: one "older than the order" problem per order, and no write of shop.json for a coin that changes nothing (2000 coins made
+// 2001 problems and 3001 rewrites); the same buyer's order sent again: the order's block is its oldest coin's, never a copier's
+test("2000 old coins with an order's reference: one 'older than the order' problem, the first coin's id whole, and the writes bounded by the order's coin list", async () => {
+  const t = await javaSetup("flood"); t.st.msg = [await t.seal("ORD-F", 1500)];
+  t.st.pay = Array.from({ length: 2000 }, (_, i) => Object.assign(t.pay("ORD-F", 1001 + (i ? 1 + (i % 400) : 0)), { coinid: "0xFB" + (0x10000 + i).toString(16) }));
+  let writes = 0; const real = fs.renameSync; fs.renameSync = function () { writes++; return real.apply(this, arguments); };
+  try { t.st.tip = 1510; await t.m.shop.scanOnce(); } finally { fs.renameSync = real; }
+  const o = t.m.store.order("ORD-F"), older = o.problems.filter(p => p.startsWith("a payment with this order's reference is older than the order"));
+  assert.equal(older.length, 1, o.problems.length + " problems"); assert.equal(o.problems.length, 1);
+  assert.equal(older[0], "a payment with this order's reference is older than the order (payment coin 0xFB10000 at block 1001, the order at block 1500): check by hand");
+  assert.ok(writes <= 1002, writes + " writes: the order, its one problem, and each coin counted on its list (at most 1000)"); assert.equal(o.paid, false);
+});
+test("the same buyer's order sent again: a payment between the two copies pays it (the order's block is its oldest copy's); a copier's lower coin never moves another buyer's order's block", async () => {
+  { const t = await javaSetup("resend"); t.shopId = "resend"; const buyer = await t.m.sc.deriveIdentity("resend buyer");
+    t.st.msg = [await sealFrom(t, buyer, "ORD-R", 1010, "B"), await sealFrom(t, buyer, "ORD-R", 1000, "B")];   // the node lists newest first
+    t.st.pay = [t.pay("ORD-R", 1001)]; t.st.tip = 1020; await t.m.shop.scanOnce();
+    const o = t.m.store.order("ORD-R"); assert.equal(o.orderBlock, 1000, "lowered to the oldest copy"); assert.equal(o.paid, true, o.problems.join(" | ")); }
+  { const t = await javaSetup("resend2"); t.shopId = "resend2"; const buyer = await t.m.sc.deriveIdentity("resend2 buyer"), atk = await t.m.sc.deriveIdentity("copier resend2");
+    t.st.msg = [await sealFrom(t, buyer, "ORD-R", 1010, "B"), await sealFrom(t, atk, "ORD-R", 1000, "COPIER")];
+    t.st.pay = [t.pay("ORD-R", 1003)]; t.st.tip = 1020; await t.m.shop.scanOnce();
+    const o = t.m.store.order("ORD-R"), c = t.m.store.order("ORD-R~" + atk.publicId);
+    assert.equal(o.delivery, "B"); assert.equal(o.orderBlock, 1010, "not moved by another sender's coin"); assert.equal(c.orderBlock, 1000, "the copier's order is a second buyer's");
+    assert.equal(o.paid, false); assert.equal(t.m.store.mayAdvance(o), false); assert.equal(t.m.store.mayAdvance(c), false); }
+});
 // 0.18.286: past the tree, orders read whole but the payments read cut by the reply cap: the payments' cause is the reply cap
 test("past the tree with only the payments read cut by the reply cap, the notice names the reply cap for the payments", async () => {
   const t = await javaSetup("paycut"); const m = await t.reopen();

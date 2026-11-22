@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.290] — miniMall: one "older than the order" problem per order; a re-sent order keeps its oldest block
+
+- Each old payment coin carrying an order's reference added its own "a payment with this order's reference is older than the order" problem (the coin id made each text new) and a synchronous rewrite of `shop.json`: 2000 coins gave 2001 problems, 3001 rewrites and 1.35 s of blocked main thread. Now an order gets that problem once, naming the first coin whole, and a coin that adds nothing writes nothing.
+- The same buyer's order sent again (a second coin, the same sealed sender): the order's block is now its oldest coin's. The node lists newest first, so the later copy set the block and a real payment mined between the two copies was held as "older than the order" (it failed safe: a check by hand). The sender is the sealed box's signer, so another buyer's coin with the same reference is a second buyer's order and never moves this one's block.
+
 ## [0.18.289] — miniMall: a copier's order is never paid by another buyer's coin
 
 - A payment coin created at block N is judged only once the chain is past block N + 3 (`PAY_BEFORE_ORDER`); until then it is not judged and not marked seen, and a later pass reads it again (the payments read never skips what an earlier pass read, every window reaches at least 64 blocks below the tip, and the cursor is on disk, so a restart reads it too). Orders are read before payments in every pass, so the real order, mined within the 3-block allowance, is held by then: a copier who put the payment's plain-text reference into an order of their own mined the block after the payment had that order marked PAID before the real order arrived, and the vendor could ship to the copier. Now both orders meet as two buyers' orders with one reference, and neither moves on until the vendor checks it by hand.

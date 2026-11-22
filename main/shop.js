@@ -52,6 +52,7 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // A waiting coin is read again: the payments read never skips what an earlier pass read, and every window reaches 64 blocks or more
 // below the tip, so a coin within 3 blocks of the last tip is inside the next one, after a restart too (the cursor is on disk).
 const PAY_BEFORE_ORDER = 3;
+const OLDER_PAYMENT = "a payment with this order's reference is older than the order";
 const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
 let judgedTip = 0;              // the tip the last payments read judged against
 
@@ -346,6 +347,11 @@ function routeIncoming(w, fromPublicId, coinBlock) {
     // The same reference from a second buyer (0.18.208): it was dropped, and a payment carrying that reference was counted
     // for whichever order came first. Both are kept, and neither can be paid automatically: a payment cannot be told apart.
     const prior = store.order(w.ref), problems = chk.problems.slice(0, 20).map(p => String(p).slice(0, 300));
+    // the same buyer's order sent again (0.18.290): the order reached the chain with its OLDEST coin. The node lists newest first, so the
+    // copy routed first set orderBlock, and a real payment between the two copies read as older than the order. "The same buyer" is the
+    // sealed box's signer (opened.fromPublicId, and w.from must equal it): a copier signs with their own key, so their coin with this
+    // reference is a second buyer's order below and never moves this one's block.
+    if (prior && prior.role === "sell" && prior.counterparty === fromPublicId && prior.orderBlock && Number.isSafeInteger(coinBlock) && coinBlock > 0 && coinBlock < prior.orderBlock) { prior.orderBlock = coinBlock; store.flush(); }
     if (prior && prior.counterparty !== fromPublicId) {
       if (store.order(dupKey(w.ref, fromPublicId))) return;   // this buyer's copy is already kept
       const DUP = "another buyer sent an order with the same reference " + w.ref + ": a payment with it cannot be told apart, so check both orders by hand";
@@ -427,7 +433,8 @@ async function scanPayments(depth, tip) {
     try {
       // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
       // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
-      if (o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER)
+      // one such problem per order (0.18.290): each old coin added a line (its id made the text new) and a write of shop.json
+      if (o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
         store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
       outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
     } catch (e) { seenPayCoins.delete(id); throw e; }   // a coin whose judging threw is read again (0.18.289); the pass fails, as before
