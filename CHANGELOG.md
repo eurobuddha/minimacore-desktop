@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.363] — Dexicon lanes test: the lanes' order no longer races the host's own 400 ms limit
+
+- The intermittent `test:dexicon` failure ("Expected values to be strictly equal", review-desktop-r4 G6) is this test's `assert.equal(net.most(), 2)` (scripts/dexicon-host.test.cjs, the lanes test), with 4 !== 2: caught 3 times in 30 runs of the whole suite with two copies running at once. The test booted its host with a 400 ms request limit (`netLimitMs`) for all of it, and holds low0 and low1 at the network from the first posts until it lets them go after its order, take and long-poll checks. On a busy machine that took longer than 400 ms: the host's limit then ended both requests and freed their places, as it is meant to (main/dexicon.js makeLane), the order and the take went out, and the stand-in network, which still held the two abandoned posts, counted 4 at once. A 450 ms pause at that point gives the same failure every time. The lanes themselves never had more than 2 of their own requests out.
+- Now the lanes' order, drops and priorities are tested on a host with the app's own limit (30 s), and the limit itself (a request that never settles frees its place, not before 300 ms) on a second host with 400 ms. No assertion is weakened or removed; nothing in the app changes. With the 450 ms pause the test passes.
+
 ## [0.19.362] — miniMall: the review's nits (a coin given up on flags the order it would pay; held in the list), as released 0.18.308
 
 - A payment coin given up on after three passes that threw (0.19.350) put its problem on the order kept under the coin's reference, also when the coin proves another buyer's copy of it (ref~buyer): it now lands on the order the coin would pay, whenever that is known. One whose reference could not be read names no order, so no check by hand cleared it from the Inbox: the Inbox now offers Hide for those (the same Hide as the unread notice's). At most 64 coins given up on are said; the oldest go first (each was logged with its error, and its order keeps its problem).

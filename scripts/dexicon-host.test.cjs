@@ -869,8 +869,12 @@ test("16 refused takes in one cycle: two refusals at the network at a time, neve
 });
 
 test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an order or a read is never dropped; long polls do not block work; a request that never settles frees its place", async () => {
-  const net = slowNet();
-  const { host, ctx } = await boot({ net, netLimitMs: 400 });
+  // 0.19.363: the lanes' order is tested on a host whose own limit is the app's (30 s), and the limit itself on a second host with 400 ms. With
+  // 400 ms for the whole test, a busy machine took longer than that between holding low0 and low1 and letting them go: the host's limit then
+  // freed their places (as it should), the order and the take went out beside them, and the stand-in network counted 4 at once ("4 !== 2" at
+  // net.most(), 3 of 30 runs with two copies of the suite at once). The lanes never had more than 2 of their own requests out.
+  let net = slowNet();
+  let { host, ctx } = await boot({ net });
   const post = (n, low) => vm.runInContext(`MDS.net.POST("https://eurobuddha.com/dex-relay/dex/msg", ${JSON.stringify(n)}, function (r) { __done.push([${JSON.stringify(n)}, r.status]); }, ${low})`, ctx);
   vm.runInContext("globalThis.__done = []", ctx);
   for (let i = 0; i < 40; i++) post("low" + i, true);
@@ -899,7 +903,8 @@ test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an 
   assert.equal(net.sent.length, 2 + 2 + 32, "every refusal that was not dropped was sent in the end");
   assert.ok(done().some(d => d[0] === "read" && d[1] === true));
   assert.equal(net.most(), 2);
-  // a request that never settles (netfetch gives up after 20 s by itself; the host's own limit is the backstop)
+  // a request that never settles (netfetch gives up after 20 s by itself; the host's own limit is the backstop): a host whose limit is 400 ms
+  net = slowNet(); ({ host, ctx } = await boot({ net, netLimitMs: 400 })); vm.runInContext("globalThis.__done = []", ctx);
   post("stuck1", false); post("stuck2", false); post("after", false);
   await M.until(() => net.held.length === 2);
   const t0 = Date.now();
