@@ -7,8 +7,9 @@
  * scripts safely (verified live: runscript with a quoted script → parseok true) and structurally avoids the
  * JSONObject.quote `\/`-escaping class of bug. Long commands (txnimport blobs) go over POST.
  *
- * Auth is HTTP Basic (user "minima" + the app-generated secret); the node binds 0.0.0.0 so the password is
- * not optional. The renderer NEVER sees this module — it calls through the IPC proxy in main.js.
+ * Auth is HTTP Basic (user "minima" + the app-generated secret). The node's RPC binds 127.0.0.1 by default since
+ * minima 1.1.2.3-euro8 (0.18.287; -rpcbind all would open it to every interface, which this app never passes); the
+ * password is still not optional: anything running on this machine can reach a loopback port. The renderer NEVER sees this module — it calls through the IPC proxy in main.js.
  */
 const http = require("http");
 

@@ -45,7 +45,15 @@ const NODE_TREE_DEPTH = 1024, NODE_TREE_MOST = 1123, ROOT_DEPTH = 1124;
 // order's onSent; a Retry is later still), so a real payment is never created before its order; the two are mined separately, and the
 // order coin (a sealed message of up to 90000 bytes) may land a few blocks after the payment. A payment older than that is held for a
 // check by hand, never refused outright.
+// A payment is judged only once the chain is past that allowance (0.18.289): a payment coin created at block pb waits, not judged and
+// not marked seen, until the tip is above pb + PAY_BEFORE_ORDER. Orders are read before payments in every pass, so a real order mined
+// within the allowance is held by then, and a copier's order with the same reference meets it as a second buyer's (both held for a
+// check by hand). Judged at once, a copier's order mined in the block after the payment was paid before the real order arrived.
+// A waiting coin is read again: the payments read never skips what an earlier pass read, and every window reaches 64 blocks or more
+// below the tip, so a coin within 3 blocks of the last tip is inside the next one, after a restart too (the cursor is on disk).
 const PAY_BEFORE_ORDER = 3;
+const waitingPay = new Map();   // ref -> { coin, block }: a payment known and not judged yet, said on the vendor's order (in memory)
+let judgedTip = 0;              // the tip the last payments read judged against
 
 const T = { ORDER: "ORDER", INQUIRY: "INQUIRY", REPLY: "REPLY", BUYER_REPLY: "BUYER_REPLY", STATUS_UPDATE: "STATUS_UPDATE" };
 
@@ -387,7 +395,7 @@ async function scanOrders(depth, floor) {
   }
   return changed;
 }
-async function scanPayments(depth) {
+async function scanPayments(depth, tip) {
   const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   const listed = [], have = new Set();
   for (const a of addrs) {   // every published payout address (0.18.205), one coin once
@@ -411,18 +419,24 @@ async function scanPayments(depth) {
     const refHex = statePort(c, 1); if (!refHex) { seenPayCoins.add(id); return ""; }
     const ref = hexToText(refHex); if (!ref) { seenPayCoins.add(id); return ""; }
     const o = store.order(ref); if (!o || o.role !== "sell" || o.paid) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
+    const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
+    // not judged, not marked seen, until the chain is past the allowance (0.18.289): read again on a later pass
+    if (known && !(tip > pb + PAY_BEFORE_ORDER)) { const w = waitingPay.get(ref); if (!w || tip > w.block + PAY_BEFORE_ORDER) waitingPay.set(ref, { coin: String(id), block: pb }); return ""; }
     seenPayCoins.add(id);
-    // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
-    // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
-    const pb = Number(c.created);
-    if (o.orderBlock && Number.isSafeInteger(pb) && pb > 0 && pb < o.orderBlock - PAY_BEFORE_ORDER)
-      store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
-    const outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
+    let outcome;
+    try {
+      // a payment older than its order never pays it automatically (0.18.285): the reference is plain text on chain, so anyone could copy a
+      // payment's reference into an order of their own when the real order is not held here (older than the node's tree, or not read yet)
+      if (o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER)
+        store.flagDuplicate(ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
+      outcome = store.recordPayment(ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id));   // the store counts each coin once, across restarts
+    } catch (e) { seenPayCoins.delete(id); throw e; }   // a coin whose judging threw is read again (0.18.289); the pass fails, as before
     if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref, paid: outcome }); }
     return outcome || "";
   };
   // One pass oldest first, then one more over this scan's dust if anything counted (a top-up older than the payment it completes).
+  judgedTip = tip;
   const dust = coins.filter(c => judge(c) === "DUST");
   if (changed && dust.length) for (const c of dust) judge(c);
   return changed;
@@ -439,7 +453,7 @@ async function scanOnce() {
     const failed = () => { readFailed = true; return false; };
     passServed = depth; readFailed = false;
     const a = await scanOrders(depth).catch(failed);
-    const b = await scanPayments(depth).catch(failed);
+    const b = await scanPayments(depth, tip).catch(failed);
     let changed = a || b;
     const recentFailed = readFailed;   // a backfill step's failure below is said as such, not as the recent window's (0.18.277)
     if (tip && !readFailed && prev && tip < prev) {
@@ -459,7 +473,7 @@ async function scanOnce() {
         // payments read reaches the root, where this wallet's unspent payment coins of any age are. Orders skip what was read before (floor);
         // payments never do (0.18.282): one seen before its order was known was not counted then, and judging a coin again is idempotent
         passServed = NODE_TREE_MOST; const c = await scanOrders(NODE_TREE_MOST, floor).catch(failed); const ordersServed = passServed;
-        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH).catch(failed); const root = passServed >= ROOT_DEPTH;
+        passServed = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH, tip).catch(failed); const root = passServed >= ROOT_DEPTH;
         changed = changed || c || d;
         // each read's own cut (0.18.283: the payments read's depth stood for both, so a cut orders read ended at once with the wrong cause);
         // a read the reply cap cut is tried on two more passes, as a backfill step is
@@ -475,7 +489,7 @@ async function scanOnce() {
       } else if (target && floor) {   // ONE backfill step per pass, paced: a widening query is heavy on the shared MINIMERCH address
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, NODE_TREE_DEPTH);   // never past what the tree surely holds (0.18.277)
         passServed = deep;
-        const c = await scanOrders(deep, floor).catch(failed), d = await scanPayments(deep).catch(failed);   // payments: no floor (0.18.282)
+        const c = await scanOrders(deep, floor).catch(failed), d = await scanPayments(deep, tip).catch(failed);   // payments: no floor (0.18.282)
         changed = changed || c || d;
         const reached = tip - passServed;
         if (readFailed) { /* nothing moves: the same step is tried on the next pass */ }
@@ -545,7 +559,10 @@ function orderDetail(ref) {
   // a second buyer's copy of a reference (0.18.218): payments carrying that reference are counted on the first order
   const first = o.wireRef ? store.order(o.wireRef) : null;
   const sharedRef = first ? { ref: first.ref, received: first.paidAmount || "0" } : null;
-  return Object.assign({ order: o, chat: store.chat(ref), sharedRef }, payState(o));
+  // a payment with this order's reference that waits for the allowance (0.18.289): said, never as "not paid"
+  const w = o.role === "sell" && !o.paid ? waitingPay.get(ref) : null;
+  const waiting = w && judgedTip <= w.block + PAY_BEFORE_ORDER ? { coin: w.coin, block: w.block, after: w.block + PAY_BEFORE_ORDER } : null;
+  return Object.assign({ order: o, chat: store.chat(ref), sharedRef, waiting }, payState(o));
 }
 /** The buyer checked their History and the uncertain payment was not sent (0.18.217): Retry is offered again. */
 function paymentNotSent(ref) {

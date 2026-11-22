@@ -40,7 +40,8 @@ test("a 0.18.69 shop.json: no coin counted twice, paid and shipped orders keep t
     { coinid: "0xC2", tokenid: MX, tokenamount: "10", amount: "0.0000001", created: "100", state: st("ORD-PHONE") },
     { coinid: "0xC3", tokenid: MX, tokenamount: "5", amount: "0.0000001", created: "90", state: st("ORD-HALF") },   // the 5 the old version already counted
   ];
-  shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "v" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } }
+  // CHANGED on purpose (0.18.289): the stand-in answers `block`; a payment is judged only once the chain is more than 3 blocks past it
+  shop._setRunner(async (c) => c.startsWith("vault") ? { status: true, response: { phrase: "v" } } : c.startsWith("getaddress") ? { status: true, response: { miniaddress: VADDR } } : c === "block" ? { status: true, response: { block: 5000 } }
     : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] });
   await shop.init(); await shop.scanOnce();
   const o = (r) => store.order(r);

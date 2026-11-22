@@ -254,12 +254,18 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid) {
   flush(); return outcome;
 }
 /** A second buyer sent an order with this order's reference (0.18.208): it can no longer be paid automatically. An order
- *  already paid or confirmed is left as it is (its payment was counted before the copy arrived). */
+ *  the vendor confirmed or moved on (CONFIRMED, SHIPPED, DELIVERED), or checked by hand, is left as it is. One marked PAID and
+ *  not moved on (0.18.289) is held again: the payment that paid it may be the other buyer's (the reference is plain text on
+ *  chain, so a copier's order can be the one held first), so it is unpaid, UNCHECKED, and moves on only once checked by hand.
+ *  What was received stays counted on it. Nothing was sent for PAID: the buyer hears of an order only from CONFIRMED on. */
 function flagDuplicate(ref, problem) {
-  ensureLoaded(); const o = order(ref); if (!o || o.role !== "sell" || o.paid || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.PAID) return false;
+  ensureLoaded(); const o = order(ref); if (!o || o.role !== "sell") return false;
+  const unpay = o.status === "PAID" && !o.handChecked;
+  if (!unpay && (o.paid || (STATUS_RANK[o.status] || 0) >= STATUS_RANK.PAID)) return false;
   ensureChecked(o); if (o.problems.includes(problem)) return false;
   o.problems = [problem].concat(o.problems); o.due = "";
-  if (o.status !== "INQUIRY" && (STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED && o.status !== "WRONG_TOKEN") o.status = "UNCHECKED";
+  if (unpay) { o.paid = false; o.status = "UNCHECKED"; }
+  else if (o.status !== "INQUIRY" && (STATUS_RANK[o.status] || 0) <= STATUS_RANK.UNCHECKED && o.status !== "WRONG_TOKEN") o.status = "UNCHECKED";
   flush(); return true;
 }
 /** The vendor's explicit "I checked this order by hand" for an order that does not match the listing: only then can it

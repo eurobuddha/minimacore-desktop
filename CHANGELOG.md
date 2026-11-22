@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.289] — miniMall: a copier's order is never paid by another buyer's coin
+
+- A payment coin created at block N is judged only once the chain is past block N + 3 (`PAY_BEFORE_ORDER`); until then it is not judged and not marked seen, and a later pass reads it again (the payments read never skips what an earlier pass read, every window reaches at least 64 blocks below the tip, and the cursor is on disk, so a restart reads it too). Orders are read before payments in every pass, so the real order, mined within the 3-block allowance, is held by then: a copier who put the payment's plain-text reference into an order of their own mined the block after the payment had that order marked PAID before the real order arrived, and the vendor could ship to the copier. Now both orders meet as two buyers' orders with one reference, and neither moves on until the vendor checks it by hand.
+- An order marked PAID (not confirmed or moved on, not checked by hand) that meets a second buyer's order with its reference is held again: unpaid, UNCHECKED, the duplicate problem first, what was received still counted. A confirmed, shipped or delivered order, or one checked by hand, is left as it is. Nothing was ever sent to the buyer for PAID.
+- While a payment waits, the vendor's order says so: "A payment with this order's reference has arrived (payment coin <whole id> at block N). It is counted after block N+3, so that another order with the same reference is seen first."
+- A payment coin whose judging threw is no longer kept as seen: the pass fails, as before, and the coin is judged again on the next pass.
+- `main/rpc.js`'s header no longer says the node binds 0.0.0.0: since minima 1.1.2.3-euro8 its RPC binds 127.0.0.1 unless `-rpcbind` says otherwise (this app never passes it).
+
 ## [0.18.288] — Vestr: a collect at or just after the end block is no longer dropped by the chain
 
 - The node's contract maths (`runscript` on CHECK_MATHS) works out its `change` before an expired contract's `cancollect` is raised to the whole coin, so at and just after the final block it reported a full payout AND a change (a sample contract coin, coin `0x23456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01`, 100 MINIMA, final block 1000004: collect 100, change 1). The collect paid out 100 and returned 1 from a 100 coin: `txnpost` took it, the chain dropped it, and the app said it was collected. The change is now the coin less the payout in exact decimals, never the script's `change`: an expired contract collects the whole coin with no change output, a partly vested one returns the exact rest to the contract with its state as before. Nothing is built while the grace wait is in force (the node's `mustwait`, or the coin younger than the contract's minimum wait) or when the node's figure is more than the coin holds. Test: `scripts/inject-test.cjs`.

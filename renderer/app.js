@@ -2893,6 +2893,7 @@ async function renderShopOrderDetail(ref) {
       ${o.shipping ? `<div class="view__desc">Shipping: ${esc(o.shipping)}</div>` : ""}
       ${isSell && o.delivery ? `<div class="view__desc">Deliver to: ${esc(o.delivery)}</div>` : ""}
       ${isSell ? `<div class="view__desc">${o.paid ? "Paid ✓ " + esc(o.paidAmount || "") : o.status === "BAD_TOTAL" ? "Your listing says nothing is due for this order, so it is never marked paid. Received so far: " + esc(o.paidAmount || "0") : "Received so far: " + esc(o.paidAmount || "0")}</div>` : ""}
+      ${isSell && d.waiting ? `<div class="view__desc" style="overflow-wrap:anywhere">A payment with this order's reference has arrived (payment coin <span class="mono">${esc(d.waiting.coin)}</span> at block ${esc(String(d.waiting.block))}). It is counted after block ${esc(String(d.waiting.after))}, so that another order with the same reference is seen first.</div>` : ""}
       ${(!isSell && d.sending) ? `<div class="view__desc" style="margin-top:8px">The payment is being sent to the node now. Wait for its answer before you do anything else with this order.</div>` : ""}
       ${(!isSell && d.ambiguous && !o.paid) ? `<div class="shop-warn" style="margin-top:8px">⚠ This payment may already have gone through (the node did not answer, or the app closed while it was being sent). Check your Balance and History before you pay again, so you do not pay twice.
         <button class="btn btn--outline btn--full" id="shopNotSent" style="margin-top:8px">I checked my History: it was not sent</button></div>` : ""}
