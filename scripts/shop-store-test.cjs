@@ -1011,7 +1011,8 @@ test("vendor: one payout address whose read throws does not keep the other addre
 const nodeCrypto = require("crypto");
 const proofT = (s) => "0x" + nodeCrypto.createHash("sha256").update(Buffer.from(s.slice(2), "hex")).digest("hex").toUpperCase();
 const newSecret = () => "0x" + nodeCrypto.randomBytes(32).toString("hex").toUpperCase();
-const NOPROOF = (id) => "a payment with this order's reference does not carry this order's proof (payment coin " + id + "): check by hand";
+// CHANGED on purpose (0.19.368, as Minima Core Desktop 0.18.311): the note names the coin's amount as the node gave it and its token id whole (or Minima)
+const NOPROOF = (id, amount, token) => "a payment with this order's reference does not carry this order's proof (payment coin " + id + ", amount " + (amount || "1.5") + ", token " + (token || "Minima") + "): check by hand";
 const BADSECRET = "this order's secret cannot be read, so no payment can be proved to be its buyer's: check by hand";
 // an order from `who` with `nonce` (undefined: no field, as an older Shop), and a payment coin with `proof` in port 2 (undefined: none)
 const sOrder = (who, ref, created, delivery, nonce) => ({ coinid: "0xSO" + Buffer.from(who.slice(2, 8) + ref + created + delivery).toString("hex"), created,
@@ -1131,11 +1132,12 @@ test("two orders with one reference: different secrets are paid each by its own 
     assert.equal(store.order("ORD-V~" + ATK).paid, true, "B paid by its own coin"); assert.equal(store.mayAdvance(store.order("ORD-V~" + ATK)), true, "and confirmable at once: its payment proves its secret");
     await walkTo(st, 1012, 1012);
     // CHANGED on purpose (0.19.359, as released 0.18.305): a note, never a problem (it held the order, so its own proved coin then could not pay it)
-    assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xFE51")], "one note on the unpaid order, the first coin's id whole, not one per coin"); assert.deepEqual(store.order("ORD-V").problems, []);
+    assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xFE51", "0.0002")], "one note on the unpaid order, the first coin's id whole, not one per coin"); assert.deepEqual(store.order("ORD-V").problems, []);
     assert.deepEqual(store.order("ORD-V~" + ATK).problems, [], "an order already paid by its proof is not disturbed"); assert.equal(store.order("ORD-V~" + ATK).notes, undefined); assert.equal(store.order("ORD-V~" + ATK).paid, true);
     await walkTo(st, 1013, 1016);
     const a2 = store.order("ORD-V"); assert.deepEqual(a2.coins, ["0xfe53"], "A's own coin counted on it, the stray ones on nothing"); assert.equal(a2.status, "PAID", "and paid by it: the note holds nothing");
-    assert.equal(store.mayAdvance(a2), true); assert.deepEqual(a2.notes, [NOPROOF("0xFE51")], "the note stays shown"); });
+    // CHANGED on purpose (0.19.368, as Minima Core Desktop 0.18.311): paid in full by its proved coin, the note (which says "check by hand") is dropped
+    assert.equal(store.mayAdvance(a2), true); assert.equal(a2.notes, undefined, "the note goes once it is paid"); });
   // the same buyer's order sent again (the same secret): one order, paid once
   await copyRig(async (st) => { const A = newSecret();
     st.msg.push(sOrder(VICTIM, "ORD-V", 1011, "VICTIM", A), sOrder(VICTIM, "ORD-V", 1009, "VICTIM", A)); st.pay.push(sPay("ORD-V", 1010, proofT(A), "0xFE60"));
@@ -1291,7 +1293,8 @@ test("S1a, S1b, S1c, R4: a settled order stays settled through a failed orders r
 // released 0.18.286 paid all three. Within one block coins are judged by coin id, never by Number() of amounts (of different tokens, rounded) ----
 test("S2a, S2b, S2c, S2d: a coin with the reference and without the order's proof is a note, never a hold: the proved payment pays the order; S4: a copier's order is never paid", async () => {
   const paid = (o, coins, note) => { assert.equal(o.paid, true, o.problems.join(" | ")); assert.equal(o.status, "PAID"); assert.deepEqual(o.problems, []); assert.deepEqual(o.coins, coins); assert.equal(o.due, "1.5");
-    assert.deepEqual(o.notes, note ? [NOPROOF(note)] : undefined, "the note, the first coin's id whole"); };
+    // CHANGED on purpose (0.19.368, as Minima Core Desktop 0.18.311): an order paid in full by its proved coins carries no note (it said "check by hand"); `note` is the coin that left one
+    assert.equal(o.notes, undefined, "no note on the paid order (" + note + ")"); };
   const run = (fn) => copyRig(async (st) => { const S = newSecret(); st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM", S)); await fn(st, proofT(S)); });
   // S2a: a worthless token's coin with the reference and no proof, the same block as the proved payment
   await run(async (st, P) => { st.pay.push(sPay("ORD-V", 1010, P, "0xFE01"), Object.assign(sPay("ORD-V", 1010, undefined, "0xBAD1", "0.000000001"), { tokenid: "0x" + "AB".repeat(32), tokenamount: "1000000" }));
@@ -1404,7 +1407,8 @@ test("N1: the real order with a secret, after a copier's order without one was p
     assert.equal(v.paid, false); assert.equal(v.status, "PENDING"); assert.deepEqual(v.problems, [], "a note holds nothing"); assert.deepEqual(v.notes, [DUPV], "one note: the clash is said");
     assert.equal(store.mayAdvance(v), false); assert.deepEqual(shop.vendorCheck(v.ref), { ok: true }, "and it can be checked by hand"); assert.equal(store.mayAdvance(store.order(v.ref)), true);
     st.pay.push(sPay("ORD-V", 1017, proofT(S), "0xFE02")); await walkTo(st, 1017, 1018);
-    assert.equal(store.order(v.ref).paid, true, "its own proved coin still pays it"); assert.deepEqual(store.order(v.ref).coins, ["0xfe02"]); });
+    assert.equal(store.order(v.ref).paid, true, "its own proved coin still pays it"); assert.deepEqual(store.order(v.ref).coins, ["0xfe02"]);
+    assert.equal(store.order(v.ref).notes, undefined, "paid in full by its proved coin: the note goes (0.19.368)"); });
   await copyRig(async (st) => { const S = newSecret(); st.pay.push(sPay("ORD-V", 1010, proofT(S), "0xFE01")); st.msg.push(sOrder(ATK, "ORD-V", 1011, "COPIER"));
     await walkTo(st, 1001, 1011); st.msg.push(sOrder(VICTIM, "ORD-V", 1012, "VICTIM", S)); await walkTo(st, 1012, 1016);
     const c = store.order("ORD-V"), v = store.order("ORD-V~" + VICTIM);
@@ -1432,4 +1436,24 @@ test("R6: a coin given up on that is counted after a restart takes its own probl
   await run(async () => { const s = store.shop("tea"); s.products[0].price = "2"; store.saveShop(s); }, async (o) => {
     assert.equal(o.paid, false, "checked again against the listing as it is now: it no longer matches"); assert.equal(o.status, "UNCHECKED"); assert.equal(o.due, "");
     assert.equal(o.problems.length, 1); assert.match(o.problems[0], /the order's price 1\.5 is not your price 2$/); assert.equal(store.mayAdvance(o), false); });
+});
+
+// ---- 0.19.368 (as Minima Core Desktop 0.18.311): the note of a coin without the order's proof names its amount (as the node gave it, never rounded)
+// and its token id whole, or Minima, so a stranger's dust or worthless token is told apart from a buyer's real payment made without the proof
+// (review-desktop-r5); once the order is paid in full by its proved coins the note, which says "check by hand", is dropped; an unpaid order keeps it ----
+test("the no-proof note names the coin's amount exactly and its token id whole (or Minima), every id uncut, said in every language; paid in full by its proved coin, the note goes; an unpaid order keeps it", async () => {
+  const TOK = "0x" + "AB".repeat(32), BIG = "0x" + "CD".repeat(32), AMT = "123456789012345678.12345678901234567890123456789012345678901234";
+  await copyRig(async (st) => { const S = newSecret(); st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM", S));
+    st.pay.push(Object.assign(sPay("ORD-V", 1010, undefined, BIG, "0.000000001"), { tokenid: TOK, tokenamount: AMT })); await walkTo(st, 1001, 1012);
+    const o = store.order("ORD-V"), n = NOPROOF(BIG, AMT, TOK); assert.ok(n.length > 300, "longer than the old 300-character cut: " + n.length);
+    assert.deepEqual(o.notes, [n], "the coin's id, amount and token id whole"); assert.equal(o.paid, false); assert.equal(o.status, "PENDING");
+    const I18N = require("../renderer/i18n.js"), MS = require("../renderer/mainsaid.js"), r = MS.read(n); assert.equal(r.code, "SHOP_NO_PROOF"); assert.deepEqual([r.params.coin, r.params.amount, r.params.token], [BIG, AMT, TOK]);
+    try { for (const code of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + code + ".js"); I18N.set(code); const said = MS.say(n); assert.ok(said !== n && said.includes(BIG) && said.includes(AMT) && said.includes(TOK), code + ": " + said); } } finally { I18N.set("en"); }
+    st.pay.push(sPay("ORD-V", 1013, proofT(S), "0xFE01")); await walkTo(st, 1013, 1016);
+    const p = store.order("ORD-V"); assert.equal(p.paid, true); assert.equal(p.status, "PAID"); assert.deepEqual(p.coins, ["0xfe01"]); assert.equal(p.notes, undefined, "paid in full by its proved coin: no note"); });
+  await copyRig(async (st) => { const S = newSecret(); st.msg.push(sOrder(VICTIM, "ORD-V", 1009, "VICTIM", S));
+    st.pay.push(sPay("ORD-V", 1010, undefined, "0xBAD7", "0.00000010")); await walkTo(st, 1001, 1012);
+    assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xBAD7", "0.00000010", "Minima")], "Minima, the amount as the node wrote it (its trailing zero kept)");
+    st.pay.push(sPay("ORD-V", 1013, proofT(S), "0xFE01", "0.5")); await walkTo(st, 1013, 1016);
+    assert.equal(store.order("ORD-V").status, "UNDERPAID"); assert.deepEqual(store.order("ORD-V").notes, [NOPROOF("0xBAD7", "0.00000010", "Minima")], "part paid: the note stays"); });
 });

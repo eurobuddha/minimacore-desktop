@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.368] — miniMall: the no-proof note names the coin's amount and token; a paid order drops its note (as Minima Core Desktop 0.18.311)
+
+- The note left on an order with a secret by a coin with its reference and without its proof named only the coin's id, so a vendor could not tell a stranger's dust or worthless token from a buyer's real payment made without the proof (review-desktop-r5). It now names the coin's amount exactly as the node gave it (never rounded) and its token id whole, or Minima: "a payment with this order's reference does not carry this order's proof (payment coin <id>, amount <amount>, token <token id or Minima>): check by hand"; renderer/mainsaid.js reads it back (SHOP_NO_PROOF) and it is said in zh / ru / uk. A note may now be 600 characters long (it was cut at 300), so no id in it is cut.
+- A note says "check by hand", and it stayed on an order after it became PAID, where no check-by-hand button is offered. Once an order is paid in full by its proved coins, its note is dropped (the simpler of the two choices; notes are only ever on orders with a secret, which only proved coins pay). An unpaid order, also one only part paid, keeps its note.
+- main/shop.js and main/shop-store.js change: their pins in scripts/apps-money.test.cjs are updated on purpose.
+- Tests (scripts/shop-store-test.cjs): the note with a 66-character coin id, a 63-character amount and a token id whole (over the old 300-character cut), read back and said in zh / ru / uk with every value whole, kept while unpaid and part paid, dropped once paid; "Minima" with the amount's trailing zero kept; N1's note goes once its proved coin pays it. Changed on purpose: the no-proof sentence in the tests; "the note stays shown" on a paid order is now "the note goes"; S2a, S2b and S2d's paid orders carry no note. All fail on 0.19.367.
+
 ## [0.19.367] — miniMall: a coin given up on and counted after all no longer holds its order (as Minima Core Desktop 0.18.310)
 
 - A payment coin whose judging threw on three passes is given up on and leaves "payment coin <id> could not be judged: check by hand" on its order (0.19.350). After a restart the coin is judged again and counted, but that problem still held the order: UNCHECKED, never PAID (review-desktop-r5 R6; the released app paid it). When a coin is counted for an order, that order's problem for exactly that coin now goes; when no problem is left, the order is checked against the listing again exactly as a fresh order is (what is due, and any way it departs from the listing, which still holds it), so it is paid as before. Any other problem on it still holds it.

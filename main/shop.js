@@ -411,7 +411,10 @@ async function scanPayments(depth) {
       // with its reference, the first coin's id whole (0.19.359, as released 0.18.305: it was a problem, which held the order, so a stranger's coin
       // with the reference, a worthless token or dust, stopped the proved payment from paying it). The note holds nothing: the order is paid by
       // its proved coins as ever, and an unpaid one with a note can be checked by hand (a buyer who paid by hand without the proof).
-      if (!o) { for (const u of pay.unproven) store.noteNoProof(u.ref, noProof(String(id))); return ""; }   // not marked seen: the order it proves may still be read
+      // with the coin's amount as the node gave it (never rounded) and its token id whole, or Minima (0.19.368, as Minima Core Desktop 0.18.311;
+      // review-desktop-r5): a stranger's dust or worthless token is told apart from a buyer's real payment made without the proof
+      const token = !c.tokenid || c.tokenid === MINIMA_TOKEN ? "Minima" : String(c.tokenid);
+      if (!o) { for (const u of pay.unproven) store.noteNoProof(u.ref, noProof(String(id), String(coinAmount(c)), token)); return ""; }   // not marked seen: the order it proves may still be read
       seenPayCoins.add(id);
       if (o.paid) return "";
       // a payment older than its order never pays it automatically (0.19.339, as released 0.18.285): held for a check by hand, the coin id whole
@@ -483,7 +486,7 @@ const OLDER_PAYMENT = "a payment with this order's reference is older than the o
 // this vendor, so a copier who puts a payment's reference in an order of their own cannot make that payment theirs, whatever order the coins
 // arrive in. Only the proof is kept on an order; the secret is never stored or logged.
 const NO_PROOF = "a payment with this order's reference does not carry this order's proof";
-const noProof = (coin) => "a payment with this order's reference does not carry this order's proof (payment coin " + coin + "): check by hand";
+const noProof = (coin, amount, token) => "a payment with this order's reference does not carry this order's proof (payment coin " + coin + ", amount " + amount + ", token " + token + "): check by hand";
 const BAD_SECRET = "this order's secret cannot be read, so no payment can be proved to be its buyer's: check by hand";
 function proofOf(secret) {
   if (typeof secret !== "string" || secret.length !== 66 || !/^0x[0-9a-fA-F]{64}$/.test(secret)) return "";

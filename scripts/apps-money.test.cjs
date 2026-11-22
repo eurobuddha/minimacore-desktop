@@ -411,7 +411,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // both again in 0.19.362 (the review's nits)
   // main/shop.js again in 0.19.366 (review-desktop-r5 N1: the newcomer's note)
   // main/shop-store.js again in 0.19.367 (review-desktop-r5 R6: a coin given up on and counted after all)
-  for (const [f, want, ver] of [["main/shop.js", "00aa197f02b5fa90a88acb81f585a20616e3fd3b504e478dd4ae85584c7a1235", "0.19.366"], ["main/shop-store.js", "5c3b74090b25e49b14d63fa88b0c50278cd9974806007f115a149b23c9ddf648", "0.19.367"],
+  // both again in 0.19.368 (review-desktop-r5: the no-proof note's amount and token; a paid order drops its note)
+  for (const [f, want, ver] of [["main/shop.js", "fecf903566044fb2fddb079ee706f5920489112f0ef88ff905d8a24af5f842b3", "0.19.368"], ["main/shop-store.js", "27cb8df36d6adf475670a14f0a933fb7c58ad7512add9142e4a21bf6f4e60f9f", "0.19.368"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

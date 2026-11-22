@@ -229,6 +229,10 @@ function remainingOf(o) {
 function judge(o) {
   const outcome = o.problems.length ? "UNCHECKED" : !payableTotal(o.due) ? "BAD_TOTAL" : decGte(o.paidAmount, o.due) ? "PAID" : "UNDERPAID";
   if (outcome === "PAID") { o.paid = true; o.settled = false; }   // settles from here (0.19.358: settleBlock, latchSettled)
+  // paid in full by its proved coins (0.19.368, as Minima Core Desktop 0.18.311; review-desktop-r5): its note (a coin without its proof, or another order
+  // with its reference) is dropped, since a note says "check by hand" and a paid order has nothing left to check. Notes are only ever on orders with
+  // a secret, which only proved coins pay.
+  if (outcome === "PAID" && o.commit) delete o.notes;
   if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+
   return outcome;
 }
@@ -325,11 +329,11 @@ function handCheck(ref) {
   o.handChecked = true; if (hold) o.checkedUntil = hold; flush(); return true;
 }
 /** A coin with this order's reference that does not carry its proof and pays no order (0.19.359, as released 0.18.305): a note for the vendor,
- *  kept on the order and shown, at most one (the first coin's id whole). It holds nothing (not a problem: what is due, the status and whether
+ *  kept on the order and shown, at most one (the first coin's id, amount and token id whole; 0.19.368: up to 600 characters, so no id in it is cut). It holds nothing (not a problem: what is due, the status and whether
  *  it may advance are as without it); an unpaid order with one can be checked by hand. Not on an order already paid. */
 function noteNoProof(ref, note) {
   ensureLoaded(); const o = order(ref); if (!o || o.role !== "sell" || o.paid || (Array.isArray(o.notes) && o.notes.length)) return false;
-  o.notes = [String(note).slice(0, 300)]; flush(); return true;
+  o.notes = [String(note).slice(0, 600)]; flush(); return true;
 }
 /** Settling (0.19.354, as released 0.18.300). A payment is counted the first time it is read (as released 0.18.286), but an order paid without a
  *  proof of its secret (no secret, or stored before 0.19.352) may be a copier's, paid by another buyer's coin whose real order is mined up to 3
