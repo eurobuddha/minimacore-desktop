@@ -284,7 +284,7 @@ function routeIncoming(w, fromPublicId, coinBlock) {
     // the sealed box's signer (opened.fromPublicId, and w.from must equal it): a copier signs with their own key, so their coin with this reference
     // is a second buyer's order below and never moves this one's block.
     if (prior && prior.role === "sell" && prior.counterparty === fromPublicId && prior.orderBlock && Number.isSafeInteger(coinBlock) && coinBlock > 0 && coinBlock < prior.orderBlock) { prior.orderBlock = coinBlock; store.flush(); }
-    let ref = w.ref, wireRef;
+    let ref = w.ref, wireRef, notes;
     if (prior && prior.counterparty !== fromPublicId) {
       if (store.order(dupKey(w.ref, fromPublicId))) return;   // this buyer's copy is already kept
       const DUP = "another buyer sent an order with the same reference " + w.ref + ": a payment with it cannot be told apart, so check both orders by hand";
@@ -297,6 +297,11 @@ function routeIncoming(w, fromPublicId, coinBlock) {
       const others = store.refOrders(w.ref), clash = !!proof && others.some(x => x.commit === proof);
       for (const x of others) if (x.commit ? clash && x.commit === proof : !(proof && x.paid && x.noSecret)) store.flagDuplicate(x.ref, DUP, coinBlock);   // its block: an order checked by hand while settling (0.19.361)
       if (!proof || clash) problems.unshift(DUP);
+      // 0.19.366 (as Minima Core Desktop 0.18.309; review-desktop-r5 N1): that newcomer was kept silent (PENDING, nothing said, no check by hand), so
+      // when its buyer paid outside the app without the proof, that coin paid the other order and the vendor could neither see the clash nor act on
+      // the real order. It carries the same sentence as ONE note: a note holds nothing (its proved coin still pays it), and an unpaid order with a
+      // note can be checked by hand.
+      else if (others.some(x => !x.commit && x.paid && x.noSecret)) notes = [DUP];
       wireRef = w.ref; ref = dupKey(w.ref, fromPublicId);
     }
     const isNew = store.upsertOrder({ ref, wireRef, role: "sell", counterparty: fromPublicId, buyerName: txt(w.fromname, 64),
@@ -304,7 +309,7 @@ function routeIncoming(w, fromPublicId, coinBlock) {
       due: problems.length ? "" : chk.due, problems, currency: tokenid === MXUSD_TOKEN ? "USDT" : "Minima",
       tokenid, shipping, delivery: txt(w.delivery, 500), buyerPayaddr: txt(w.buyerPayaddr, 90),
       status: w.type === T.INQUIRY ? "INQUIRY" : problems.length ? "UNCHECKED" : "PENDING", paid: false, date: when(w.date), unread: true, note: txt(w.message, 1000),
-      ...(proof ? { commit: proof } : { noSecret: true }),
+      ...(proof ? { commit: proof } : { noSecret: true }), ...(notes ? { notes } : {}),
       ...(Number.isSafeInteger(coinBlock) && coinBlock > 0 ? { orderBlock: coinBlock } : {}) });   // when the order reached the chain (0.19.339): see PAY_BEFORE_ORDER
     if (isNew) emitter.emit("incoming", { ref, shopName: own.shopName, amount: problems.length ? "" : chk.due, currency: tokenid === MXUSD_TOKEN ? "MxUSD" : "Minima" });
   } else if (w.type === T.STATUS_UPDATE) {

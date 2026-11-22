@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.366] — miniMall: a newcomer with a secret that leaves a paid order without one as it is says so in a note (as Minima Core Desktop 0.18.309)
+
+- Since 0.19.360 a second buyer's order WITH a secret leaves a PAID order without one as it is. That newcomer was kept silent: PENDING, nothing said, and a check by hand was refused (review-desktop-r5 N1). When its buyer had paid outside the app without the proof, that coin paid the other order, and the vendor could neither see the clash nor act on the real order (the released app put the duplicate problem on it, so it could be checked by hand). It now carries the duplicate sentence as ONE note: "another buyer sent an order with the same reference …: a payment with it cannot be told apart, so check both orders by hand" (said in zh / ru / uk as the problem already is). A note holds nothing (its own proved coin still pays it), and an unpaid order with a note can be checked by hand.
+- main/shop.js changes: its pin in scripts/apps-money.test.cjs is updated on purpose.
+- Tests (scripts/shop-store-test.cjs): N1 (the real order shows the note, can be checked by hand, and is still paid by its own proved coin); N1b (paid by its own proved coin: no note, the copier's order held as before); S5's newcomer now carries the note (changed on purpose). N1 and S5 fail on 0.19.365.
+
 ## [0.19.365] — Dexicon lanes test: the limit part waits for at least the two stuck posts, not for exactly two
 
 - A third race in the same test, seen once in the 30-run stress of 0.19.364 (two copies of the suite at once): the limit part waited for exactly 2 posts at the stand-in network. That is true only from the second stuck post's arrival until the host's 400 ms limit frees a place and "after" goes out (then 3 are held, since the stand-in never answers the stuck ones); a poll starved past that window never saw 2 and timed out after 8 s ("timed out waiting for: () => net.held.length === 2"). It now waits until both stuck posts have reached the network (2 or more held); the timing check of 0.19.364 is unchanged. With the test's first poll made 500 ms late, 0.19.364's test times out and this one passes. Nothing in the app changes.
