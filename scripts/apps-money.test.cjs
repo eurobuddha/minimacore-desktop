@@ -218,7 +218,7 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "vestr.js"), "utf8");
   assert.equal(require("crypto").createHash("sha256").update(vestr.CLEAN_SCRIPT).digest("hex"), "ec2dfe508c24ea1c46431a3629ac391ffdeb03f8bcb7c107d52e004b48f6fb11", "the covenant text");
   assert.equal(vestr.CONTRACT, "0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE");
-  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "768442755e0c0325e93bb6b4834f1e56b6bd343e9c5241ee2106b8c8b56b6e1e", "main/vestr.js is the file of 0.19.343 (changed on purpose: 0.19.343 a collect's change is the coin less the payout, exactly, never the script's change, and nothing is built within the grace wait or for a payout above the coin; 0.19.194 oneCommand, 0.19.196 a password with ; refused, 0.19.239 chain state checked before commands, status true at each step, an unanswered post or lock may have gone, exact units, grace a whole number; before that, of 0.19.107)");
+  assert.equal(require("crypto").createHash("sha256").update(src).digest("hex"), "4e3b1ca12c47c1dcf64a3db58a0605dbca3ac7e651397d4914ef761dae1a004d", "main/vestr.js is the file of 0.19.347 (changed on purpose: 0.19.347 checkmempool on both reads, a coin collected in this session refused while listed, txncheck before txnpost, refusals in the order shape / tip / nothing available / grace, the grace counted at the tip, decSub \"\" when unreadable; 0.19.343 a collect's change is the coin less the payout, exactly, never the script's change, and nothing is built within the grace wait or for a payout above the coin; 0.19.194 oneCommand, 0.19.196 a password with ; refused, 0.19.239 chain state checked before commands, status true at each step, an unanswered post or lock may have gone, exact units, grace a whole number; before that, of 0.19.107)");
   const state = [[0, BEN], [1, "1000"], [2, "2400000"], [3, "2555520"], [4, "1728"], [5, "1"], [6, "2"], [7, "24"], [8, "3"], [199, "0xUID"]].map(([port, data]) => ({ port, data }));
   const reg = createRegistry({ now: () => 1e12, log: () => {}, sends: "enforce" });
   // another owner holds an unrelated wallet coin: the guard is awake, and still passes every Vestr command unchanged
@@ -231,8 +231,11 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
       if (c.startsWith("coins coinid:")) return { status: true, response: [{ coinid: COIN, tokenid: "0x00", amount: "875.5", created: "2400100", address: vestr.CONTRACT, state }] };
       if (c === "block") return { status: true, response: { block: "2428094" } };
       if (c.startsWith("runscript")) return { status: true, response: { variables: { cancollect: "12.5", change: "863" } } };
+      if (c.startsWith("txncheck")) return { status: true, response: { validtransaction: true } };   // changed on purpose (0.19.347)
+      if (c.startsWith("coins address:")) return { status: true, response: [] };
       return { status: true, response: {} };
     }));
+    await vestr.list();   // changed on purpose (0.19.347): forgets the coin the previous run collected (no longer listed)
     const r = await vestr.collect(COIN, burn);
     assert.deepEqual(r, { ok: true, collected: "12.5", tokenid: "0x00" });
     return sent.filter(c => /^txn/.test(c));
@@ -241,7 +244,7 @@ test("Vestr, main process (untouched): the collect commands, in order; which of 
   await assert.rejects(vestr.collect(COIN, "0"), /Invalid burn amount/, "what the old screen sent when the fee was left alone: refused, so nothing was collected");
   assert.deepEqual(plain, ["txncreate id:" + id, "txninput id:" + id + " coinid:" + COIN + " scriptmmr:true",
     "txnoutput id:" + id + " address:" + BEN + " amount:12.5 tokenid:0x00 storestate:false", "txnoutput id:" + id + " address:" + vestr.CONTRACT + " amount:863 tokenid:0x00 storestate:true",
-    ...state.map(s => "txnstate id:" + id + " port:" + s.port + " value:" + s.data), "txnpost id:" + id, "txndelete id:" + id]);
+    ...state.map(s => "txnstate id:" + id + " port:" + s.port + " value:" + s.data), "txncheck id:" + id, "txnpost id:" + id, "txndelete id:" + id]);
   assert.deepEqual(plain.filter(c => SIGNING.test(c)), [], "a collect with no fee signs nothing (the covenant needs no signature): nothing waits in the signing queue");
   const burned = await run("0.01");
   assert.deepEqual(burned.filter(c => SIGNING.test(c)).map(c => c.replace(/vc\d+/, "ID")), ["txnpost id:ID burn:0.01"], "a fee is a signed burn: that post is queued behind every other signer");

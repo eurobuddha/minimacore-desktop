@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.347] — Vestr: no second collect of a coin being collected; the node judges every collect before it is posted (as released 0.18.291 / 0.18.292)
+
+- Both reads of contract coins send `checkmempool:true` (the node then leaves out a coin it is mining a transaction for or that a mempool transaction spends), and a coin collected in this session is refused again while the node still lists it: "This contract coin was collected a moment ago and the node still lists it. Wait until it is gone from the list before you collect again. Nothing was sent."
+- `txncheck` runs after the build and before `txnpost`; the collect is posted only when it answers status true with `response.validtransaction` the boolean true (as the phone's Vestr), otherwise "The node checked this collect and judged it invalid, so it was not sent. Nothing was collected."
+- Refusals in the order: the coin's shape (states 2, 3 and 4 must be plain numbers, the created block a whole number: a malformed grace or end block read as no wait), the tip ("The node's block height could not be read, so nothing was built. Nothing was sent."), "Nothing available to collect yet", the grace wait. The grace wait is counted at the tip (refused while tip < final block and tip − created < the grace blocks): `txncheck` and the node's own relay check of a txpow it mined both run the script with `@BLOCK` = the tip, so a collect only the next block accepts never leaves the node. The list's Collect button reads the same figure (at coin age 0 it no longer offers a collect the app then refuses).
+- `decSub` gives "" for a figure it cannot read (it gave "0"); every use treats it as a refusal, and an unreadable "collected" is shown as nothing. zh / ru / uk for the three new sentences.
+
 ## [0.19.346] — miniMall: the released tree's behaviour where this tree differed unlisted; the shop test b5c9fbb lost is back; restoresync on a block wallet says what is true there
 
 - A payment coin whose judging threw is no longer kept as seen: the pass fails and the coin is judged on the next pass (it was caught, logged and marked seen, so it was never counted in that session). A payout address whose read threw no longer keeps the other addresses' payments from being judged in that pass (each read is caught on its own; the pass still counts as failed). A "may not have been read" notice stored with no cause says "Orders and payments older than block N may not have been read: the node keeps only its recent blocks." (it said the reply cap's sentence). All three as released (minimaCore Desktop 0.18 tree); zh / ru / uk for the new sentence.
