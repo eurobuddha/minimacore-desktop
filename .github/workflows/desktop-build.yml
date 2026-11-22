@@ -89,6 +89,10 @@ jobs:
       - name: Verify no command injection
         run: npm run test:inject
 
+      # A file the node is told to read (a backup, a MegaMMR file): chosen in the open dialog, checked, quoted; one command, no password echoed.
+      - name: Verify file import
+        run: npm run test:import
+
       # Keets chat: the wire schema, the file transfer port and the peer-string caps (as released 0.18.182).
       - name: Verify chat
         run: npm run test:chat

@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld("mcd", {
   keyMode: () => ipcRenderer.invoke("mcd:keyMode"),
   recordKeyMode: (mode) => ipcRenderer.invoke("mcd:recordKeyMode", mode),
   restoreBackup: (o) => ipcRenderer.invoke("mcd:restoreBackup", o),
+  // a backup (.bak) or a MegaMMR file chosen in the system's open dialog: { path, size } or null; the path is only shown and given back
+  pickImport: (kind) => ipcRenderer.invoke("mcd:pickImport", kind),
+  importMegammr: (file) => ipcRenderer.invoke("mcd:importMegammr", file),
   copyRpcPassword: () => ipcRenderer.invoke("mcd:copyRpcPassword"),
 
   // language: the saved (or the system's) language as a plain string, known before the first screen is drawn; langSet saves a pick

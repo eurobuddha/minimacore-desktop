@@ -335,9 +335,30 @@ node.onEnginesHold = async () => { await Promise.all([dexicon.hold(), atomix.hol
 // posted action is recorded by the engine that posted it. Each wait is bounded (Dexicon: main/dexicon.js STOP DRAINS).
 node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandapools.quiet(10000)]);
 node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
+// A file the node is told to read (main/importfile.js): only one the user chose in the system's open dialog, kept here, never copied.
+const importfile = require("./importfile");
+const nodeKeepsMegammr = async () => { const st = await rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "status").catch(() => null); return !!(st && st.response && st.response.megammr); };
+const imports = importfile.create({ platform: process.platform, t: (s) => (currentLang(), lang.t(s)), defaultPath: () => config.load().dataFolder || config.defaultDataFolder(),
+  showOpen: (o) => dialog.showOpenDialog(win, o) });
+ipcMain.handle("mcd:pickImport", async (_e, kind) => {
+  requireRunning();
+  if (kind === "megammr" && !await nodeKeepsMegammr()) throw new Error(importfile.NEEDS_MEGAMMR);   // asked before the dialog (megammr.java: "MegaMMR not enabled")
+  return imports.pick(kind === "megammr" ? "megammr" : "backup");
+});
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
-ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(),
+ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(), picked: (shown) => imports.confirm("backup", shown),
   running: node.state === "running", run: async (c) => { await mayStop(); return held(() => runResync(c)); }, work: walletWork }));   // the stop guard right before the node gets it (0.19.294)
+// Resync from a MegaMMR FILE: `megammr action:import file:` (core/minima-core megammr.java: a node that keeps the MegaMMR only). The chain is
+// replaced and the wallet's own coins read again from the file; the wallet is not. It ends by stopping the node: run as a resync
+// (node-manager runResync starts it again), after the same stop guard as every stop.
+ipcMain.handle("mcd:importMegammr", async (_e, shown) => {
+  requireRunning();
+  if (!await nodeKeepsMegammr()) throw new Error(importfile.NEEDS_MEGAMMR);
+  const cmd = importfile.megammrImportCommand(imports.confirm("megammr", shown), process.platform);
+  await mayStop();
+  const j = await held(() => runResync(cmd));
+  return j && j.error ? { status: j.status === true, error: String(j.error) } : { status: !!(j && j.status === true) };
+});
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });

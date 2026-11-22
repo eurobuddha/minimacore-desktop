@@ -529,7 +529,7 @@ function ipcError(e) { return MainSaid.say(ipcRaw(e)); }
 // ---- Backup & Recovery (the phone's BackupActivity hub, over the backup, resync, restore and vault commands
 // the Settings cards ran). One view; BK_PAGE says which of the phone's screens it shows ("" = the hub).
 let BK_PAGE = "";
-const BK_TITLE = { "": N_("Backup & Recovery"), create: N_("Create backup"), restore: N_("Restore from file"), resync: N_("Resync node"), keys: N_("Private keys") };   // translated where shown
+const BK_TITLE = { "": N_("Backup & Recovery"), create: N_("Create backup"), restore: N_("Restore from file"), megafile: N_("Resync from a MegaMMR file"), resync: N_("Resync node"), keys: N_("Private keys") };   // translated where shown
 function bkOpen(page) { BK_PAGE = page; el("barPage").textContent = t(BK_TITLE[page]); el("main").scrollTop = 0; renderBackup(); }
 /**
  * megammrsync, built in ONE place for every screen that runs it (chain resync, rebuild from a phrase, the
@@ -597,6 +597,7 @@ function renderBackup() {
       ["chat", t("Chat backup"), t("Save or restore your keets chat address, contacts and messages.")],
       ["mail", t("Mail backup"), t("Save or restore your MinimaMail identity, contacts and messages.")],
       ["resync", t("Resync node"), t("Rebuild this node's chain from a MegaMMR node. Your wallet and seed phrase are not touched.")],
+      ["megafile", t("Resync from a MegaMMR file"), t("Rebuild this node's chain from a MegaMMR file on this computer. Your wallet and seed phrase are not touched.")],
       ["keys", t("Private keys"), t("Seed phrase, or rebuild this wallet from a phrase.")]];
     host.innerHTML = head(t("Backup & Recovery"), t("Save a copy of this node, put it back, or rebuild it from another node.")) + (running ? "" : stopped) +
       `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
@@ -651,6 +652,14 @@ function renderBackup() {
     } catch (e) { st.textContent = t("{label} not completed. {e}", { label: label, e: ipcError(e) }); btn.disabled = false; btn.textContent = btn.dataset.label; }
   };
   const hostField = field("bkHost", t("MegaMMR node"), `value="${esc(CFG.megammrHost)}"`);
+  // A file for the node: chosen in the system's own open dialog by the main process (main/importfile.js), which keeps the path and
+  // runs only on that one. Shown here in full; nothing typed here is ever a path.
+  const filePick = (label) => `<div class="eyebrow ps-label">${esc(label)}</div><div class="bk-mono" id="bkFile">${th("No file chosen")}</div><button class="btn btn--outline ps-btn" id="bkPick">${th("Choose…")}</button>`;
+  let chosen = "";
+  const wirePick = (kind) => { $("bkPick").onclick = async () => {
+    try { const r = await api.pickImport(kind); if (!r) return; chosen = r.path; $("bkFile").textContent = r.path; $("bkStatus").textContent = ""; }
+    catch (e) { chosen = ""; $("bkFile").textContent = t("No file chosen"); $("bkStatus").textContent = ipcError(e); }
+  }; };
   const built = (o) => Object.assign(resyncCommand(o), { host: String(o.host || "").trim() });
 
   if (BK_PAGE === "resync") {
@@ -663,16 +672,26 @@ function renderBackup() {
 
   if (BK_PAGE === "restore") {
     host.innerHTML = head(t("Restore from file"), t("Replaces this node's wallet and chain with the contents of a backup, then catches up to the chain tip from a MegaMMR node.")) +
-      field("bkFile", t("Backup file"), `placeholder="${th("a .bak file in the node folder, or its full path")}"`) +
+      filePick(t("Backup file")) +
       field("bkFilePw", t("Backup password"), `type="password" placeholder="${th("the password used when it was made")}"`) + backupModeQuestionHtml() + hostField +
       `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Restore this node")}">${th("Restore this node")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
-    wireModeQuestion(host);
-    $("bkGo").onclick = async () => { const f = $("bkFile").value.trim(), picked = host.querySelector('.modeq .opt[aria-checked="true"]');
+    wireModeQuestion(host); wirePick("backup");
+    $("bkGo").onclick = async () => { const f = chosen, picked = host.querySelector('.modeq .opt[aria-checked="true"]');
       const o = { host: $("bkHost").value.trim(), file: f, password: $("bkFilePw").value, mode: picked ? picked.dataset.mode : "" };
       // The main process checks the backup's key mode and builds the command; a refusal comes before the question below.
       try { $("bkStatus").textContent = ""; await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { if (!await offerWithoutDexicon(e)) { $("bkStatus").textContent = ipcError(e); return; } }
       run("bkGo", t("Restore"), { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, t("Replace this node?"),
       t("Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", { f: f }), t("Restore")); };
+    return;
+  }
+
+  if (BK_PAGE === "megafile") {
+    host.innerHTML = head(t("Resync from a MegaMMR file"), t("Rebuild this node's chain from a MegaMMR file on this computer. Your wallet and seed phrase are not touched.")) + filePick(t("MegaMMR file")) +
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Import")}">${th("Import")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
+    wirePick("megammr");
+    $("bkGo").onclick = () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
+      run("bkGo", t("Import"), { host: CFG.megammrHost, exec: () => api.importMegammr(f) }, t("Import this MegaMMR file?"),
+      t("Minima will replace this node's chain with the one in {f}, then restart.\n\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• A large file needs a lot of memory (Settings, Parlons Node memory). If the import stops part way, resync the node from a MegaMMR node (Resync node).", { f: f }), t("Import")); };
     return;
   }
 

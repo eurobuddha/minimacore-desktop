@@ -65,7 +65,7 @@ test("the RPC password goes from the main process to the clipboard and is never 
 test("Backup & Recovery: the phone's hub rows, in its order, with Mail backup after Chat backup", () => {
   assert.ok(html.includes('id="view-backup"') && /SUB_TITLE = \{[^}]*backup: "Backup & Recovery"/.test(app));
   const rows = [...source("renderBackup").matchAll(/\["([a-z]+)", "([^"]+)", "/g)].map(m => m[1] + "=" + m[2]);
-  assert.deepEqual(rows, ["create=Create backup", "restore=Restore from file", "chat=Chat backup", "mail=Mail backup", "resync=Resync node", "keys=Private keys"]);
+  assert.deepEqual(rows, ["create=Create backup", "restore=Restore from file", "chat=Chat backup", "mail=Mail backup", "resync=Resync node", "megafile=Resync from a MegaMMR file", "keys=Private keys"]);   // 0.19.386: Resync from a MegaMMR file, after the resync from a node
   assert.ok(!/setBackup|setResync|setReveal|setRestore|showRestoreOverlay/.test(app), "the Settings cards and the restore dialog are gone: one home for each operation");
 });
 

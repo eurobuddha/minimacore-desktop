@@ -36,6 +36,8 @@ const RESYNC_TIMEOUT_MS = 60 * 60 * 1000;
 function timeoutFor(command) {   // the verb read as the node reads it, in every piece of a chain (main/cmdverb.js, 0.19.190, as released 0.18.175)
   const ps = V.parts(command);
   if (ps.some(part => V.is(part, "megammrsync") && V.fold(V.paramValue(part, "action") || "") === "resync")) return RESYNC_TIMEOUT_MS;
+  // megammr action:import reads a whole MegaMMR file (1.6 GB for the mainnet one) in batches of 256 blocks, each allowed 10 minutes (megammr.java)
+  if (ps.some(part => V.is(part, "megammr") && V.fold(V.paramValue(part, "action") || "") === "import")) return RESYNC_TIMEOUT_MS;
   return ps.some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 

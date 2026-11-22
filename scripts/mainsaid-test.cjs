@@ -87,6 +87,7 @@ test("Restoring a backup and replacing the wallet: every refusal, every line of 
     const skipped = r.activeWorkList(Object.assign({ skipDexicon: true }, w)); if (skipped.length) check(r.activeWorkProblem(skipped));
   }
   check(r.skipWarning(r.activeWorkList({ atomix: { ready: true }, pools: [], dexicon: null })));   // Dexicon alone: its own text
+  check(r.withoutPassword({ status: false, error: "Error restoring.. the password pw1x was refused" }, "pw1x").error);   // a refusal that still names the password
   for (const c of MS.codes().filter(c => /^(RESTORE|REPLACE|RP|NO_WALLET|BACKUP|COUNT)_/.test(c))) assert.ok(seen.has(c), "never said by main/restore.js: " + c);
 });
 
@@ -229,4 +230,17 @@ test("ETH Wallet, miniMall, Vestr, Web Wallet, Faucet, Explorer, KeyUses, update
   const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8"), tools = fs.readFileSync(path.join(__dirname, "..", "renderer", "apps-tools.js"), "utf8");
   assert.ok(app.includes('MainSaid.has(r.raw || "", "EW_CANCELLED") ? t("Cancelled") : r.err') && !/\/cancel\/i\.test/.test(app), "the key export decides by code");
   assert.ok(app.includes("error: MainSaid.say(u.error)") && tools.includes("esc(MainSaid.say(s.error))"));
+});
+
+test("A file the node is told to read (main/importfile.js): every refusal, said in each language", async () => {
+  const F = require("../main/importfile.js"), fs = require("fs"), os = require("os"), path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pd-import-said-")), f = (n, size) => { const p = path.join(dir, n); fs.writeFileSync(p, Buffer.alloc(size)); return p; };
+  try {
+    const why = (kind, p) => { try { F.check(kind, p, fs); } catch (e) { return e.message; } assert.fail("expected a refusal: " + p); };
+    check(F.pathProblem("/a;b.bak", "darwin")); check(why("backup", dir)); check(why("backup", path.join(dir, "missing.bak")));
+    check(why("backup", f("a.txt", 100))); check(why("backup", f("b.bak", 3))); check(why("megammr", f("c.bak", 5000))); check(why("megammr", f("d.mmr", 10)));
+    check(F.KINDS.backup.large); check(F.NEEDS_MEGAMMR);
+    check(await rejected(Promise.resolve().then(() => F.create({ fs, showOpen: async () => ({ canceled: true }) }).confirm("backup", "/x.bak"))));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  for (const c of MS.codes().filter(c => /^IMPORT_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js: " + c);
 });

@@ -45,6 +45,7 @@ function createNodeLog(dir, opts) {
  *  - a seed phrase: phrase:"…", "phrase":"…" as a reply's JSON has it, and phrase: followed by bare words (up to 24;
  *    a word that is the next parameter's name, as in "host:", ends it, so the rest of the line stays);
  *  - a private key after privatekey:;
+ *  - a password: or confirm: value, also as a reply's JSON echoes it ("password":"…": a refused megammrsync file: names the inner restore's params);
  *  - the "seed", "seedphrase", "mnemonic" and "privatekey" fields of a reply's JSON (0.19.172: `vault` answers with the
  *    wallet's seed as "seed", which the phrase rule did not cover; 0.19.175: the other two names, as the released 0.18.169);
  *  - the bidirectional controls (U+202A to U+202E, U+2066 to U+2069, U+200E, U+200F): a line a remote party wrote
@@ -60,7 +61,7 @@ function scrub(line, secret) {
     .replace(/phrase(?::|[ \t]+:[ \t]*)[A-Za-z]+\b(?![ \t]*:)(?: [A-Za-z]+\b(?![ \t]*:)){0,23}/g, "phrase:•••")   // "phrase: none given" (prose) is not one
     .replace(/privatekey[ \t]*:[ \t]*"?(?:0x[0-9A-Fa-f]+|M[xX][0-9A-Za-z]+)"?/gi, "privatekey:•••")   // an Mx form too (0.19.302: getAddressParam takes it)
     .replace(/\b(password|confirm|seed)[ \t]*:[ \t]*(?:"[^"]*"|[^\s"]+)/gi, "$1:•••")   // a command's password:, confirm:, seed: (0.19.292)
-    .replace(/"(phrase|seed|seedphrase|mnemonic|privatekey|seedrandom)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');   // any letter case (0.19.197: "phrase" too, as released 0.18.179)   // any letter case (0.19.197: "phrase" too, as released 0.18.179)
+    .replace(/"(phrase|seed|seedphrase|mnemonic|privatekey|seedrandom|password|confirm)"\s*:\s*"[^"]*"/gi, (m, k) => '"' + k + '":"•••"');   // any letter case (0.19.197: "phrase" too, as released 0.18.179)   // any letter case (0.19.197: "phrase" too, as released 0.18.179)
 }
 
 /**

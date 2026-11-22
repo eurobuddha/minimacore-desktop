@@ -30,17 +30,21 @@ function backupModeProblem(picked, recorded, supported) {
   return "";
 }
 
-/** megammrsync for a backup file, or { error }. The node's command parser has no escape character, so refusing a value is the only defence. */
+/** megammrsync for a backup file, or { error }. The node's command parser has no escape character, so refusing a value is the only defence.
+ *  o.picked: the file is a path the main process took from the system's open dialog (main/importfile.js): it goes in double quotes,
+ *  so a space is fine, and every character the node would read otherwise is refused there. */
 function restoreFileCommand(o) {
   const host = String((o && o.host) || "").trim(), file = String((o && o.file) || "").trim(), password = String((o && o.password) || "");
   if (!/^[\w.\-]+:\d+$/.test(host)) return { error: "MegaMMR host must be host:port." };
   if (!file) return { error: "Enter the backup file's name or path." };
-  if (/[\s"\\]/.test(file)) return { error: "File path can't contain spaces or quotes." };
+  const picked = !!(o && o.picked) && !require("./importfile").pathProblem(file);
+  if (o && o.picked && !picked) return { error: require("./importfile").BAD_PATH };
+  if (!picked && /[\s"\\]/.test(file)) return { error: "File path can't contain spaces or quotes." };
   if (/[\s"\\]/.test(password)) return { error: "Password can't contain spaces or quotes." };
   // The node reads ; as the end of a command: the rest of the value would be run as a second command and the restore would fail on half a name.
   if (file.includes(";")) return { error: "The file path contains a semicolon (;), which the node reads as the end of the command. Rename the file or move it, then try again." };
   if (password.includes(";")) return { error: "The password contains a semicolon (;), which the node reads as the end of the command, so this app cannot pass it. Restore this backup from the node's own command line." };
-  let cmd = `megammrsync action:resync host:${host} file:${file}`;
+  let cmd = `megammrsync action:resync host:${host} file:${picked ? '"' + file + '"' : file}`;
   if (password) cmd += ` password:${password}`;
   return { cmd };
 }
@@ -285,14 +289,29 @@ async function restoreBackup(o, d) {
   o = o || {};
   const why = backupModeProblem(o.mode, d.keyMode, d.supported);
   if (why) throw new Error(why);
+  // d.picked (main.js): the file is the one the user chose in the open dialog, checked again; the window's own text is never a path
+  if (d.picked) o = Object.assign({}, o, { file: d.picked(o.file), picked: true });
   const built = restoreFileCommand(o);
   if (built.error) throw new Error(built.error);
   if (!d.running) throw new Error("The node is not running. Start the node before restoring.");
   const open = activeWorkProblem(await d.work());
   if (open) throw new Error(open);
   if (o.check) return { ok: true };
-  return d.run(built.cmd);
+  return withoutPassword(await d.run(built.cmd), o.password);
+}
+/**
+ * What the window is told of a restore: its status and the node's reason, never the password. The node echoes every parameter
+ * (Command.getJSONReply), and megammrsync's refusal carries the inner restore's whole reply, password and all ("Error restoring.. " +
+ * result.toJSONString(), core/minima-core megammrsync.java): only that reply's own error is kept from it.
+ */
+function withoutPassword(j, password) {
+  if (!j || typeof j !== "object") return j;
+  let error = j.error == null ? "" : String(j.error);
+  const inner = /\{[\s\S]*\}/.exec(error);
+  if (inner) { let why = ""; try { why = String(JSON.parse(inner[0]).error || ""); } catch (e) { /* not JSON: dropped whole */ } error = (error.slice(0, inner.index).trim() + " " + why).trim(); }
+  if (password && error.includes(password)) error = "The node refused the restore.";
+  return error ? { status: j.status === true, error } : { status: j.status === true };
 }
 
-module.exports = { keyusesProblem, namesKeyuses, KEYUSES_ONE_SIGNATURE, KEYUSES_SET, KEYUSES_ADD, KEYUSES_TIP_MARGIN, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+module.exports = { keyusesProblem, namesKeyuses, KEYUSES_ONE_SIGNATURE, KEYUSES_SET, KEYUSES_ADD, KEYUSES_TIP_MARGIN, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, withoutPassword, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
   onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };
