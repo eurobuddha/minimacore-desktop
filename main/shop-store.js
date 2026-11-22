@@ -295,8 +295,16 @@ function handCheck(ref) {
   // an order an older version counted money for can be checked by hand too, and one whose older verdict was kept but that is
   // not paid (0.18.218: confirmed by an older version without a payment, it could never move on)
   // and a paid order that is still settling (0.18.300)
-  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid) && !settleBlock(o)) return false;
+  // and an unpaid order with a note of a coin without its proof (0.18.304)
+  ensureChecked(o); if (!o.problems.length && !o.legacyPaid && !(o.legacyVerdict && !o.paid) && !settleBlock(o) && !(!o.paid && (o.notes || []).length)) return false;
   o.handChecked = true; flush(); return true;
+}
+/** A coin with this order's reference that does not carry its proof and pays no order (0.18.304): a note for the vendor, kept on the order and
+ *  shown, at most one (the first coin's id whole). It holds nothing (not a problem: what is due, the status and whether it may advance are as
+ *  without it); an unpaid order with one can be checked by hand. Not on an order already paid. */
+function noteNoProof(ref, note) {
+  ensureLoaded(); const o = order(ref); if (!o || o.role !== "sell" || o.paid || (Array.isArray(o.notes) && o.notes.length)) return false;
+  o.notes = [String(note).slice(0, 300)]; flush(); return true;
 }
 /** Settling (0.18.300). A payment is counted the first time it is read (as released 0.18.286), but an order paid without a proof of its secret
  *  (no secret, or stored before 0.18.297) may be a copier's, paid by another buyer's coin whose real order is mined up to 3 blocks after it.
@@ -341,7 +349,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 
 module.exports = {
   saveShop, shops, shop, deleteShop,
-  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, mayAdvance, settleBlock, setOrdersRead, latchSettled, ensureChecked,
+  upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, noteNoProof, mayAdvance, settleBlock, setOrdersRead, latchSettled, ensureChecked,
   addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
   _money: { decCmp, decGte, decAdd, decSub, payableTotal }, PENDING_MAX,
   _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }

@@ -2916,6 +2916,7 @@ async function renderShopOrderDetail(ref) {
   if (el("shopHandCheck")) el("shopHandCheck").onclick = async () => {
     const yes = await showConfirm("Checked by hand?", ((o.problems || []).length ? "This order does not match your shop:\n" + (o.problems || []).map(p => "• " + p).join("\n")
       : d.settling ? "Paid. Held until block " + d.settling.block + " in case another order with the same reference arrives."
+      : (o.notes || []).length && !o.paid ? "This order is not paid yet:\n" + o.notes.map(p => "• " + p).join("\n")   // a coin without its proof (0.18.304)
       : o.legacyVerdict && !o.legacyPaid ? "An older version of this app moved this order on (" + String(o.status).toLowerCase() + ") without a payment this version can see."
       : "An older version of this app recorded " + o.legacyPaid + " " + ShopRules.cur(o.currency) + " received for this order; the coins the node shows now come to " + (o.paidAmount || "0") + ".")
       + "\n\nThe buyer's total: " + o.amount + " " + ShopRules.cur(o.currency) + " (their own figure)\nReceived so far: " + (o.paidAmount || "0") + " " + ShopRules.cur(o.currency)
@@ -2935,10 +2936,13 @@ function shopCheckBlock(o) {
     return `<div class="shop-warn" style="margin-top:8px">An older version of this app moved this order on (${esc(String(o.status).toLowerCase())}) without a payment this version can see. Check it by hand to move it on.
       <button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button></div>`;   // 0.18.218
   }
+  // a coin with this order's reference and without its proof (0.18.304): a note, never a hold; an unpaid order with one can be checked by hand
+  const notes = (o.notes || []).length ? `<div class="shop-warn" style="margin-top:8px"><div style="white-space:pre-wrap;overflow-wrap:anywhere">${o.notes.map(p => "• " + esc(p)).join("\n")}</div>
+      ${o.paid || (o.problems || []).length || o.legacyPaid ? "" : o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>` : "";
   const legacy = o.legacyPaid && !o.paid ? `<div class="shop-warn" style="margin-top:8px">An older version of this app recorded ${esc(o.legacyPaid)} ${cur} received for this order. It is counted again from the coins the node still shows; if that is less, check the payment yourself.
       ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : (o.problems || []).length ? "" : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>` : "";
-  if (!(o.problems || []).length) return `<div class="row" style="justify-content:space-between;font-weight:700"><span>Due by your listing</span><span class="mono">${esc(o.due)} ${cur}</span></div>` + legacy;
-  return legacy + `<div class="shop-warn" style="margin-top:8px"><b>Unchecked: the items or total do not match your shop; check by hand.</b> It is never marked paid by the buyer's figure.
+  if (!(o.problems || []).length) return `<div class="row" style="justify-content:space-between;font-weight:700"><span>Due by your listing</span><span class="mono">${esc(o.due)} ${cur}</span></div>` + legacy + notes;
+  return legacy + notes + `<div class="shop-warn" style="margin-top:8px"><b>Unchecked: the items or total do not match your shop; check by hand.</b> It is never marked paid by the buyer's figure.
       <div style="white-space:pre-wrap;overflow-wrap:anywhere">${(o.problems || []).map(p => "• " + esc(p)).join("\n")}</div>
       ${o.handChecked ? `<div style="margin-top:6px">You checked this order by hand.</div>` : `<button class="btn btn--outline btn--full" id="shopHandCheck" style="margin-top:8px">I checked this order by hand</button>`}</div>`;
 }
