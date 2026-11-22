@@ -816,6 +816,65 @@ test("vendor: a payment said as waiting stays said when its payout address read 
   });
 });
 
+// ---- 0.19.349 (as released 0.18.294): orders are read before payments, and a payment is judged only when the orders that may go with it are
+// known read: a pass whose orders read failed judges no payment, and a coin below what a cut orders read reached waits for the read of that range ----
+const held2 = (copier, victim) => { for (const x of [copier, victim]) { assert.ok(x); assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); assert.equal(x.problems[0], DUPV, x.problems.join(" | ")); } };
+test("vendor: the orders read fails on the pass that would judge a payment: no payment is judged in that pass; the next good pass holds both orders", async () => {
+  await copyRig(async (st) => {
+    st.pay.push(jPay("ORD-V", 1010)); st.msg.push(atkOrder("ORD-V", 1011), jOrder("ORD-V", 1013, { coinid: "0xJOV" }));
+    await walkTo(st, 1001, 1012);
+    st.hook = (addr) => (addr === "M" ? "throw" : null); await walkTo(st, 1013, 1013);   // the real order is in block 1013, and the read of it fails
+    const o = store.order("ORD-V"); assert.equal(o.delivery, "COPIER"); assert.equal(o.paid, false, "not judged while the orders up to the tip are not read"); assert.equal(o.status, "PENDING");
+    assert.equal(store.mayAdvance(o), false); assert.equal(shop.scanState().readFailed, true);
+    st.hook = null; await walkTo(st, 1014, 1014);
+    held2(store.order("ORD-V"), store.order("ORD-V~" + BUYER)); assert.equal(store.order("ORD-V").paidAmount, "1.5", "counted once, on the order held under the reference");
+  });
+  // past the tree: the orders read as deep as the tree may hold fails, so the root read's payments wait for the next pass
+  await copyRig(async (st) => {
+    st.pay.push(jPay("ORD-V", 1474)); st.msg.push(jOrder("ORD-V", 1475, { coinid: "0xJOV" }), atkOrder("ORD-V", 1477));
+    st.hook = (addr, d) => (addr === "M" && d > 1024 ? "throw" : null); jTip(st, 2500); await shop.scanOnce();
+    assert.equal(store.order("ORD-V").delivery, "COPIER"); assert.equal(store.order("ORD-V").paid, false, "no payment judged after a failed orders read");
+    st.hook = null; jTip(st, 2501); await shop.scanOnce(); held2(store.order("ORD-V"), store.order("ORD-V~" + BUYER));
+  });
+});
+test("vendor: a cut orders read (window, step or past the tree): a payment below what it reached waits until the orders of its range are read; neither order is paid", async () => {
+  // the window (608 blocks) cut to 304 reaches block 1296: the copier's order in it, the payment and the real order just under it; the step fails once
+  await copyRig(async (st) => {
+    st.pay.push(jPay("ORD-V", 1294)); st.msg.push(atkOrder("ORD-V", 1296), jOrder("ORD-V", 1293, { coinid: "0xJOV" }));
+    let n = 0; st.hook = (addr) => { if (addr !== "M") return null; n++; return n === 1 ? CAPPED : n === 2 ? null : "throw"; };
+    jTip(st, 1600); await shop.scanOnce();
+    assert.equal(store.order("ORD-V").delivery, "COPIER"); assert.equal(Number(store.getMeta("backfill_floor_block")), 1296);
+    assert.equal(store.order("ORD-V").paid, false, "the payment waits: the orders of its range are not read"); assert.equal(store.order("ORD-V").status, "PENDING");
+    st.hook = null; jTip(st, 1601); await shop.scanOnce(); held2(store.order("ORD-V"), store.order("ORD-V~" + BUYER));
+  });
+  // a backfill step whose orders read is cut above the gap's target: the window (1008) cut to 252 (floor 1748), the step (764) cut to 382: it reaches 1618
+  await copyRig(async (st) => {
+    st.pay.push(jPay("ORD-V", 1616)); st.msg.push(atkOrder("ORD-V", 1618), jOrder("ORD-V", 1615, { coinid: "0xJOV" }));
+    let n = 0; st.hook = (addr, d) => { if (addr !== "M") return null; n++; return (n <= 3 && d > 256) || (n > 3 && d > 384) ? CAPPED : null; };
+    jTip(st, 2000); await shop.scanOnce();
+    assert.equal(Number(store.getMeta("backfill_floor_block")), 1618, "the step reached 1618"); assert.equal(store.order("ORD-V").delivery, "COPIER");
+    assert.equal(store.order("ORD-V").paid, false, "the payment at 1616 waits: the orders below 1618 are not read");
+    st.hook = null; jTip(st, 2001); await shop.scanOnce();
+    const c = store.order("ORD-V"), v = store.order("ORD-V~" + BUYER); assert.ok(v); for (const x of [c, v]) { assert.equal(x.paid, false); assert.equal(x.status, "UNCHECKED"); }
+  });
+  // a step that reaches the gap's target judges what it lists below it: those blocks' orders were read before the gap
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-E", 997)); jTip(st, 1001); await shop.scanOnce(); assert.ok(store.order("ORD-E")); st.pay.push(jPay("ORD-E", 998));
+    store.setMeta("scanned_tip_block", 1005); store.setMeta("backfill_target_block", 1000); store.setMeta("backfill_floor_block", 1004);
+    st.hook = (addr, d) => (addr === "M" && d > 7 ? CAPPED : null);   // the window served 4 blocks, the step (14) 7: it reaches 999
+    jTip(st, 1006); await shop.scanOnce();
+    assert.equal(Number(store.getMeta("backfill_target_block")), 0, "the backfill reached its target"); assert.equal(store.order("ORD-E").paid, true, "the payment at 998 is judged");
+  });
+  // past the tree: the orders read as deep as the tree may hold is cut on the first try and whole on the second
+  await copyRig(async (st) => {
+    st.pay.push(jPay("ORD-V", 1474)); st.msg.push(jOrder("ORD-V", 1475, { coinid: "0xJOV" }), atkOrder("ORD-V", 1477));
+    st.hook = (addr, d) => (addr === "M" && d > 1024 ? CAPPED : null); jTip(st, 2500); await shop.scanOnce();
+    assert.equal(store.order("ORD-V").delivery, "COPIER"); assert.equal(store.order("ORD-V").paid, false, "the root read's coin waits while the cut read is tried again");
+    assert.equal(Number(store.getMeta("backfill_stall")), 1);
+    st.hook = null; jTip(st, 2501); await shop.scanOnce(); held2(store.order("ORD-V"), store.order("ORD-V~" + BUYER)); assert.equal(store.order("ORD-V").paidAmount, "1.5");
+  });
+});
+
 // ---- 0.19.345 (as released 0.18.290): one "older than the order" problem per order and no write for a coin that changes nothing (2000 coins
 // made 2001 problems and 3001 rewrites); the same buyer's order sent again: its block is its oldest coin's, never a copier's ----
 test("vendor: 2000 old coins with an order's reference: one 'older than the order' problem, the first coin's id whole, and the writes bounded by the order's coin list", async () => {

@@ -397,7 +397,8 @@ test("miniMall screens: MxUSD on every label, the vendor's key whole, every mone
   // that meets a second buyer's order with its reference held again)
   // main/shop.js again in 0.19.348 (as released 0.18.293: a payment judged at tip block + 3, before the wallet can spend it; the waiting line
   // cleared only by a read of every payout address)
-  for (const [f, want, ver] of [["main/shop.js", "73a6aa6e5c74589cb93a51fd3838df3f664fad5d0d347d534f59de38c2a2395c", "0.19.348"], ["main/shop-store.js", "7aeb85dfbabb0d3c881f17d82e53da447c10edefc75d50da86742b7381959e2c", "0.19.345"],
+  // main/shop.js again in 0.19.349 (as released 0.18.294: no payment judged before the orders that may go with it are read; a failed orders read judges no payment)
+  for (const [f, want, ver] of [["main/shop.js", "c5047958c2cf15af67427450d3e8b3a0a30d1acd6a075a280447322ecc5834f2", "0.19.349"], ["main/shop-store.js", "7aeb85dfbabb0d3c881f17d82e53da447c10edefc75d50da86742b7381959e2c", "0.19.345"],
     ["main/shopcrypto.js", "a486120e618622ba75f4d6360428badb4a95504329bef0a031f9805c0cd72aec", "0.19.107"]]) assert.equal(sha(f), want, f + " is the file of " + ver);
 });
 

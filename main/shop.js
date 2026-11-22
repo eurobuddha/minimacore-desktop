@@ -348,7 +348,10 @@ const skipping = (a) => (skippedPay.get(a) || 0) > Date.now();
 // Payments are judged without a block floor (0.19.337, as released 0.18.282): a payment seen while its order (below a window or step boundary)
 // was still unknown was not counted then, and judging a coin again is idempotent (recordPayment: a counted coin id is never counted twice, a
 // paid order says ALREADY, dust is gathered by coin id, same-reference orders are never paid automatically). Orders keep the floor.
-async function scanPayments(depth, tip) {
+// Orders before payments (0.19.349, as released 0.18.294): a payment is judged only when the orders that may go with it (mined up to its block
+// + 3) are known read. `ordersFrom`: the oldest block from which every order up to the tip has been read, this pass or earlier; a coin from below
+// it waits, not judged and not marked seen (a later read of that range judges it). A pass whose orders read failed judges no payment.
+async function scanPayments(depth, tip, ordersFrom) {
   const addrs = payAddresses().filter(a => !skipping(a)); if (!addrs.length) return false;
   let listed = [], any = false;
   let missed = false;   // one payout address the node did not answer for: what was read is judged, but the pass is not covered (0.19.249)
@@ -375,6 +378,7 @@ async function scanPayments(depth, tip) {
       // order message was skipped for the rest of the session. It is read again on the next scan; the store counts it once.
       const o = store.order(ref); if (!o) return "";
       const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
+      if (known && pb < (ordersFrom || 0)) return "";   // its orders are not read yet (0.19.349)
       // not judged, not marked seen, until the tip reaches the allowance (0.19.344, as released 0.18.289; pb + 3 itself since 0.19.348): read again on a later pass
       if (o.role === "sell" && !o.paid && known && tip < pb + PAY_BEFORE_ORDER) { const w = waitingPay.get(ref); if (!w || tip >= w.block + PAY_BEFORE_ORDER) waitingPay.set(ref, { coin: String(id), block: pb }); return ""; }
       seenPayCoins.add(id);
@@ -455,7 +459,11 @@ async function scanOnce() {
     const depth = tip ? depthForGap(tip, prev) : (backfilled ? POLL_DEPTH : BACKFILL_MAX_DEPTH);
     served = depth;
     const a = await scanOrders(depth).catch(() => null);
-    const b = await scanPayments(depth, tip).catch(() => null);
+    // complete enough (0.19.349, as released 0.18.294): the orders read reached the last pass's tip, so with what earlier passes read (down to a
+    // pending backfill's floor) every order up to the tip is known; cut above it, only what this read reached. A failed one: no payment judged.
+    const reach = tip - served, f0 = meta("backfill_floor_block"), t0 = meta("backfill_target_block");
+    const fromRecent = !prev ? 0 : reach > prev ? reach : t0 && f0 ? Math.min(f0, reach) : 0;
+    const b = a === null ? null : await scanPayments(depth, tip, fromRecent).catch(() => null);
     backfilled = true;
     // A failed read advances nothing (0.19.249, as released 0.18.213): only a pass that read both, at every payout address,
     // moves the cursor; the same blocks are read on the next pass. What could not be read is said on the Inbox (scanState).
@@ -484,9 +492,13 @@ async function scanOnce() {
         // payment coins of any age are (no floor: 0.19.337). Each read is judged by its own depth: a read the reply cap cut is tried on two
         // more passes, then the notice says why
         served = NODE_TREE_MOST; const c = await scanOrders(NODE_TREE_MOST, floor).catch(() => null); const ordersServed = served;
-        served = ROOT_DEPTH; const d = await scanPayments(ROOT_DEPTH, tip).catch(() => null); const root = served >= ROOT_DEPTH;
+        const ordersCut = ordersServed < NODE_TREE_MOST, stallNext = meta("backfill_stall") + 1;
+        // the root read judges what it lists (orders past the tree cannot be read); while a cut orders read is still tried again, the coins
+        // below what it reached wait (0.19.349, as released 0.18.294), and the try that ends the backfill judges them
+        const payFrom = ordersCut && stallNext < 3 ? tip - ordersServed : 0;
+        served = ROOT_DEPTH; const d = c === null ? null : await scanPayments(ROOT_DEPTH, tip, payFrom).catch(() => null); const root = served >= ROOT_DEPTH;
         changed = changed || !!(c || d);
-        const ordersCut = ordersServed < NODE_TREE_MOST, stall = ordersCut || !root ? meta("backfill_stall") + 1 : 0;
+        const stall = ordersCut || !root ? stallNext : 0;
         if (c === null || d === null) stepFailed = true;   // a failed read moves nothing: the same reads are tried on the next pass
         else if (stall && stall < 3) store.setMeta("backfill_stall", stall);
         else {
@@ -498,7 +510,10 @@ async function scanOnce() {
       } else if (target && floor) {   // ONE step per pass, paced: a widening query is heavy on the shared MINIMERCH address
         const deep = Math.min(tip - target + GAP_MARGIN, tip - floor + BACKFILL_CHUNK, NODE_TREE_DEPTH);   // never past what the tree surely holds
         served = deep;
-        const c = await scanOrders(deep, floor).catch(() => null), d = await scanPayments(deep, tip).catch(() => null);   // payments: no floor (0.19.337)
+        const c = await scanOrders(deep, floor).catch(() => null), stepReach = tip - served;
+        // payments: no floor (0.19.337); judged down to what the orders read reached, with what was read above the floor (0.19.349, as released 0.18.294)
+        const payFrom = stepReach <= target ? 0 : Math.min(stepReach, floor);
+        const d = c === null ? null : await scanPayments(deep, tip, payFrom).catch(() => null);
         changed = changed || !!(c || d);
         const reached = tip - served;
         if (c === null || d === null) stepFailed = true;   // nothing moves: the same step is tried on the next pass (0.19.249), said as OLDER orders (0.19.332)
