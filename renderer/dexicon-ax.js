@@ -874,11 +874,12 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const up = () => D.running() && S.st.ready;
   /** AtomiX's rows of the shared Activity's ONE list (0.19.384; dexicon-ui.js mixes them by time with DexCore.activityMix):
    *  every swap not hidden, each with its whole card. A swap spans two chains, so it has no one block: it is placed by the
-   *  time it was created, and is pending until it has finished. */
+   *  time it was created, and is pending until it has finished. Its label names its own Minima-side token (0.19.385), not
+   *  the market the ⇄ pill is on now. */
   function activityItems() {
     if (!up()) return [];
-    const tag = tr("ATOMIX · USDT ⇄ {c}", { c: esc(ccy()) });
-    return (S.swaps || []).filter((x) => !S.hidden.has(x.hash)).map((x) => ({ kind: "atomix", key: "ax:" + x.hash, ts: Number(x.created) || 0, block: 0, pending: !terminal(x), tag, html: swapCard(x, true) }));
+    const side = (x) => [tok(x.selltoken), tok(x.buytoken)].find((t) => t === "MINIMA" || t === "MxUSD") || ccy();
+    return (S.swaps || []).filter((x) => !S.hidden.has(x.hash)).map((x) => ({ kind: "atomix", key: "ax:" + x.hash, ts: Number(x.created) || 0, block: 0, pending: !terminal(x), tag: tr("ATOMIX · USDT ⇄ {c}", { c: esc(side(x)) }), html: swapCard(x, true) }));
   }
   function part(tab, sub) {
     if (!up()) return tab === "assets" ? `<div class="dx-card"><div class="dx-label">${th("ETHEREUM")}</div><div class="dx-sub dx-sub--sans">${D.running() ? th("AtomiX is still starting: the Ethereum wallet appears when it is ready.") : th("The node is stopped. The Ethereum wallet appears when it runs.")}</div></div>` : "";

@@ -717,7 +717,8 @@ test("0.19.384: Activity is one list: block order where a block holds the row, e
   const input = [pool, ax, fast, chain], copy = input.slice();
   assert.deepEqual(C.activityMix(input).map(r => r.key), ["dx:s1", "dx:t1", "ax:h", "pp:0"], "the pending on-chain fill (newest), the FAST fill (its block), the AtomiX swap (its time), the pool swap (its block)");
   assert.deepEqual(input, copy, "the rows given are not reordered");
-  assert.deepEqual(C.activityMix([row("pool", "a", T + 5000, 10), row("fast", "b", T, 11)]).map(r => r.key), ["b", "a"], "two rows in blocks: the later block first, whatever their times say");
+  assert.deepEqual(C.activityMix([row("pool", "a", T + 5000, 10), row("fast", "b", T, 11)]).map(r => r.key), ["a", "b"], "0.19.385: two rows in blocks whose times disagree: by time (one order, so the day headers never repeat)");
+  assert.deepEqual(C.activityMix([row("pool", "a", T, 10), row("fast", "b", T, 11)]).map(r => r.key), ["b", "a"], "two rows in blocks at one time: the later block first");
   assert.deepEqual(C.activityMix([row("fast", "a", T, 10), row("pool", "b", T + 1, 10)]).map(r => r.key), ["b", "a"], "in one block: the later time first");
   assert.deepEqual(C.activityMix([row("pool", "z", T, 10), row("fast", "y", T, 10)]).map(r => r.key), ["y", "z"], "same block, same time: by kind, so two draws never swap them");
   assert.deepEqual(C.activityMix([row("atomix", "p", T, 0), row("pool", "m", T, 10)]).map(r => r.key), ["m", "p"], "a row in a block and a row without one at the same time: the one in a block first");
@@ -752,12 +753,90 @@ test("0.19.384: the Activity screen draws the Exchange's rows (with the maker's 
   const where = ['data-act="0"', 'data-act="1"', 'id="AXROW"', 'id="PPROW"'].map(at);
   assert.ok(where.every(i => i >= 0), "every row is drawn: the maker's FAST fill, the taker's FAST fill, the AtomiX swap, the pool swap " + JSON.stringify(where));
   assert.deepEqual(where.slice().sort((a, b) => a - b), where, "newest first, all kinds mixed: maker fill (pending, newest), taker fill (block 2417300), AtomiX (its time), pool (block 2417290)");
-  const kinds = [...html.matchAll(/<div class="dx-mix" data-kind="(\w+)"><div class="dx-mix__k"( data-pending)?>([^<]*)<\/div>/g)].map(m => [m[1], m[3], !!m[2]]);
+  const kinds = [...html.matchAll(/<div class="dx-mix" data-kind="(\w+)"><div class="dx-mix__k"( data-pending)?(?: aria-hidden="true")?>([^<]*)<\/div>/g)].map(m => [m[1], m[3], !!m[2]]);
   assert.deepEqual(kinds, [["fast", "fast book · PENDING", true], ["fast", "fast book", false], ["atomix", "ATOMIX · USDT ⇄ MxUSD · PENDING", true], ["pool", "POOL", false]], "each row marked with its kind; not in a block yet: PENDING");
   assert.ok(!/ATOMIX SWAPS|POOL OPERATIONS/.test(html), "no separate sections");
   let shown = null; els.shell.appendChild = (d) => { shown = d; };
   await els.dxBody.onclick({ target: { closest: (sel) => (sel === "button" ? { dataset: { act: "0" } } : null) } });
   assert.ok(shown && shown.innerHTML.includes(MAKER_FILL.txpowid) && shown.innerHTML.includes(MAKER_FILL.taker) && shown.innerHTML.includes(MAKER_FILL.coins[0]), "the maker's row opens its facts with every identifier whole");
+});
+
+// 0.19.385 (review of 0.19.384): block order and time could disagree, so a day header was drawn twice, and a row in a
+// block with no time was drawn under "1 JAN 1970" and dragged the rows after it down with it
+test("0.19.385: Activity's one order is by time: a day header never repeats, a row in a block with no time sits by its block neighbour, a row with no time at all goes last", () => {
+  const D2 = new Date(2026, 10, 20, 12).getTime(), D1 = D2 - 86400000, row = (kind, key, ts, block) => ({ kind, key, ts, block });
+  const days = (rows) => rows.map(r => (r.ts ? C.dayLabel(r.ts, D2) : "UNDATED"));
+  const once = (labels) => labels.every((d, i) => i === 0 || d === labels[i - 1] || !labels.slice(0, i).includes(d));
+  // probe 1: blocks 12 > 11 > 10 but times D2, D1, D2 (a later block can carry an earlier time: a slow post, another device)
+  const p1 = C.activityMix([row("pool", "p", D2, 12), row("fast", "q", D1, 11), row("chain", "r", D2 - 1000, 10)]);
+  assert.deepEqual(p1.map(r => r.key), ["p", "r", "q"]);
+  assert.ok(once(days(p1)), "no day header twice: " + days(p1).join(" | "));
+  // probe 2: a row in block 11 with ts 0 between rows in blocks 12 and 10, and an AtomiX swap (no block) between them in time
+  const p2 = C.activityMix([row("pool", "a", D2, 12), row("pool", "z", 0, 11), row("chain", "c", D2 - 5000, 10), row("atomix", "x", D2 - 1000, 0)]);
+  assert.deepEqual(p2.map(r => r.key), ["a", "z", "x", "c"], "the row with no time takes its nearest block neighbour's time; nothing is dragged");
+  assert.equal(p2[1].ts, D2);
+  assert.ok(!days(p2).some(d => /1970/.test(d)) && once(days(p2)), days(p2).join(" | "));
+  // a row with no time and no block: last, with ts 0 (drawn under UNDATED); a time before 2001 is no time
+  const p3 = C.activityMix([row("pool", "u", 0, 0), row("atomix", "s", 500, 0), row("fast", "f", D1, 0)]);
+  assert.deepEqual(p3.map(r => [r.key, r.ts]), [["f", D1], ["s", 0], ["u", 0]]);
+});
+
+/** The Activity screen of the real dexicon-ui.js over a mock window: the Exchange's rows come from acts/fills, AtomiX's and
+ *  PandaPools' from the items given. Returns { html(), click(dataset) }. */
+async function drawActivity({ acts = [], fills = [], axItems = [], ppItems = [], now }) {
+  const vm = require("node:vm");
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, showModal() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
+  const els = {}, win = { DexCore: C, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date: class extends Date { static now() { return now; } },
+    DexPools: { tick() {}, render() {}, shared() {}, part: () => "", activityItems: () => ppItems },
+    DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false, activityItems: () => axItems },
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener() {} };
+  win.window = win;
+  win.mcd = { dxStatus: async () => ({ version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {}, block: 2417310 }), onDexicon() {}, clip: async () => true,
+    dxBook: async () => ({ fast: [], book: [], poolAsks: [], poolBids: [], pools: [] }), dxMine: async () => ({ orders: [], pending: [] }), cmd: async () => ({ status: true, response: [] }),
+    dxCommand: async (a) => ({ status: true, rows: /fill_%/.test(a.query) ? fills.map((f) => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) : [{ K: "activity", V: JSON.stringify(acts) }] }) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
+  vm.createContext(win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/lib/activity.js"), "utf8"), win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
+  win.document.getElementById("shell").dataset.mode = "dex";
+  win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+  win.DexUI.paint("dexicon"); win.DexUI.pickTab("activity"); await settle();
+  return { html: () => els.dxBody.innerHTML, click: async (dataset) => { await els.dxBody.onclick({ target: { closest: (sel) => (sel === "button" ? { dataset } : null) } }); await settle(); } };
+}
+
+test("0.19.385: the drawn Activity: day headers in one run each, never 1970, UNDATED last; one line counts the unfinished rows and shows only them, in the same order", async () => {
+  const H = (c) => "0x" + c.repeat(64), now = new Date(2026, 10, 22, 12).getTime(), DAY = 86400000;
+  const item = (kind, key, ts, block, pending, tag, id, unfinished) => ({ kind, key, ts, block, pending, unfinished, tag, html: `<div id="${id}"></div>` });
+  const TAKER = { id: "t1", route: "FAST", role: "taker", side: "buy", amount: "500", price: "0.0031", txpowid: H("A"), orderId: H("B"), counterparty: H("C"), stage: "COSIGNED", block: 2417300, ts: now - 2 * DAY, outs: [H("D")] };
+  const v = await drawActivity({ now, acts: [TAKER],
+    axItems: [item("atomix", "ax:" + H("E"), now - 3 * DAY, 0, true, "ATOMIX · USDT ⇄ MxUSD", "AXOPEN"), item("atomix", "ax:" + H("F"), now - 1000, 0, false, "ATOMIX · USDT ⇄ MINIMA", "AXDONE")],
+    ppItems: [item("pool", "pp:" + H("1"), now - DAY, 2417310, false, "POOL", "PPNEW"), item("pool", "pp:" + H("2"), 0, 2417305, false, "POOL", "PPNOTIME"), item("pool", "pp:" + H("3"), 0, 0, false, "POOL · Not found on this node", "PPNOTFOUND", true)] });
+  let html = v.html();
+  const heads = [...html.matchAll(/<div class="dx-day">([^<]*)<\/div>/g)].map(m => m[1]);
+  assert.ok(heads.every((d, i) => heads.indexOf(d) === i), "each day header once: " + heads.join(" | "));
+  assert.ok(!heads.some(d => /1970/.test(d)) && heads[heads.length - 1] === "UNDATED", heads.join(" | "));
+  const where = ["AXDONE", "PPNEW", "PPNOTIME", 'data-act="0"', "AXOPEN", "PPNOTFOUND"].map(s => html.indexOf(s));
+  assert.ok(where.every(i => i >= 0) && where.every((x, i) => i === 0 || x > where[i - 1]), "newest first by time; the pool row with no time beside its block neighbour; the one with no time at all last " + JSON.stringify(where));
+  assert.match(html, /<button class="pp-link pp-link--row" data-aopen="1" aria-pressed="false">2 unfinished — show<\/button>/, "the pending AtomiX swap far down, and the pool operation the node did not find");
+  assert.ok(html.indexOf('data-aopen="1"') < html.indexOf("AXDONE"), "the line sits above the list");
+  await v.click({ aopen: "1" }); html = v.html();
+  assert.match(html, /aria-pressed="true">Showing only the 2 unfinished — show all<\/button>/);
+  assert.ok(html.includes("AXOPEN") && html.includes("PPNOTFOUND") && html.indexOf("AXOPEN") < html.indexOf("PPNOTFOUND"), "only the unfinished, in the same order");
+  assert.ok(!/AXDONE|PPNEW|PPNOTIME|data-act=/.test(html), "the finished rows are not shown");
+  await v.click({ aopen: "1" }); assert.ok(v.html().includes("AXDONE") && v.html().includes("2 unfinished — show"), "and back to the whole list");
+});
+
+test("0.19.385: a FAST or on-chain row's button says its kind and PENDING to a screen reader; no unfinished line when nothing is unfinished", async () => {
+  const H = (c) => "0x" + c.repeat(64), now = new Date(2026, 10, 22, 12).getTime();
+  const POSTED = { id: "s1", route: "CHAIN", side: "sell", amount: "100", price: "0.0032", txpowid: H("A"), stage: "POSTED", ts: now - 60000 };
+  let html = (await drawActivity({ now, acts: [POSTED] })).html();
+  assert.match(html, /<div class="dx-mix__k" data-pending aria-hidden="true">on-chain · PENDING<\/div><button class="dx-card dx-led" data-act="0"><span class="dx-sr">on-chain · PENDING: <\/span>/);
+  assert.match(html, /1 unfinished — show/);
+  html = (await drawActivity({ now, axItems: [{ kind: "atomix", key: "ax:x", ts: now, block: 0, pending: false, tag: "ATOMIX · USDT ⇄ MxUSD", html: "<div></div>" }] })).html();
+  assert.ok(!/data-aopen/.test(html), "nothing unfinished: no line");
+  assert.match(html, /<div class="dx-mix__k">ATOMIX · USDT ⇄ MxUSD<\/div>/, "a card without a row button keeps its kind line readable");
 });
 
 test("Settings: a relay the desktop cannot reach is refused before anything is saved", () => {

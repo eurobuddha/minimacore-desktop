@@ -718,13 +718,18 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   }
   /** PandaPools' rows of the shared Activity's ONE list (0.19.384; dexicon-ui.js mixes them by time with DexCore.activityMix):
    *  the 60 newest and every one not finished, each with its whole card. block: the block the node's own check found the
-   *  transaction in (pp_txproof inclusionblock), when it found it; pending: not failed and not found in a block yet. */
+   *  transaction in (pp_txproof inclusionblock), when it found it. pending (0.19.385): not failed, not confirmed, not found
+   *  in a block and not checked yet; a row only the history holds (a consolidation, a row from another device or a restore)
+   *  has a depth but no inclusion block, and is not pending. A row the node checked and did not find, or one with no
+   *  transaction id, says so instead of PENDING; one not found is still unfinished (it may yet be mined, or was dropped). */
   function activityItems() {
     if (!up()) return [];
     const now = Date.now();
     return (S.acts || []).filter((a) => a.type !== "STATUS").map((a, i) => {
       const it = actItem(a, now), block = Number(a.verifiedDepth) >= 0 && Number(a.inclusionBlock) > 0 ? Number(a.inclusionBlock) : 0;
-      return { kind: "pool", key: "pp:" + i, ts: Number(a.ts) || 0, block, pending: !a.failed && !block, tag: th("POOL"), html: itemHtml(it), keep: i < 60 || !it.done };
+      const open = !a.failed && !a.confirmed && !(Number(a.verifiedDepth) >= 0), noId = open && !a.txpowid, notFound = open && !noId && !!a.verifiedAt;
+      return { kind: "pool", key: "pp:" + (a.txpowid ? String(a.txpowid).toLowerCase() : "#" + i), ts: Number(a.ts) || 0, block, pending: open && !noId && !notFound, unfinished: notFound,
+        tag: th("POOL") + (noId ? " · " + th("No transaction ID saved") : notFound ? " · " + th("Not found on this node") : ""), html: itemHtml(it), keep: i < 60 || !it.done };
     }).filter((x) => x.keep);
   }
   /** the shared screens ask for PandaPools' part of their data: at once when one opens, then once a minute */

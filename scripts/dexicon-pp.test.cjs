@@ -841,3 +841,26 @@ test("0.19.384: PandaPools' Activity rows: the block the node's check found, pen
   assert.ok(items.every((x) => x.tag === "POOL"));
   assert.equal(M.part("activity"), "", "no separate pool section any more");
 });
+
+// 0.19.385 (review of 0.19.384): a confirmed row only the history holds (a consolidation, a row from another device or a
+// restore) has a depth but no inclusion block (the engine's rowModel copies verifiedDepth/verifiedAt/confirmed/statusText
+// only), so it read "POOL · PENDING" for ever; a row the node checked and did not find, or one with no id, read PENDING too
+test("0.19.385: PandaPools' Activity rows: a history-only confirmed row is not pending; not found / no id say so; the key is the transaction id", async () => {
+  const ctx = Object.assign({ console, setTimeout, setImmediate, Promise, DexCore: C, localStorage: { getItem: () => null, setItem() {} }, document: { getElementById: () => null, querySelectorAll: () => [] } }, require("./i18n-plain.cjs").globals());
+  ctx.window = ctx; vm.createContext(ctx); vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-pp.js"), "utf8"), ctx);
+  const M = ctx.DexPools, T = 1763800000000;
+  const acts = [{ type: "Consolidation", summary: "2 MINIMA", txpowid: PK("C1"), ts: T, failed: false, verifiedDepth: 40, verifiedAt: T, confirmed: true, statusText: "40 confirmations · on-chain" },
+    { type: "Pool transaction", summary: "+1 MINIMA", txpowid: PK("C2"), ts: T - 1, failed: false, verifiedDepth: 1, verifiedAt: T, confirmed: false, statusText: "1 confirmation · on-chain" },
+    { type: "SWAP", summary: "x", txpowid: PK("C3"), ts: T - 2, verifiedDepth: -1, verifiedAt: T, statusText: "Not found on this node" },
+    { type: "ADD", summary: "y", txpowid: "", ts: T - 3, verifiedDepth: -1, verifiedAt: 0, statusText: "No transaction ID saved" },
+    { type: "CREATE", summary: "z", txpowid: PK("C5"), ts: T - 4, verifiedDepth: -1, verifiedAt: 0, statusText: "Waiting for node check" }];
+  M.init({ api: { ppStatus: async () => ({ ready: true }), ppActivity: async () => acts }, running: () => true, redraw() {} });
+  M.shared(true); for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+  const items = M.activityItems();
+  assert.deepEqual(items.map((x) => [x.key, x.pending, !!x.unfinished, x.tag]), [
+    ["pp:" + PK("C1").toLowerCase(), false, false, "POOL"],
+    ["pp:" + PK("C2").toLowerCase(), false, false, "POOL"],
+    ["pp:" + PK("C3").toLowerCase(), false, true, "POOL · Not found on this node"],
+    ["pp:#3", false, false, "POOL · No transaction ID saved"],
+    ["pp:" + PK("C5").toLowerCase(), true, false, "POOL"]]);
+});

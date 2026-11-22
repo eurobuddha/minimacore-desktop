@@ -775,3 +775,14 @@ test("0.19.384: AtomiX's Activity rows: every swap not hidden, placed by its cre
   assert.ok(items[0].html.includes(PK("A1")) && items[0].html.includes(PK("F9")) && items[0].html.includes('data-axhide="' + PK("A1") + '"'), "the swap's own card, ids whole, still hideable");
   assert.equal(M.part("activity", 0), "", "no separate AtomiX section any more");
 });
+
+// 0.19.385 (review of 0.19.384): each AtomiX row was labelled with the market the ⇄ pill is on now, not its own
+test("0.19.385: AtomiX's Activity rows name their own Minima-side token, whatever market is active", async () => {
+  const ctx = Object.assign({ console, setTimeout, setImmediate, Promise, DexCore: C, localStorage: { getItem: () => null, setItem() {} }, document: { getElementById: () => null, querySelectorAll: () => [] } }, require("./i18n-plain.cjs").globals());
+  ctx.window = ctx; vm.createContext(ctx); vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ax.js"), "utf8"), ctx);
+  const M = ctx.DexAx, sw = (n, dir, sell, buy) => ({ hash: PK(n), role: "INITIATOR", direction: dir, status: "COMPLETE", selltoken: sell, sellamount: "40", buytoken: buy, buyamount: "39.6", created: 1763800000000, counterparty: PK("D1"), contractId: PK("F9") });
+  const swaps = [sw("A1", "ERC20_TO_MINIMA", "USDT", AX.MXUSD), sw("A2", "MINIMA_TO_ERC20", "0x00", "USDT"), sw("A3", "ERC20_TO_MINIMA", "USDT", "0x00")];
+  M.init({ api: { axStatus: async () => ({ ready: true, currency: "minima" }), axSwaps: async () => swaps, axMarketHistory: async () => ({}), axWallet: async () => null }, running: () => true, repaintStrip() {}, redraw() {} });
+  M.shared(true); for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(M.activityItems().map((x) => x.tag), ["ATOMIX · USDT ⇄ MxUSD", "ATOMIX · USDT ⇄ MINIMA", "ATOMIX · USDT ⇄ MINIMA"]);
+});

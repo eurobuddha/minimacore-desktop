@@ -425,18 +425,18 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   /** "TODAY · 19 NOV" / "18 NOV" (local time), for the day headers of History and Activity */
   function dayLabel(ms, nowMs) { const d = new Date(ms), n = new Date(nowMs), t = d.getDate() + " " + MONTHS[d.getMonth()]; return (d.toDateString() === n.toDateString() ? (I18N.t("TODAY ·") + " ") : "") + t + (d.getFullYear() === n.getFullYear() ? "" : " " + d.getFullYear()); }
   /** Activity's ONE list (0.19.384, owner: "They should all be together in chronological order, mixed."): the FAST,
-   *  on-chain, pool and AtomiX rows, each { kind, key, ts, block }, newest first. A row a block holds (block > 0) is
-   *  ordered among those rows by its block (a later block first; in one block the later ts first); every other row
-   *  (still pending, failed, an AtomiX swap, which spans two chains) by its ts, the time it was sent or recorded; the
-   *  two runs are then interleaved by ts, and at an equal ts the row in a block goes first. Last tie-break: kind, then
-   *  key, so the order never changes between two draws. Nothing is dropped. */
+   *  on-chain, pool and AtomiX rows, each { kind, key, ts, block }, newest first, in ONE order (0.19.385): by time, so
+   *  the day headers drawn over it never repeat. At an equal time: of two rows in blocks the later block first, a row in
+   *  a block before one that is not, then kind, then key, so two draws never swap them. A row a block holds that has no
+   *  time takes the time of the row nearest it by block that has one; a row with no time at all goes last, with ts 0
+   *  (drawn under UNDATED, never under 1970). A time before 2001 is no time. Returns copies (ts filled); nothing dropped. */
   function activityMix(rows) {
-    const n = (v) => { const x = Number(v); return isFinite(x) && x > 0 ? x : 0; };
-    const byTs = (a, b) => n(b.ts) - n(a.ts) || String(a.kind).localeCompare(String(b.kind)) || String(a.key).localeCompare(String(b.key));
-    const mined = rows.filter(r => n(r.block)).sort((a, b) => n(b.block) - n(a.block) || byTs(a, b)), rest = rows.filter(r => !n(r.block)).sort(byTs), out = [];
-    let i = 0, j = 0;
-    while (i < mined.length || j < rest.length) out.push(j >= rest.length || (i < mined.length && n(mined[i].ts) >= n(rest[j].ts)) ? mined[i++] : rest[j++]);
-    return out;
+    const n = (v) => { const x = Number(v); return isFinite(x) && x > 0 ? x : 0; }, t = (v) => (n(v) >= 1e12 ? n(v) : 0);
+    const timed = rows.filter(r => n(r.block) && t(r.ts)), dist = (r, b) => Math.abs(n(r.block) - b);
+    const near = (b) => timed.reduce((best, r) => (!best || dist(r, b) < dist(best, b) || (dist(r, b) === dist(best, b) && n(r.block) > n(best.block)) ? r : best), null);
+    const out = rows.map(r => { const b = n(r.block), own = t(r.ts), nb = !own && b ? near(b) : null; return Object.assign({}, r, { ts: own || (nb ? t(nb.ts) : 0) }); });
+    return out.sort((a, b) => b.ts - a.ts || (n(a.block) && n(b.block) ? n(b.block) - n(a.block) : !!n(b.block) - !!n(a.block))
+      || String(a.kind).localeCompare(String(b.kind)) || String(a.key).localeCompare(String(b.key)));
   }
   /** How long ago, in whole units cut down (Util.ago) */
   function ago(ms) { const s = Math.floor(Math.max(0, ms) / 1000); if (s < 60) return I18N.t("{s}s ago", { s: s }); const m = Math.floor(s / 60); const rel = (v, unit) => new Intl.RelativeTimeFormat(I18N.tag(), { numeric: "always" }).format(-v, unit);   // "1 minute ago", "3 hours ago", worded in the language on show
