@@ -140,7 +140,7 @@ test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies 
   assert.equal((sh.replace(/<<MSG[\s\S]*?\nMSG\n/, "").match(/^\s*cp /gm) || []).length, 1, "one copy, the --jars one (the copy commands in the refusal are text)");
   assert.ok(sh.indexOf('if [ -n "$JARS" ]; then') < sh.indexOf('cp "${found[0]}"') && sh.indexOf('cp "${found[0]}"') < sh.indexOf("\nfi\nmissing=0"), "and it is inside the --jars branch");
   for (const must of ["is, or is inside, the real install's folder", "contains the real install's folder", "was not created by this script", "something is already listening on port(s)", "12001 is the real app's default base port",
-    "shasum -a 256", "minima-1.1.2.31-euro5.jar", "parlons-node-0.2.153.jar", "desktop/minimacore-desktop/resources/minima.jar", 'MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT"\n', "17001 is Pandamonium Desktop's default base port"])
+    "shasum -a 256", "minima-1.1.2.31-euro14-block.jar", "parlons-node-0.2.160-block.jar", "node-cmdinject-2026-11-21/minima-1.1.2.3-euro8.jar", "node-cmdinject-2026-11-21/parlons-node-0.2.162.jar", 'MCD_TEST_PROFILE="$PROFILE" exec "$ELECTRON" "$ROOT"\n', "17001 is Pandamonium Desktop's default base port"])
     assert.ok(sh.includes(must), "dev-run.sh: " + must);
   assert.ok(sh.indexOf("for off in 0 1 2 3 4 5 584 586") < sh.indexOf('mkdir -p "$PROFILE"'), "the ports are probed before anything is created");
   assert.ok(!/--user-data-dir=/.test(sh.replace(/^\s*#.*$/gm, "")), "the app is started without --user-data-dir: it refuses the switch and sets its folder itself (0.19.105)");

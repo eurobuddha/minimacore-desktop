@@ -35,7 +35,8 @@ test("an older shop.json: no coin counted twice, paid and shipped orders keep th
     { coinid: "0xC1", tokenid: MX, tokenamount: "10", amount: "0.0000001", created: "100", state: st("ORD-DESK") },
     { coinid: "0xC3", tokenid: MX, tokenamount: "5", amount: "0.0000001", created: "90", state: st("ORD-HALF") }   // the 5 the old version already counted
   ];
-  shop._setRunner(async (c) => (c === "getaddress" ? { status: true, response: { miniaddress: VADDR } } : c === "block" ? { status: true, response: { block: 100 } }
+  // changed on purpose (0.19.344): the tip is 104, more than PAY_BEFORE_ORDER blocks past the coins (a payment is judged only then)
+  shop._setRunner(async (c) => (c === "getaddress" ? { status: true, response: { miniaddress: VADDR } } : c === "block" ? { status: true, response: { block: 104 } }
     : c.startsWith("coins address:" + VADDR) ? { status: true, response: pay } : { status: true, response: [] }));
   await shop.init(); await shop.scanOnce();
   const o = (r) => store.order(r);

@@ -69,12 +69,12 @@ for jar in minima.jar parlons-node.jar; do [ -f "$RES/$jar" ] || { echo "MISSING
 if [ "$missing" = 1 ]; then
   cat >&2 <<MSG
 REFUSED: a node jar is missing, and this script does not fetch or copy jars by itself. Copy them yourself:
-  the shipped jars (classic wallets only):
-    cp "$HOME/Projects/minima/desktop/minimacore-desktop/resources/minima.jar" "$RES/minima.jar"
-    cp "$HOME/Projects/minima/desktop/minimacore-desktop/resources/parlons-node.jar" "$RES/parlons-node.jar"
-  the block-capable jars (19 Nov 2026 build):
-    cp "$HOME/Projects/minima/_artifacts/parlons-block-2026-11-19/minima-1.1.2.31-euro5.jar" "$RES/minima.jar"
-    cp "$HOME/Projects/minima/_artifacts/parlons-block-2026-11-19/parlons-node-0.2.153.jar" "$RES/parlons-node.jar"
+  the jars package.json pins (classic wallets only: minima 1.1.2.3-euro8, parlons-node 0.2.162):
+    cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.3-euro8.jar" "$RES/minima.jar"
+    cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.162.jar" "$RES/parlons-node.jar"
+  the block-capable jars the pandamonium flavour pins (minima 1.1.2.31-euro14, parlons-node 0.2.160):
+    cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.31-euro14-block.jar" "$RES/minima.jar"
+    cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.160-block.jar" "$RES/parlons-node.jar"
   or let this script copy a folder's pair:  scripts/dev-run.sh --jars <dir>
 Nothing was started.
 MSG

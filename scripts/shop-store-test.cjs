@@ -145,8 +145,11 @@ standIn("main/shopcrypto.js", { ready: async () => {}, loadIdentity: () => ({ pu
 let shop = require("../main/shop");
 const hex = (s) => "0x" + Buffer.from(s, "utf8").toString("hex");
 /** One scan in which the MINIMERCH channel carries `orders` (wire objects from BUYER, or a raw JSON text) and my address the `pays` coins ({ coinid, ref, amount, tokenid }). */
+// changed on purpose (0.19.344): the stand-in answers `block` (5000): a payment is judged only once the chain is more than PAY_BEFORE_ORDER
+// blocks past it, and with no tip nothing is judged
 async function scan(orders, pays) {
   shop._setRunner(async (c) => {
+    if (c === "block") return { status: true, response: { block: "5000" } };
     if (c === "getaddress") return { status: true, response: { miniaddress: VENDOR } };
     if (c.startsWith("coins address:" + shop.MINIMERCH)) return { status: true, response: orders.map((w, i) => ({ coinid: "0xM" + (++n) + "_" + i, state: { "99": hex(typeof w === "string" ? w : JSON.stringify(Object.assign({ from: BUYER, date: 1 }, w))) } })) };
     if (c.startsWith("coins address:" + VENDOR)) return { status: true, response: pays.map(p => ({ coinid: p.coinid, tokenid: p.tokenid, amount: p.amount, tokenamount: p.amount, created: p.created, state: { "1": hex(p.ref) } })) };
@@ -383,11 +386,13 @@ test("two buyers' orders with the same reference are both kept, both Unchecked, 
     await scan([JSON.stringify({ type: "BUYER_REPLY", ref: "ORD-DUP", from: B2, randomid: "rr1", message: "hi back", date: 2 })], []);
     assert.ok(store.chat("ORD-DUP~" + B2).some(m => m.message === "hi back")); assert.ok(!store.chat("ORD-DUP").some(m => m.message === "hi back"));
   } finally { sc.open = open0; }
-  // an order already paid when the copy comes is left as it was
+  // changed on purpose (0.19.344, as released 0.18.289): an order marked PAID when the copy comes is held again (its payment may be the other
+  // buyer's); one the vendor confirmed is left as it was
   store.saveShop({ shopId: "dup2", shopName: "D2", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "10", maxUnits: "5" }], shipping: [] });
   await scan([{ type: "ORDER", ref: "ORD-DUP2", shopId: "dup2", items: [{ product: "Tea", quantity: 1, unitPrice: "10" }], amount: "10", currency: "Minima", shipping: "" }], [{ coinid: "0xDB01", ref: "ORD-DUP2", amount: "10", tokenid: "0x00", created: 9 }]);
   assert.equal(store.order("ORD-DUP2").paid, true);
-  assert.equal(store.flagDuplicate("ORD-DUP2", "x"), false); assert.equal(store.order("ORD-DUP2").status, "PAID");
+  assert.equal(store.flagDuplicate("ORD-DUP2", "x"), true); assert.equal(store.order("ORD-DUP2").status, "UNCHECKED"); assert.equal(store.order("ORD-DUP2").paid, false); assert.equal(store.order("ORD-DUP2").paidAmount, "10");
+  store.setStatus("ORD-DUP2", "CONFIRMED"); assert.equal(store.flagDuplicate("ORD-DUP2", "y"), false); assert.equal(store.order("ORD-DUP2").status, "CONFIRMED");
 });
 
 // ---- 0.19.248 (as released 0.18.190): an order's dust coins are counted together once their sum covers what is still due ----
@@ -711,4 +716,73 @@ test("vendor: an order whose payment is older than the order is held for a check
       delete store.order("ORD-L").orderBlock; store.flush(); st.pay.push(jPay("ORD-L", 1003)); jTip(st, 1012); await shop.scanOnce();
       assert.equal(store.order("ORD-L").orderBlock, undefined); assert.equal(store.order("ORD-L").paid, true, "no block: paid as before"); store.clear(); }
   } finally { sc.open = open0; store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+});
+
+// ---- 0.19.344 (as released 0.18.289): a payment is judged only once the chain is more than PAY_BEFORE_ORDER blocks past it; orders are read
+// before payments in every pass, so a real order mined within the allowance is held by then; an order marked PAID (not moved on, not checked
+// by hand) that meets a second buyer's order with its reference is held again ----
+const ATK = "0x" + "66".repeat(32);
+const atkOrder = (ref, created, delivery) => ({ coinid: "0xAT" + Buffer.from(ref + created).toString("hex"), created, state: { "99": hex(JSON.stringify({ type: "ORDER", ref, from: ATK, date: 1, shopId: "tea", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], amount: "1.5", currency: "Minima", shipping: "Digital", delivery: delivery || "COPIER" })) } });
+const teaShop = () => store.saveShop({ shopId: "tea", shopName: "Tea", currency: "Minima", tokenid: "0x00", products: [{ id: "p1", name: "Tea", price: "1.5", maxUnits: "10" }], shipping: [{ id: "digital", label: "Digital", fee: "0" }] });
+async function copyRig(fn) {
+  const sc = require.cache[require.resolve("../main/shopcrypto.js")].exports, open0 = sc.open;
+  sc.open = async (_id, blob) => { const t = Buffer.from(String(blob).slice(2), "hex"); return { valid: true, fromPublicId: JSON.parse(t).from, plaintext: t }; };   // the sender is whoever sealed it
+  try { store.clear(); teaShop(); const st = await javaSetup(1000); await shop.scanOnce(); await fn(st); }
+  finally { sc.open = open0; store.clear(); teaShop(); store.setLog((m) => { throw new Error("no log expected: " + m); }); }
+}
+const walkTo = async (st, from, to) => { for (let t = from; t <= to; t++) { jTip(st, t); await shop.scanOnce(); } };
+const DUPV = "another buyer sent an order with the same reference ORD-V: a payment with it cannot be told apart, so check both orders by hand";
+test("vendor: a copier's order mined the block after another buyer's payment, the real order two blocks later: neither advances automatically, both are held for a check by hand", async () => {
+  await copyRig(async (st) => {
+    const p = jPay("ORD-V", 1010); st.pay.push(p); st.msg.push(atkOrder("ORD-V", 1011), jOrder("ORD-V", 1012, { coinid: "0xJOV" }));
+    await walkTo(st, 1010, 1011);
+    assert.equal(store.order("ORD-V").delivery, "COPIER"); assert.equal(store.order("ORD-V").paid, false, "the payment at 1010 waits at tip 1011");
+    assert.deepEqual(shop.orderDetail("ORD-V").waiting, { coin: p.coinid, block: 1010, after: 1013 }, "and is said as waiting, its coin id whole");
+    await walkTo(st, 1012, 1016);
+    const copier = store.order("ORD-V"), victim = store.order("ORD-V~" + BUYER);
+    assert.ok(victim, "the real order is kept as a second buyer's");
+    for (const o of [copier, victim]) {
+      assert.equal(o.paid, false); assert.equal(o.status, "UNCHECKED"); assert.equal(store.mayAdvance(o), false); assert.equal(o.problems[0], DUPV, o.problems.join(" | "));
+      await assert.rejects(shop.advanceStatus(o.ref, "CONFIRMED"), /Check it by hand first/);
+    }
+    assert.equal(copier.paidAmount, "1.5", "counted once on the order held under the reference"); assert.equal(shop.orderDetail("ORD-V").waiting, null);
+  });
+});
+test("vendor: an order marked PAID meets a second buyer's order with its reference: unpaid and held for a check by hand; confirmed, shipped or hand-checked ones are left as they are", async () => {
+  await copyRig(async (st) => {
+    st.pay.push(jPay("ORD-V", 1010)); st.msg.push(atkOrder("ORD-V", 1011));
+    await walkTo(st, 1010, 1015); assert.equal(store.order("ORD-V").paid, true); assert.equal(store.order("ORD-V").status, "PAID");
+    st.msg.push(jOrder("ORD-V", 1020, { coinid: "0xJOV" })); await walkTo(st, 1016, 1021);
+    const copier = store.order("ORD-V"), victim = store.order("ORD-V~" + BUYER);
+    assert.equal(copier.paid, false); assert.equal(copier.status, "UNCHECKED"); assert.equal(copier.problems[0], DUPV); assert.equal(copier.paidAmount, "1.5", "what was received stays counted");
+    assert.equal(store.mayAdvance(copier), false); assert.equal(store.mayAdvance(victim), false);
+    assert.equal(store.handCheck("ORD-V"), true); assert.equal(store.mayAdvance(store.order("ORD-V")), true, "moves on once checked by hand");
+    const base = { role: "sell", shopId: "tea", amount: "1.5", currency: "Minima", tokenid: "0x00", items: [{ product: "Tea", quantity: 1, unitPrice: "1.5" }], shipping: "Digital", problems: [], due: "1.5" };
+    store.upsertOrder(Object.assign({ ref: "ORD-C1", status: "CONFIRMED", paid: true }, base)); store.upsertOrder(Object.assign({ ref: "ORD-C2", status: "PAID", paid: true, handChecked: true }, base));
+    store.upsertOrder(Object.assign({ ref: "ORD-C3", status: "SHIPPED", paid: true }, base));
+    for (const r of ["ORD-C1", "ORD-C2", "ORD-C3"]) { const was = JSON.stringify(store.order(r)); assert.equal(store.flagDuplicate(r, "x"), false, r); assert.equal(JSON.stringify(store.order(r)), was, r + " unchanged"); }
+  });
+});
+test("vendor: one buyer's order then payment, the same block, and an order 3 blocks after its payment are paid once the chain is 4 blocks past the payment, counted once", async () => {
+  for (const [ob, pb] of [[1009, 1010], [1010, 1010], [1013, 1010]]) {
+    await copyRig(async (st) => {
+      st.msg.push(jOrder("ORD-1", ob)); const p = jPay("ORD-1", pb); st.pay.push(p);
+      await walkTo(st, 1001, pb + 3); assert.equal(store.order("ORD-1") && store.order("ORD-1").paid, false, "tip " + (pb + 3) + " = the payment's block + 3: not judged (order " + ob + ")");
+      await walkTo(st, pb + 4, pb + 8); const o = store.order("ORD-1");
+      assert.equal(o.paid, true, "tip " + (pb + 4) + ": judged (order " + ob + ")"); assert.equal(o.paidAmount, "1.5"); assert.deepEqual(o.coins, [p.coinid.toLowerCase()]);
+    });
+  }
+});
+test("vendor: a payment left waiting is judged on a later pass after a restart; the boundary is tip = block + 3 (waits) and block + 4 (judged); the Inbox says it waits", async () => {
+  await copyRig(async (st) => {
+    st.msg.push(jOrder("ORD-W", 1009)); st.pay.push(jPay("ORD-W", 1010));
+    jTip(st, 1011); await shop.scanOnce(); assert.equal(store.order("ORD-W").paid, false, "tip 1011: waits");
+    const reopen = async () => { store.flush(); delete require.cache[require.resolve("../main/shop")]; shop = require("../main/shop"); shop._setRunner(javaNode(st)); await shop.init(); };
+    await reopen(); jTip(st, 1013); await shop.scanOnce(); assert.equal(store.order("ORD-W").paid, false, "tip 1013 = 1010 + 3: waits");
+    await reopen(); jTip(st, 1014); await shop.scanOnce(); assert.equal(store.order("ORD-W").paid, true, "tip 1014 after a restart: judged");
+    st.msg.push(jOrder("ORD-W2", 1013)); st.pay.push(jPay("ORD-W2", 1014)); jTip(st, 1014); await shop.scanOnce(); assert.equal(store.order("ORD-W2").paid, false);
+    await reopen(); for (let i = 0; i < 5; i++) { jTip(st, 1700 + i); await shop.scanOnce(); } assert.equal(store.order("ORD-W2").paid, true, "after 700 blocks away");
+  });
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  assert.ok(app.includes('${d.waiting ? `<div class="mm-hint" style="overflow-wrap:anywhere">${tr("A payment with this order\'s reference has arrived (payment coin {coin} at block {block}). It is counted after block {after}, so that another order with the same reference is seen first.", { coin: esc(d.waiting.coin)'), "the vendor is told the payment waits");
 });

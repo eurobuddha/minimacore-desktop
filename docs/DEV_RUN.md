@@ -26,13 +26,18 @@ scripts/dev-run.sh --jars <dir>          # copy <dir>/minima*.jar and <dir>/parl
   copy commands:
 
 ```bash
-# the shipped jars (classic wallets only)
-cp ~/Projects/minima/desktop/minimacore-desktop/resources/minima.jar       resources/minima.jar
-cp ~/Projects/minima/desktop/minimacore-desktop/resources/parlons-node.jar resources/parlons-node.jar
-# the block-capable jars (19 Nov 2026 build)
-cp ~/Projects/minima/_artifacts/parlons-block-2026-11-19/minima-1.1.2.31-euro5.jar resources/minima.jar
-cp ~/Projects/minima/_artifacts/parlons-block-2026-11-19/parlons-node-0.2.153.jar  resources/parlons-node.jar
+# the jars package.json pins (classic wallets only): minima 1.1.2.3-euro8, parlons-node 0.2.162 (parlonsNode / parlonsNodeSha256)
+cp ~/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.3-euro8.jar    resources/minima.jar
+cp ~/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.162.jar    resources/parlons-node.jar
+# the block-capable jars the pandamonium flavour pins (flavors.pandamonium.jars): minima 1.1.2.31-euro14, parlons-node 0.2.160
+cp ~/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.31-euro14-block.jar resources/minima.jar
+cp ~/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.160-block.jar   resources/parlons-node.jar
 ```
+
+  sha256: minima-1.1.2.3-euro8 `fc63eb672374e7ceb7cfba17d0e098e3c2991c9a0ef124b0a14fae111c088ef9`, parlons-node-0.2.162
+  `65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1`, minima-1.1.2.31-euro14-block
+  `e9399cce238971138d5efe7aa2fba93bfc601bce9e536fcf7477c3c2970e72e0`, parlons-node-0.2.160-block
+  `e40ad7bc812285ba49a93715df6a9e855dcc7bfd3df9c450bee58b8b89558a39` (the folder's `SHA256SUMS`).
 
   `resources/minima.jar` is a tracked file: after copying another jar over it, git shows it modified. Do not commit
   it; `git checkout resources/minima.jar` puts the shipped one back. `resources/parlons-node.jar` is ignored by git.
@@ -144,8 +149,12 @@ Build (macOS arm64, signed with the Developer ID certificate in the login keycha
 ```bash
 cp -R ../minimacore-desktop/resources/jre resources/jre                                      # once: the JRE (not in git)
 cp -R ../minimacore-desktop/resources/keets-sidecar/node_modules resources/keets-sidecar/    # once: the sidecar's modules
-node scripts/build-flavor.cjs pandamonium --jars ~/Projects/minima/_artifacts/parlons-block-2026-11-19
+cp ~/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.31-euro14-block.jar resources-pandamonium/minima.jar       # once: the flavour's pinned jars
+cp ~/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.160-block.jar   resources-pandamonium/parlons-node.jar
+node scripts/build-flavor.cjs pandamonium
 ```
+
+(The 21 Nov folder holds more than one `minima*.jar`, so `--jars` on it refuses; a folder with only the two jars works.)
 
 `--jars <dir>` copies the two jars into `resources-pandamonium/` (not in git); the build refuses a jar whose sha256 is
 not the one pinned for the flavour. `--stage-only` stops after that check; `--adhoc` signs without a certificate.

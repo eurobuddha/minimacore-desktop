@@ -7,6 +7,17 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.344] — miniMall: a copier's order is never paid by another buyer's coin (as released 0.18.289)
+
+- A payment coin created at block N is judged only once the chain is past block N + 3 (`PAY_BEFORE_ORDER`); until then it is not judged and not marked seen, and a later pass reads it again (the payments read never skips what an earlier pass read, every window reaches at least 64 blocks below the tip, and the cursor is on disk, so a restart reads it too). Orders are read before payments in every pass, so the real order, mined within the 3-block allowance, is held by then: a copier who put the payment's plain-text reference into an order of their own mined the block after the payment had that order marked PAID before the real order arrived. Now both meet as two buyers' orders with one reference, and neither moves on until the vendor checks it by hand.
+- An order marked PAID (not confirmed or moved on, not checked by hand) that meets a second buyer's order with its reference is held again: unpaid, UNCHECKED, the duplicate problem first, what was received still counted. Confirmed, shipped, delivered and hand-checked orders are left as they are.
+- While a payment waits, the vendor's order says so: "A payment with this order's reference has arrived (payment coin <whole id> at block N). It is counted after block N+3, so that another order with the same reference is seen first." (zh / ru / uk).
+- `docs/DEV_RUN.md` and `scripts/dev-run.sh` name the jars package.json pins now (minima 1.1.2.3-euro8 and parlons-node 0.2.162; the flavour's minima 1.1.2.31-euro14 and parlons-node 0.2.160), not minima-1.1.2.31-euro5 / parlons-node-0.2.153.
+
+## [0.19.343] — Vestr: a collect at or just after the end block is no longer dropped by the chain (as released 0.18.288)
+
+- The node's contract maths (`runscript` on CHECK_MATHS) works out its `change` before an expired contract's `cancollect` is raised to the whole coin, so at and just after the final block it reported a full payout AND a change: outputs above the input, a transaction `txnpost` took and the chain dropped while the app said collected (a sample contract coin, coin `0x23456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01`). The payout is the node's `cancollect` (a plain number above 0, at most the coin); the change is the coin less the payout, in exact decimals, and there is no change output once the whole coin is paid out. Nothing is built within the grace wait or for a payout above the coin, each said with a plain sentence (zh / ru / uk).
+
 ## [0.19.342] — The node jars with the command-injection fix and the RPC hardening
 
 - **Released identity:** `resources/minima.jar` is minima-core 1.1.2.3-euro8 (sha256 `fc63eb672374e7ceb7cfba17d0e098e3c2991c9a0ef124b0a14fae111c088ef9`), and the Parlons node pin moves to 0.2.162 (`parlonsNode` / `parlonsNodeSha256` `65ee56a6ffb302ea0ffcb0d81c1af6ce3f64f0abd662f7885346863d80eb34c1`; fetched from the maxima release `node-v0.2.162`). Both carry the 21 Nov 2026 fix set: built sub-commands are never re-parsed from text (no `;` / quote injection), the RPC binds 127.0.0.1 unless `-rpcbind`, checks Host and browser Origin, reads its body by bytes with a cap, a read-mode RPC user runs as non-admin, and non-admin callers only create plain `.txn` files in the base folder. The app already talks to its node on 127.0.0.1 and passes no flag these jars refuse.
