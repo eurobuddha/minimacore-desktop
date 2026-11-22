@@ -185,20 +185,28 @@ async function collect(coinid, burn) {
   const v = await runScriptVars(CHECK_MATHS,
     { 1: stateVar(coin, 1), 2: stateVar(coin, 2), 3: stateVar(coin, 3), 4: stateVar(coin, 4), 5: stateVar(coin, 5) },
     { "@AMOUNT": coinAmount(coin), "@BLOCK": tp, "@COINAGE": coin.created });
-  const cancollect = String(v.cancollect != null ? v.cancollect : "0");
-  const change = String(v.change != null ? v.change : "0");
+  // 0.19.343: CHECK_MATHS works out its `change` BEFORE an expired contract's cancollect is raised to @AMOUNT, so at and just
+  // after the final block it said "collect 100, change 1" for a 100 coin: outputs above the input, a transaction txnpost takes
+  // and the chain drops while the app said collected. The payout is the node's cancollect; the change is the coin less the
+  // payout, exactly, as the covenant computes it (none once the whole coin is paid out). Within the grace wait the covenant
+  // refuses (@COINAGE LT minblockwait), so nothing is built.
+  const amount = coinAmount(coin), cancollect = String(v.cancollect != null ? v.cancollect : "0");
+  if (!(tp >= Number(stateVar(coin, 3))) && (String(v.mustwait) === "TRUE" || !(tp - Number(coin.created) >= Number(stateVar(coin, 4)))))
+    throw new Error("The grace period of this contract is still running, so nothing can be collected yet. Nothing was sent.");
   if (!(Number(cancollect) > 0)) throw new Error("Nothing available to collect yet");
   const withdrawalAddress = stateVar(coin, 0), tokenid = coin.tokenid;
   // what the chain wrote goes into commands only in its shape (0.19.239): anyone can make a coin at the contract
-  if (!HEX64.test(String(withdrawalAddress)) || !/^0x[0-9A-Fa-f]{2,64}$/.test(String(tokenid)) || !PLAIN.test(cancollect) || !PLAIN.test(change)
+  if (!HEX64.test(String(withdrawalAddress)) || !/^0x[0-9A-Fa-f]{2,64}$/.test(String(tokenid)) || !PLAIN.test(cancollect) || !PLAIN.test(amount)
     || [0, 1, 2, 3, 4, 5, 6, 7, 8, 199].some(pt => !STATE_OK.test(String(stateVar(coin, pt)))))
     throw new Error("This contract coin's state is not one this app can carry. Nothing was signed.");
+  if (decSub(cancollect, amount) !== "0") throw new Error("The node's figure to collect is more than this contract coin holds. Nothing was sent.");
+  const change = decSub(amount, cancollect);   // payout + change = the coin, exactly
   const id = "vc" + Math.floor(Math.random() * 1e9);
   const cmds = [];
   cmds.push("txncreate id:" + id);
   cmds.push("txninput id:" + id + " coinid:" + coinid + " scriptmmr:true");
   cmds.push("txnoutput id:" + id + " address:" + withdrawalAddress + " amount:" + cancollect + " tokenid:" + tokenid + " storestate:false");
-  if (Number(change) > 0) cmds.push("txnoutput id:" + id + " address:" + CONTRACT + " amount:" + change + " tokenid:" + tokenid + " storestate:true");
+  if (change !== "0") cmds.push("txnoutput id:" + id + " address:" + CONTRACT + " amount:" + change + " tokenid:" + tokenid + " storestate:true");
   for (const p of [0, 1, 2, 3, 4, 5, 6, 7, 8, 199]) cmds.push("txnstate id:" + id + " port:" + p + " value:" + stateVar(coin, p));
   cmds.push("txnpost id:" + id + (burn && Number(burn) > 0 ? " burn:" + burn : ""));
   try {

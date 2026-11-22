@@ -339,3 +339,56 @@ test("Web Wallet: the ceiling, the chain at the limit, the over-count (sent and 
   assert.equal(await msg(ww.ackKeyuses(FROM, 10)), "This wallet's saved key-use count (300000) is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved.");
   ww.setOnchain(async () => null); ww.setKeyMode(() => "");
 });
+
+// ---- 0.19.343: a collect never pays out more than the coin; its change is the coin less the payout, exactly ----
+test("Vestr collect: an expired contract pays the whole coin with no change output; a partial one returns the exact rest with its state; nothing within the grace wait", async () => {
+  const vestr = require("../main/vestr");
+  const COIN = "0x23456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01", UNLOCK = "0xA1B2C3D4E5F60718A1B2C3D4E5F60718A1B2C3D4E5F60718A1B2C3D4E5F60718";
+  // a sample contract coin as the node reported it: 100 MINIMA, blocks 1000001 to 1000004, no grace, a 16-byte id, created at 1000002
+  const owner = [[0, UNLOCK], [1, "100"], [2, "1000001"], [3, "1000004"], [4, "0"], [5, "1700000000000"], [6, "1700000021278"], [7, "0"], [8, "1700000141315"], [199, "0x112233445566778899AABBCCDDEEFF00"]];
+  let coin, block, vars, sent = [];
+  vestr._setRunner(async (c) => {
+    sent.push(c);
+    if (c.startsWith("newscript")) return { status: true, response: { address: vestr.CONTRACT } };
+    if (c === "block") return { status: true, response: { block: String(block) } };
+    if (c.startsWith("coins coinid:")) return { status: true, response: [coin] };
+    if (c.startsWith("runscript")) return { status: true, response: { variables: vars } };
+    return { status: true, response: {} };
+  });
+  const run = async (st, amount, created, tip, v) => {
+    coin = { coinid: COIN, tokenid: "0x00", amount, created: String(created), address: vestr.CONTRACT, state: st.map(([port, data]) => ({ port, data })) };
+    block = tip; vars = v; sent = [];
+    const r = await vestr.collect(COIN, "");
+    return { r, txn: sent.filter(c => /^txn/.test(c)).map(c => c.replace(/vc\d+/, "ID")) };
+  };
+  const states = (st) => st.map(([p, d]) => "txnstate id:ID port:" + p + " value:" + d);
+  const whole = (st, tip) => ["txncreate id:ID", "txninput id:ID coinid:" + COIN + " scriptmmr:true",
+    "txnoutput id:ID address:" + UNLOCK + " amount:100 tokenid:0x00 storestate:false", ...states(st), "txnpost id:ID", "txndelete id:ID"];
+  // at the final block CHECK_MATHS says cancollect 100 AND change 1 (its change is worked out before the expiry raises cancollect)
+  for (const [tip, change] of [[1000004, "1"], [1000078, "0"]]) {
+    const { r, txn } = await run(owner, "100", 1000002, tip, { cancollect: "100", change, mustwait: "FALSE", contractexpired: "TRUE" });
+    assert.deepEqual(r, { ok: true, collected: "100", tokenid: "0x00" });
+    assert.deepEqual(txn, whole(owner, tip), "tip " + tip + ": the whole coin, no change output");
+  }
+  // expired, the covenant pays the whole coin whatever its age: the grace wait does not apply
+  const ownerGraced = owner.map(([p, d]) => [p, p === 4 ? "1728" : d]);
+  assert.deepEqual((await run(ownerGraced, "100", 1000003, 1000004, { cancollect: "100", change: "1", mustwait: "FALSE", contractexpired: "TRUE" })).txn, whole(ownerGraced, 1000004));
+  // partly vested: 1000 over blocks 999978 to 1000078, 124.5 already collected, tip half-way
+  const part = owner.map(([p, d]) => [p, ({ 1: "1000", 2: "999978", 3: "1000078" })[p] || d]);
+  const { r, txn } = await run(part, "875.5", 999988, 1000028, { cancollect: "380", change: "495.5", mustwait: "FALSE", contractexpired: "FALSE" });
+  assert.deepEqual(r, { ok: true, collected: "380", tokenid: "0x00" });
+  assert.deepEqual(txn, ["txncreate id:ID", "txninput id:ID coinid:" + COIN + " scriptmmr:true",
+    "txnoutput id:ID address:" + UNLOCK + " amount:380 tokenid:0x00 storestate:false",
+    "txnoutput id:ID address:" + vestr.CONTRACT + " amount:495.5 tokenid:0x00 storestate:true",
+    ...states(part), "txnpost id:ID", "txndelete id:ID"], "380 out, the exact 495.5 back to the contract keeping every port (SAMESTATE(0 8), PREVSTATE(199) EQ STATE(199))");
+  // the grace wait in force: 40 blocks old and the node says wait; 0 blocks old, where the node's mustwait is FALSE and the covenant still refuses
+  const graced = part.map(([p, d]) => [p, p === 4 ? "1728" : d]);
+  for (const [created, mustwait] of [[999988, "TRUE"], [1000028, "FALSE"]]) {
+    await assert.rejects(run(graced, "875.5", created, 1000028, { cancollect: "380", change: "495.5", mustwait, contractexpired: "FALSE" }), /^Error: The grace period of this contract is still running, so nothing can be collected yet\. Nothing was sent\.$/);
+    assert.ok(!sent.some(c => /^txn/.test(c)), "nothing built (created " + created + ")");
+  }
+  // a payout above the coin is refused, never posted
+  await assert.rejects(run(part, "875.5", 999988, 1000028, { cancollect: "875.6", change: "0", mustwait: "FALSE", contractexpired: "FALSE" }), /^Error: The node's figure to collect is more than this contract coin holds\. Nothing was sent\.$/);
+  assert.ok(!sent.some(c => /^txn/.test(c)), "nothing built for a payout above the coin");
+  vestr._setRunner(() => { throw new Error("no node in a test"); });
+});
