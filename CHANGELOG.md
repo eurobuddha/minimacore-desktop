@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.365] — Dexicon lanes test: the limit part waits for at least the two stuck posts, not for exactly two
+
+- A third race in the same test, seen once in the 30-run stress of 0.19.364 (two copies of the suite at once): the limit part waited for exactly 2 posts at the stand-in network. That is true only from the second stuck post's arrival until the host's 400 ms limit frees a place and "after" goes out (then 3 are held, since the stand-in never answers the stuck ones); a poll starved past that window never saw 2 and timed out after 8 s ("timed out waiting for: () => net.held.length === 2"). It now waits until both stuck posts have reached the network (2 or more held); the timing check of 0.19.364 is unchanged. With the test's first poll made 500 ms late, 0.19.364's test times out and this one passes. Nothing in the app changes.
+
 ## [0.19.364] — Dexicon lanes test: "not before the limit" is timed by when the requests reached the network
 
 - A second race in the same test, which 0.19.363 made more frequent: the limit part took its start time when the test's 15 ms poll saw the two stuck posts at the network, and asked that the next post go out at least 300 ms later. On a busy machine the poll saw them late (and 0.19.363 runs that part on a freshly booted host, whose engine is busiest then), so the next post seemed to follow in less than 300 ms although the host's 400 ms limit had run in full: "after the limit, not before" failed in 10 of 30 runs with two copies of the suite at once. The stand-in network now stamps each post when it arrives, and the test asks that the next post arrive at least 300 ms after the first stuck one did. The same bound, now measured where it happens; with the main thread held busy for 250 ms right after the poll sees them, 0.19.362's and 0.19.363's test fail and this one passes. Nothing in the app changes.

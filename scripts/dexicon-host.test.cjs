@@ -906,7 +906,9 @@ test("Dexicon's lanes: refusals beyond 32 waiting drop oldest first; a take, an 
   // a request that never settles (netfetch gives up after 20 s by itself; the host's own limit is the backstop): a host whose limit is 400 ms
   net = slowNet(); ({ host, ctx } = await boot({ net, netLimitMs: 400 })); vm.runInContext("globalThis.__done = []", ctx);
   post("stuck1", false); post("stuck2", false); post("after", false);
-  await M.until(() => net.held.length === 2);
+  // 0.19.365: at least the two stuck ones (exactly 2 holds only until the limit frees a place and "after" goes out: a poll starved past those
+  // 400 ms on a busy machine never saw 2, and timed out)
+  await M.until(() => net.held.length >= 2 && net.sent.includes("stuck1") && net.sent.includes("stuck2"));
   await M.until(() => net.sent.includes("after"));
   // 0.19.364: timed by when each reached the network, not by when this test's 15 ms poll saw it (on a busy machine the poll saw the two held
   // ones late, and "after" seemed to follow them in less than 300 ms although the host's limit had run its full 400 ms)
