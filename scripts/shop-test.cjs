@@ -1649,3 +1649,26 @@ test("N2c2: 2000 worthless-token coins with the reference in the real payment's 
     t.st.pay.push(payS("ORD-V", 1013, undefined, id("real"))); for (let x = 1013; x <= 1017; x++) { t.st.tip = x; await m.shop.scanOnce(); }
     assert.equal(m.store.order("ORD-V").status, "PAID", "the right token still pays it"); }
 });
+
+// ---- 0.18.314: coins of two worthless tokens taking turns (review-desktop-r6 H5d) wrote shop.json once per coin, since a write was made whenever
+// the token paid or the status changed; and again after every restart, as such coins are not remembered. A write is now made only when the order's
+// status changes. H5c: a right-token coin that pays part of the order after a wrong-token coin said WRONG_TOKEN; it now says UNDERPAID ----
+test("H5d: 2000 coins of two worthless tokens taking turns write shop.json at most twice, and at most twice after a restart; WRONG_TOKEN, and the real payment still pays it; H5c: part paid in the right token after a wrong coin is UNDERPAID", async () => {
+  const T1 = "0x" + "AB".repeat(32), T2 = "0x" + "CD".repeat(32), id = (s) => "0x" + nodeCrypto.createHash("sha256").update(s).digest("hex").toUpperCase();
+  { const t = await setupS("h5d"); t.st.msg = [await sealS(t, t.victim, "ORD-V", 1009, "VICTIM")]; await walk(t, 1001, 1009);
+    t.st.pay = Array.from({ length: 2000 }, (_, i) => Object.assign(payS("ORD-V", 1010, undefined, id("junk " + i), "0.000000001"), { tokenid: i % 2 ? T1 : T2, tokenamount: "1000" }));
+    let w = 0; const wf = fs.writeFileSync; fs.writeFileSync = function (p) { if (/shop\.json/.test(String(p))) w++; return wf.apply(this, arguments); };
+    try {
+      await walk(t, 1010, 1010); assert.ok(w <= 2, "first sight: " + w + " writes"); assert.equal(t.m.store.order("ORD-V").status, "WRONG_TOKEN");
+      const m = await t.reopen(); w = 0; t.st.tip = 1011; await m.shop.scanOnce(); assert.ok(w <= 2, "after a restart: " + w + " writes"); assert.equal(m.store.order("ORD-V").status, "WRONG_TOKEN");
+      t.st.pay.push(payS("ORD-V", 1012, undefined, id("real"))); for (let x = 1012; x <= 1016; x++) { t.st.tip = x; await m.shop.scanOnce(); }
+      assert.equal(m.store.order("ORD-V").status, "PAID", "the right token still pays it"); assert.equal(m.store.order("ORD-V").paid, true);
+    } finally { fs.writeFileSync = wf; } }
+  { const t = await setupS("h5c"); t.st.msg = [await sealS(t, t.victim, "ORD-V", 1009, "VICTIM")];
+    t.st.pay = [Object.assign(payS("ORD-V", 1010, undefined, "0xBAD1", "0.000000001"), { tokenid: T1, tokenamount: "5" })]; await walk(t, 1001, 1012);
+    assert.equal(t.m.store.order("ORD-V").status, "WRONG_TOKEN");
+    t.st.pay.push(payS("ORD-V", 1013, undefined, "0xFE01", "0.6")); await walk(t, 1013, 1016); assert.equal(t.m.store.order("ORD-V").status, "UNDERPAID", "part paid in the right token");
+    t.st.pay.push(Object.assign(payS("ORD-V", 1017, undefined, "0xBAD2", "0.000000001"), { tokenid: T2, tokenamount: "5" })); await walk(t, 1017, 1018);
+    assert.equal(t.m.store.order("ORD-V").status, "UNDERPAID", "a wrong coin after it changes nothing");
+    t.st.pay.push(payS("ORD-V", 1019, undefined, "0xFE02", "0.4")); await walk(t, 1019, 1024); assert.equal(t.m.store.order("ORD-V").status, "PAID"); }
+});

@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.314] — miniMall: coins of two worthless tokens taking turns no longer write the store once per coin; part paid after a wrong coin is UNDERPAID
+
+- The store was written whenever a coin of another token changed the token paid or the order's status, so coins of two worthless tokens taking turns wrote shop.json once per coin: 2000 such coins with an order's reference wrote it about 1000 times (0.8 MB each with a 400-order store), and again after every restart, as such coins are not remembered (review-desktop-r6 H5d). It is now written only when the order's status changes. The token paid is not shown anywhere.
+- A coin of the right token that paid part of an order after a coin of another token left it WRONG_TOKEN (review-desktop-r6 H5c: 0.6 of 1 paid still said WRONG_TOKEN). As in Pandamonium Desktop, a count now replaces WRONG_TOKEN: it says UNDERPAID, then PAID.
+- A comment in main/shop-store.js said 0.18.309 for the change of 0.18.310 (a coin given up on and counted after all); it now says 0.18.310.
+- Tests (scripts/shop-test.cjs): H5d (2000 coins over two worthless tokens: at most 2 writes at first sight and at most 2 after a restart, WRONG_TOKEN, and the real payment still makes it PAID; 977 writes on 0.18.313); H5c (UNDERPAID after a wrong coin, unchanged by another wrong coin, then PAID; fails on 0.18.313).
+
 ## [0.18.313] — comments: no shortened address
 
 - main/nodelog.js's header quoted the node's log line with the AtomiX HTLC address shortened; it now names it whole: 0x0CDCD61692F186EB0BBCFA289F438043F586FF7B3F6864193358E29166E8454A. main/atomix.js's comment on the publish pin named the PandaPools beacon address shortened; it now names it whole, 0x50414E4441504F4F4C53 ("PANDAPOOLS", main/pandapools/service.js SENTINEL). Comments only; nothing in the app changes.

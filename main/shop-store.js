@@ -230,7 +230,7 @@ function countCoins(o, ref, coins, paidTokenid) {
   // paid in full by its proved coins (0.18.311, review-desktop-r5): its note (a coin without its proof, or another order with its reference) is dropped,
   // since a note says "check by hand" and a paid order has nothing left to check. Notes are only ever on orders with a secret, which only proved coins pay.
   if (outcome === "PAID" && o.commit) delete o.notes;
-  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0)) o.status = outcome;   // advance, never downgrade CONFIRMED+
+  if ((STATUS_RANK[outcome] || 0) > (STATUS_RANK[o.status] || 0) || o.status === "WRONG_TOKEN") o.status = outcome;   // advance, never downgrade CONFIRMED+; a right-token coin replaces WRONG_TOKEN (0.18.314)
   return outcome;
 }
 /** The order's gathered dust, counted together when it covers what is still due → the outcome, or "". */
@@ -270,13 +270,13 @@ function recordPayment(ref, paidAmount, paidTokenid, coinid, block) {
   // order's coin list, so on an order without a secret 1000 worthless-token coins with its reference filled ORDER_COINS_MAX and the real payment
   // was never counted. What the vendor sees is as before (WRONG_TOKEN, the token paid); a wrong coin seen again changes nothing and writes nothing.
   if (!rightToken) {
-    const was = o.paidTokenid + "/" + o.status;
+    const was = o.status;   // written only when the status changes (0.18.314, review-desktop-r6 H5d): coins of two worthless tokens taking turns wrote shop.json once per coin
     o.paidTokenid = paidTokenid;
     if (STATUS_RANK.WRONG_TOKEN > (STATUS_RANK[o.status] || 0)) o.status = "WRONG_TOKEN";
-    if (o.paidTokenid + "/" + o.status !== was) flush();
+    if (o.status !== was) flush();
     return "WRONG_TOKEN";
   }
-  // a coin given up on (main/shop.js JUDGE_TRIES) and counted after all, e.g. after a restart (0.18.309, review-desktop-r5 R6): its problem on this
+  // a coin given up on (main/shop.js JUDGE_TRIES) and counted after all, e.g. after a restart (0.18.310, review-desktop-r5 R6): its problem on this
   // order goes; with no problem left the order is checked against the listing again exactly as a fresh order is (what is due, and any mismatch,
   // which still holds it), so it can be paid as the released app paid it. Any other problem still holds it.
   const gave = "payment coin " + cid + " could not be judged: check by hand";
