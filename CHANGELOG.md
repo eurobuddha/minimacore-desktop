@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.400] — After a MegaMMR file import the trading engines start only when one of the node's own earlier blocks is found again; freshness alone never releases
+
+- The owner's decision on the gap the 0.19.399 run found (a file from another genesis, ending at a block under 30 minutes old, was released before any block was compared): in "catchup" the engines are released only when BOTH hold: the node has reached a block height recorded before the import and holds the SAME block id there, and its tip block is at most 30 minutes old.
+- Until then the banner says "Catching up after the MegaMMR import: block X of at least Y" (Y: the lowest recorded height), with "Keep the imported chain" after 10 minutes (the owner decides). A different id at a recorded height is "mismatch", as before.
+- The stuck case (a node left on its file's last block after the network orphaned it: "Invalid TxPoW Super Parents" for every next block): it stays held, and after 10 minutes without the block number growing the banner adds "The node is not receiving new blocks. Resync node gets it moving again." with what Resync does to a MegaMMR, and offers Resync node now. Information, not a verdict; the line goes when the number grows.
+- Tests: scripts/importfile-test.cjs (fails on 0.19.399); zh / ru / uk.
+
 ## [0.19.399] — The real-node proof script follows the simplified marker (third review's cases)
 
 - scripts/megammr-import-private-chain.cjs (manual, not in the gate; same refusals as before): an older file with its RPC cut at 300 ms; a crash with the balance intact (cleared by itself, no banner); a crash after a payment newer than the file (banner "less", then My balance is correct); a crash with a payment arriving while the app is down (banner, then Resync node); a node cut off from G that mined its own fork, importing a newer file from G (allowed; the check says block N differs, Keep the imported chain releases); a file from another genesis. Payments are sent again when a -test chain drops one; L is put back on G's tip (Resync node) when it cannot catch up by itself.

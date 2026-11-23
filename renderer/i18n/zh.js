@@ -5760,13 +5760,11 @@
   "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.": "MegaMMR 文件导入在节点切换到 MegaMMR 模式之后、导入任何内容之前被中断：它的 MegaMMR 是空的。",
   "AtomiX, PandaPools and the Exchange stay stopped until this is settled.": "在此事处理好之前，AtomiX、PandaPools 和交易所保持停止。",
   "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.": "导入前此节点的区块 {block} 是 {before}；导入后它是 {after}。两者之一是分叉。",
-  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.": "MegaMMR 导入后正在追赶：区块 {block}。节点到达网络的最新区块后，AtomiX、PandaPools 和交易所会重新启动。",
   "Cleared. The trading apps start again.": "已清除。交易应用重新启动。",
   "coins: {n}": "币数：{n}",
   "Finish the import": "完成导入",
   "Is this your balance?": "这是你的余额吗？",
   "Keep the chain as it is?": "保持链的现状？",
-  "Keep the chain as it is": "保持链的现状",
   "Keep the imported chain": "保留导入的链",
   "Keep": "保留",
   "My balance is correct: dismiss": "我的余额正确：关闭提示",
@@ -5784,13 +5782,11 @@
   "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.",
   "AtomiX, PandaPools and the Exchange stay stopped until this is settled.",
   "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.",
-  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.",
   "Cleared. The trading apps start again.",
   "coins: {n}",
   "Finish the import",
   "Is this your balance?",
   "Keep the chain as it is?",
-  "Keep the chain as it is",
   "Keep the imported chain",
   "Keep",
   "My balance is correct: dismiss",
@@ -5813,4 +5809,11 @@
   "A resync, a restore or a MegaMMR switch is running",
   "The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.",
   "Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.": "MegaMMR 导入后正在追赶：区块 {block}，至少需要到 {target}。待节点到达该区块、在那里持有与导入前相同的区块并到达网络的最新区块后，AtomiX、PandaPools 和交易所会重新启动。",
+  "The node is not receiving new blocks. Resync node gets it moving again.": "节点没有收到新的区块。“重新同步节点”能让它重新运转。"
+}, { review: [
+  "Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.",
+  "The node is not receiving new blocks. Resync node gets it moving again."
 ] });

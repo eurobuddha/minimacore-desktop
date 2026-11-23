@@ -5773,13 +5773,11 @@
   "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.": "Импорт файла MegaMMR был прерван после переключения узла в режим MegaMMR, до того как что-либо было импортировано: его MegaMMR пуст.",
   "AtomiX, PandaPools and the Exchange stay stopped until this is settled.": "AtomiX, PandaPools и Биржа остаются остановленными, пока это не решено.",
   "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.": "Блок {block} на этом узле до импорта был {before}; после импорта это {after}. Один из двух является ответвлением.",
-  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.": "Узел догоняет сеть после импорта MegaMMR: блок {block}. AtomiX, PandaPools и Биржа запустятся снова, когда узел догонит сеть.",
   "Cleared. The trading apps start again.": "Сброшено. Торговые приложения запускаются снова.",
   "coins: {n}": "монет: {n}",
   "Finish the import": "Завершить импорт",
   "Is this your balance?": "Это ваш баланс?",
   "Keep the chain as it is?": "Оставить цепочку как есть?",
-  "Keep the chain as it is": "Оставить цепочку как есть",
   "Keep the imported chain": "Оставить импортированную цепочку",
   "Keep": "Оставить",
   "My balance is correct: dismiss": "Мой баланс верен: скрыть",
@@ -5797,13 +5795,11 @@
   "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.",
   "AtomiX, PandaPools and the Exchange stay stopped until this is settled.",
   "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.",
-  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.",
   "Cleared. The trading apps start again.",
   "coins: {n}",
   "Finish the import",
   "Is this your balance?",
   "Keep the chain as it is?",
-  "Keep the chain as it is",
   "Keep the imported chain",
   "Keep",
   "My balance is correct: dismiss",
@@ -5826,4 +5822,11 @@
   "A resync, a restore or a MegaMMR switch is running",
   "The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.",
   "Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.": "Узел догоняет сеть после импорта MegaMMR: блок {block} из как минимум {target}. AtomiX, PandaPools и Биржа запустятся снова, когда узел дойдёт до него, там окажется тот же блок, что и до импорта, и узел догонит сеть.",
+  "The node is not receiving new blocks. Resync node gets it moving again.": "Узел не получает новых блоков. «Синхронизация узла» снова запустит его."
+}, { review: [
+  "Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.",
+  "The node is not receiving new blocks. Resync node gets it moving again."
 ] });

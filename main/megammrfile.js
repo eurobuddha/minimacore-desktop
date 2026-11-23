@@ -23,8 +23,10 @@
  *   importing  written right before the import command, with the wallet's balance (confirmed per token, coin count) and the anchors. A
  *              crash, a failure after the node reset its chain, or a broken MegaMMR leave it: VERIFY FIRST. Once the node is up, the same
  *              balance and coin count clear it silently; only a different one shows the banner (Resync node, or "My balance is correct").
- *   catchup    the import's reply was good, or the node printed "All saved..". Released as soon as the node's tip is fresh (FRESH_MS);
- *              meanwhile "catching up: block X", with Keep after OFFER_MS.
+ *   catchup    the import's reply was good, or the node printed "All saved..". Released only when BOTH hold: a recorded block was reached
+ *              and holds the same id as before the import, AND the node's tip is fresh (FRESH_MS). Freshness alone never releases (a file
+ *              from another chain ends at a fresh block too). Meanwhile "block X of at least Y", with Keep after OFFER_MS, and after
+ *              OFFER_MS without the block number growing a plain line that the node is not receiving blocks (Resync node), no verdict.
  *   mismatch   a recorded height holds ANOTHER block id on the new chain (hard evidence only). Said as exactly that ("one of the two is a
  *              fork", never "the file is wrong"); the user chooses: Keep the imported chain, or Turn MegaMMR off and resync.
  * Every stage but switching holds the trading engines (holds(), main.js onEnginesRelease and launch). Every one has an exit that destroys
@@ -68,7 +70,8 @@ const SHOWN_LINES = 8;
 // The anchors (recorded before the import): the tip, NEAR blocks back (a tip can be orphaned by a short reorg) and DEEP back (final). A
 // file whose MegaMMR ends more than BEHIND blocks below this node's tip (30 days at Minima's 50 s target) is WARNED of before the import
 // (fileAge), never refused: a node that is stuck or behind is when an import is needed. After the import the engines wait for the node's
-// tip to be fresh (FRESH_MS: its tip block at most 30 minutes old); after OFFER_MS of catching up the window offers Keep.
+// tip to be fresh (FRESH_MS: its tip block at most 30 minutes old) AND a recorded block to be found with the same id; after OFFER_MS of
+// catching up the window offers Keep, and says so when the block number has not grown for OFFER_MS.
 const DEEP = 300, NEAR = 3, BEHIND = 30 * 24 * 3600 / 50, FRESH_MS = 30 * 60 * 1000, OFFER_MS = 10 * 60 * 1000;
 const STAGES = ["switching", "importing", "catchup", "mismatch"];
 /** Does this marker (config megammrImport, as read) hold the trading engines? Anything but "switching" does, a damaged one too. */
@@ -307,7 +310,7 @@ function create(d) {
   }
   /** At every node status (main.js) and after an import: what the marker owes now (see the top of this file). Never writes a verdict
    *  but "mismatch", which is hard evidence and has its own exits. */
-  let verifying = false;
+  let verifying = false, grow = { key: "", best: 0, at: 0 };
   async function verify() {
     const m = marker();
     if (!m || busy || verifying || node.state !== "running") return;
@@ -339,11 +342,15 @@ function create(d) {
         }
         matched = a.block; break;
       }
-      if (age <= FRESH_MS) {
-        d.log("[app] MegaMMR file import: the node's tip is fresh (block " + tip + ", " + Math.round(age / 1000) + " s old)" + (matched ? " and block " + matched + " is the same block as before the import" : "; none of its earlier blocks could be compared") + ": the trading engines start again");
+      if (matched && age <= FRESH_MS) {
+        d.log("[app] MegaMMR file import: block " + matched + " is the same block as before the import and the node's tip is fresh (block " + tip + ", " + Math.round(age / 1000) + " s old): the trading engines start again");
         setMarker(null); await release(); return;
       }
-      banner({ kind: "catchup", block: tip, offer: Date.now() - Number(m.since || 0) >= OFFER_MS });
+      // growth of the block number, per import (keyed by its marker's since): none for OFFER_MS is said, never concluded on
+      const key = String(m.since || m.at || ""), offerMs = d.offerMs || OFFER_MS;
+      if (grow.key !== key) grow = { key, best: tip, at: Date.now() }; else if (tip > grow.best) { grow.best = tip; grow.at = Date.now(); }
+      const target = Math.min(...(Array.isArray(m.anchors) && m.anchors.length ? m.anchors.map(a => Number(a.block)) : [Number(m.tip) || 0]));
+      banner({ kind: "catchup", block: tip, target, offer: Date.now() - Number(m.since || 0) >= offerMs, stalled: Date.now() - grow.at >= offerMs });
     } catch (e) { /* asked again at the next status */ } finally { verifying = false; }
   }
   const lessThan = (now, before) => { if (!Array.isArray(before)) return true; const g = (w, i) => w.reduce((n, t) => n + (t[0] === "0x00" ? Number(t[i]) : 0), 0), c = (w) => w.reduce((n, t) => n + Number(t[2]), 0);

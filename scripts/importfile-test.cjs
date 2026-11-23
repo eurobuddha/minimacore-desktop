@@ -202,6 +202,7 @@ async function flowWorld(o) {
     runResync: async (c) => { did.push(c.replace(mega, "F")); imported = true; if (o.swap) o.swap(mega); say(o.importLines); return o.import ? o.import(c, { node, say, cfg }) : { status: true }; },
     work: async () => o.work || [], holdEngines: async () => { did.push("hold"); }, releaseEngines: async () => { did.push("release"); } };
   if (o.emit) { node.emit = () => o.emit(node); d.showMs = 0; }
+  if (o.offerMs) d.offerMs = o.offerMs;
   if (o.sleep) d.sleep = (ms) => o.sleep(ms, { node, say, did }); if (o.stallMs) d.stallMs = o.stallMs; if (o.stuckMs) d.stuckMs = o.stuckMs;
   const mf = MF.create(d);
   await imports.pick("megammr");
@@ -481,19 +482,28 @@ test("an old file is warned of, never refused; a node that is behind or stuck ma
   assert.equal(u.r, MF.STATUS_UNKNOWN); assert.ok(!u.did.some(x => /action:(integrity|import)/.test(x)));
 });
 
-test("after the import: released as soon as the node's tip is fresh; never a verdict by time; a different id at a recorded height is said as a fork, with Keep", async () => {
+test("after the import: released only when a recorded block matches AND the tip is fresh (0.19.400); never a verdict by time; a different id at a recorded height is said as a fork, with Keep", async () => {
   const MF = require("../main/megammrfile.js");
   // an older file (the normal case): the node catches up; while its tip is old the banner says "catching up: block X", no verdict, no release
   const after = { tip: 950, tag: "AA", at: Date.now() - 3 * 3600 * 1000 };
   let w = await flowWorld({ after });
   assert.equal(w.cfg.megammrImport.stage, "catchup"); assert.deepEqual(w.cfg.megammrImport.anchors.map(a => a.block), [700, 997, 1000]);
-  assert.deepEqual(w.node.megafileBanner, { kind: "catchup", block: 950, offer: false }); assert.ok(!w.did.includes("release"));
+  assert.deepEqual(w.node.megafileBanner, { kind: "catchup", block: 950, target: 700, offer: false, stalled: false }); assert.ok(!w.did.includes("release"));
   w.cfg.megammrImport.since = Date.now() - MF.OFFER_MS - 1; await w.mf.verify(); assert.equal(w.node.megafileBanner.offer, true, "Keep is offered after 10 minutes");
   Object.assign(after, { tip: 1012, at: Date.now() }); await w.mf.verify();
   assert.equal(w.cfg.megammrImport, null); assert.equal(w.did.at(-1), "release");
-  // fresh, but none of the recorded heights holds a block yet (a node behind that imported a newer file): released, no verdict
+  // fresh, but none of the recorded blocks compared (0.19.400: freshness alone never releases): held, catching up, no verdict
   w = await flowWorld({ before: { tip: 1000 }, chain: (c, imported) => (imported && /^txpow block:/.test(c) ? { status: false, error: "TxPoW not found" } : null) });
-  assert.equal(w.cfg.megammrImport, null); assert.equal(w.did.at(-1), "release");
+  assert.equal(w.cfg.megammrImport.stage, "catchup"); assert.ok(!w.did.includes("release"));
+  // a file from another chain ending at a FRESH block below the recorded heights (what the real node showed with G2's file): held
+  w = await flowWorld({ after: { tip: 650, tag: "BB", at: Date.now() } });
+  assert.equal(w.cfg.megammrImport.stage, "catchup"); assert.ok(!w.did.includes("release"), "never released on freshness alone");
+  // stuck (the orphaned-last-block case): no growth for OFFER_MS: the plain line and Resync node, Keep; still no verdict, still held
+  const stuck = { tip: 960, tag: "AA", at: Date.now() - 3600 * 1000 };
+  w = await flowWorld({ after: stuck, offerMs: 20 });
+  assert.equal(w.node.megafileBanner.stalled, false); await new Promise(r => setTimeout(r, 30)); await w.mf.verify();
+  assert.deepEqual(w.node.megafileBanner, { kind: "catchup", block: 960, target: 700, offer: true, stalled: true }); assert.equal(w.cfg.megammrImport.stage, "catchup");
+  stuck.tip = 961; await w.mf.verify(); assert.equal(w.node.megafileBanner.stalled, false, "the block number grew: the line goes");
   // a recorded height holds ANOTHER block: "mismatch", said as exactly that, nothing released; Keep releases
   w = await flowWorld({ after: { tip: 1040, tag: "BB", at: Date.now() } });
   const m = w.cfg.megammrImport; assert.equal(m.stage, "mismatch"); assert.equal(m.block, 700); assert.ok(!w.did.includes("release"));
@@ -506,7 +516,8 @@ test("after the import: released as soon as the node's tip is fresh; never a ver
   const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8");
   assert.ok(app.includes('MEGA_MISMATCH = N_("Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.")') && !/MEGA_FOREIGN|from a different chain:/.test(app), "never names the file as the wrong one");
   assert.ok(/k === "mismatch" \? \[\[t\("Keep the imported chain"\), megaKeepAsk\], \[t\("Turn MegaMMR off and resync"\), megaOffResync\]\]/.test(app), "two choices: no network call to the host (megammrsync speaks the P2P protocol; the app has no read path to it)");
-  assert.ok(/k === "incomplete" \? \[\[t\("Resync node now"\), megaResyncAsk\], \[t\("My balance is correct: dismiss"\), megaDismiss\]\]/.test(app) && /k === "catchup" \? \(b\.offer \? \[\[t\("Keep the chain as it is"\), megaKeepAsk\]\] : \[\]\)/.test(app));
+  assert.ok(/k === "incomplete" \? \[\[t\("Resync node now"\), megaResyncAsk\], \[t\("My balance is correct: dismiss"\), megaDismiss\]\]/.test(app) && /k === "catchup" \? \[\.\.\.\(b\.offer \? \[\[t\("Keep the imported chain"\), megaKeepAsk\]\] : \[\]\), \.\.\.\(b\.stalled \? \[\[t\("Resync node now"\), megaResyncAsk\]\] : \[\]\)\]/.test(app));
+  assert.ok(app.includes('MEGA_STALLED = N_("The node is not receiving new blocks. Resync node gets it moving again.")') && /\(b\.stalled \? " " \+ t\(MEGA_STALLED\) \+ " " \+ t\(MEGA_RESYNC_EMPTIES/.test(app), "said, with what Resync does to the MegaMMR");
   const ask = app.slice(app.indexOf("async function megaResyncAsk()"), app.indexOf("async function megaResyncNow()"));
   assert.ok(/if \(\(CFG\.params \|\| \{\}\)\.megammr\) \{ showActionSheet\(t\("Resync node"\), \[\{ label: t\("Turn MegaMMR off and resync"\), onclick: megaOffResync \}, \{ label: t\("Resync and keep MegaMMR mode \(empty until re-imported\)"\), onclick: megaResyncNow \}\], t\(MEGA_RESYNC_EMPTIES/.test(ask), "Resync says it empties the MegaMMR");
   const dis = app.slice(app.indexOf("async function megaDismiss()"), app.indexOf("async function megaKeepAsk()"));

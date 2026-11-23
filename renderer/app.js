@@ -799,7 +799,8 @@ const MEGA_OLD_FILE = N_("This file's MegaMMR ends at block {fileTip}, more than
 const MEGA_HELD = N_("AtomiX, PandaPools and the Exchange stay stopped until this is settled.");
 const MEGA_LESS = N_("Your balance shows less than before an unfinished MegaMMR import. Your funds are safe.");
 const MEGA_DIFFERS = N_("Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.");
-const MEGA_CATCHUP = N_("Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.");
+const MEGA_CATCHUP = N_("Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.");
+const MEGA_STALLED = N_("The node is not receiving new blocks. Resync node gets it moving again.");
 const MEGA_MISMATCH = N_("Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.");
 const MEGA_SWITCHING = N_("A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.");
 // megammrsync.java: a MegaMMR node's MegaMMR is cleared before the resync (MinimaDB.getMegaMMR().clear())
@@ -810,11 +811,11 @@ function paintMegaBar(s) {
   const sig = JSON.stringify(b) + "|" + s.state + "|" + I18N.lang(); if (bar.dataset.sig === sig) return; bar.dataset.sig = sig;   // the buttons stay put between statuses
   const k = b.kind;
   el("megaBarText").textContent = k === "incomplete" ? t(b.less ? MEGA_LESS : MEGA_DIFFERS) + " " + t(MEGA_HELD)
-    : k === "catchup" ? t(MEGA_CATCHUP, { block: String(b.block) })
+    : k === "catchup" ? t(MEGA_CATCHUP, { block: String(b.block), target: String(b.target) }) + (b.stalled ? " " + t(MEGA_STALLED) + " " + t(MEGA_RESYNC_EMPTIES, { host: CFG.megammrHost || "" }) : "")
     : k === "mismatch" ? t(MEGA_MISMATCH, { block: String(b.block), before: String(b.before), after: String(b.after) }) + " " + t(MEGA_HELD)
     : t(MEGA_SWITCHING);
   const btns = k === "incomplete" ? [[t("Resync node now"), megaResyncAsk], [t("My balance is correct: dismiss"), megaDismiss]]
-    : k === "catchup" ? (b.offer ? [[t("Keep the chain as it is"), megaKeepAsk]] : [])
+    : k === "catchup" ? [...(b.offer ? [[t("Keep the imported chain"), megaKeepAsk]] : []), ...(b.stalled ? [[t("Resync node now"), megaResyncAsk]] : [])]
     : k === "mismatch" ? [[t("Keep the imported chain"), megaKeepAsk], [t("Turn MegaMMR off and resync"), megaOffResync]]
     : [[t("Finish the import"), () => { BK_PAGE = "megafile"; selectTab("backup"); }], [t("Turn MegaMMR off"), megammrOffNow]];
   const host = el("megaBarBtns"); host.textContent = "";
