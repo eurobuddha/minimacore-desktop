@@ -287,7 +287,7 @@ test("a broken MegaMMR or Cascade at boot: noticed during the boot only, its way
   assert.ok(/this\.lastError = this\.fatalHint \|\| \("node exited unexpectedly \(" \+ \(code \?\? sig\) \+ "\)"\);/.test(src), "an exit says the hint, not 'node exited unexpectedly (0)'");
   // the window: the Node tab offers Turn MegaMMR off whenever the boot said so, stopped or not; the notice once per launch from the status
   const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8");
-  assert.ok(/\$\{s\.megammrBroken \? `<button class="btn btn--danger" id="nMegaOff">/.test(app) && /if \(el\("nMegaOff"\)\) el\("nMegaOff"\)\.onclick = megammrOffNow;/.test(app));
+  assert.ok(/\$\{s\.megammrBroken \? `<button class="btn btn--danger" id="nMegaOff"\$\{busyAttr\(\)\}>/.test(app) && /if \(el\("nMegaOff"\)\) el\("nMegaOff"\)\.onclick = megammrOffNow;/.test(app));
   assert.ok(/\$\{s\.cascadeBroken \? `<button class="btn btn--outline" id="nRescue">\$\{th\("Startup Params"\)\}/.test(app));
   const off = app.slice(app.indexOf("async function megammrOffNow()"), app.indexOf("async function megammrOffNow()") + 400);
   assert.ok(off.indexOf("await showConfirm(") < off.indexOf("api.megammrOff()"), "asks first");

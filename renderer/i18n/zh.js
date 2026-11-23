@@ -5687,3 +5687,10 @@
   "Turn MegaMMR on?",
   "Turn MegaMMR on"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "A MegaMMR import is running": "MegaMMR 导入正在进行",
+  "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run.": "现在退出会使链只被替换了一半。你的资金是安全的，但在运行“重新同步节点”（备份与恢复）之前，余额将不完整。"
+}, { review: [
+  "A MegaMMR import is running",
+  "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run."
+] });

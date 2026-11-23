@@ -179,7 +179,9 @@ function showKeyModeBlock(msg) {
 }
 function onStatus(s) {
   if (s.keyModeAlert) showKeyModeBlock(MainSaid.say(s.keyModeAlert));
+  const wasBusy = nodeBusyNow();
   LAST_STATUS = s;   // kept for a language change: the footer is painted again from it
+  if (wasBusy !== nodeBusyNow() && activeView === "backup" && BK_PAGE === "") renderBackup();   // its rows follow an import or a resync
   paintKeyMode(s.keyMode);
   paintFooter(s);
   nodeState = s.state;
@@ -427,8 +429,8 @@ function renderParams(host, firstRun, done) {
         ${MINIMA_PARAMS.MANAGED_INFO.map(m => `<div class="prow prow--managed"><span class="prow__l">-${esc(m.flag)}</span><span class="prow__note">${th(m.note)}</span></div>`).join("")}
       </div>
     </details>
-    <button class="btn btn--outline ps-btn ps-btn--save" id="pSave">${th("Save")}</button>
-    ${firstRun ? "" : `<button class="btn btn--primary ps-btn ps-btn--main" id="pSaveRestart">${th("Save & Restart Node")}</button>`}`;
+    <button class="btn btn--outline ps-btn ps-btn--save" id="pSave"${busyAttr()}>${th("Save")}</button>
+    ${firstRun ? "" : `<button class="btn btn--primary ps-btn ps-btn--main" id="pSaveRestart"${busyAttr()}>${th("Save & Restart Node")}</button>`}`;
 
   // ---- the full editor (rebuilt from P so the switches and presets show through) ----
   function paramControl(it, val) {
@@ -610,7 +612,7 @@ function renderBackup() {
       ["keys", t("Private keys"), t("Seed phrase, or rebuild this wallet from a phrase.")]];
     if ((CFG.params || {}).megammr) rows.splice(rows.findIndex(r => r[0] === "megafile") + 1, 0, ["megaoff", t("Turn MegaMMR off"), t("Go back to a light node. The node's MegaMMR file is deleted.")]);
     host.innerHTML = head(t("Backup & Recovery"), t("Save a copy of this node, put it back, or rebuild it from another node.")) + (running ? "" : stopped) +
-      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running || r[0] === "megaoff" ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
+      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${nodeBusyNow() && !/^(chat|mail|create)$/.test(r[0]) ? busyAttr() : running || r[0] === "megaoff" ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
     host.querySelectorAll(".bk-row").forEach(b => b.onclick = () => {
       const k = b.dataset.bk;
       if (k === "chat") showActionSheet(t("Chat backup"), [{ label: t("Back up chats"), onclick: () => ChatPanel.backup() }, { label: t("Restore chats"), onclick: () => ChatPanel.restore() }]);
@@ -1132,6 +1134,10 @@ function chooseLanguage() {
   });
 }
 let LAST_STATUS = null;
+/** A MegaMMR file import, a restore, a MegaMMR switch or a resync is running (main.js nodeBusy): what would stop, restart or reset the
+ *  node, or change how it starts, is disabled meanwhile (main refuses it anyway, with the reason). */
+const nodeBusyNow = () => !!(LAST_STATUS && (LAST_STATUS.resyncing || LAST_STATUS.megafileBusy));
+const busyAttr = () => (nodeBusyNow() ? ` disabled title="${th("A resync, an import, a restore or a MegaMMR switch is already running. Wait for it to finish. Nothing was changed.")}"` : "");
 function relang() {
   I18N.apply(document);
   el("barPage").textContent = activeView === "backup" ? t(BK_TITLE[BK_PAGE]) : t(SUB_TITLE[activeView] || "");
@@ -3391,11 +3397,11 @@ function renderNode(s) {
     ${s.megammrBroken && s.state !== "error" ? `<div class="home-row"><span class="home-row__k">${th("This node's MegaMMR does not fit its chain")}</span><span class="home-row__v" style="color:var(--red);white-space:pre-wrap">${th(MEGAMMR_BROKEN_NOTE)}</span></div>` : ""}
     ${s.portOwner ? row(t("Port {basePort} held by", { basePort: esc(s.portOwner.port || CFG.basePort) }), t("pid {pid} · {command}", { pid: esc(s.portOwner.pid), command: esc(s.portOwner.command) })) : ""}
     <div class="home-actions">
-      <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? th("Start node") : th("Restart node")}</button>
-      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">${th("Start again")}</button>` : ""}
-      ${s.megammrBroken ? `<button class="btn btn--danger" id="nMegaOff">${th("Turn MegaMMR off")}</button>` : ""}
+      <button class="btn btn--outline" id="nRestart"${busyAttr()}>${s.state === "stopped" ? th("Start node") : th("Restart node")}</button>
+      ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim"${busyAttr()}>${th("Start again")}</button>` : ""}
+      ${s.megammrBroken ? `<button class="btn btn--danger" id="nMegaOff"${busyAttr()}>${th("Turn MegaMMR off")}</button>` : ""}
       ${s.cascadeBroken ? `<button class="btn btn--outline" id="nRescue">${th("Startup Params")}</button>` : ""}
-      ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib">${contributing ? th("Stop contributing to the network") : th("Contribute to the network")}</button>` : ""}
+      ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib"${busyAttr()}>${contributing ? th("Stop contributing to the network") : th("Contribute to the network")}</button>` : ""}
       <button class="btn btn--outline" id="nReconfig">${th("Reconfigure node")}</button>
     </div>
     </div>`;

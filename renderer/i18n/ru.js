@@ -5700,3 +5700,10 @@
   "Turn MegaMMR on?",
   "Turn MegaMMR on"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "A MegaMMR import is running": "Идёт импорт MegaMMR",
+  "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run.": "Если выйти сейчас, цепочка останется заменённой наполовину. Ваши средства в безопасности, но баланс будет неполным, пока не будет выполнена «Синхронизация узла» (Резервное копирование и восстановление)."
+}, { review: [
+  "A MegaMMR import is running",
+  "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run."
+] });

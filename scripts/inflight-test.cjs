@@ -230,7 +230,8 @@ test("main: Restore from file asks the stop guard before its resync, and Apply a
   walk(sf);
   for (const allow of [false, true]) {
     const did = [], h = {};
-    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
+    const ask = async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); };
+    const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: ask, guardStop: ask,   // the restore runs inside its own exclusive: the stop guard alone (0.19.391)
       restore: { restoreBackup: async (o, d) => d.run("megammrsync action:resync host:h:1 file:b.bak") }, runResync: async (c) => { did.push("resync"); return {}; },
       config: { load: () => ({ keyMode: "classic", params: {} }), save: (p) => did.push("save " + JSON.stringify(p)) }, saveConfigPatch: (p) => did.push("patch " + JSON.stringify(p)),
       node: { state: "running", blockKeysSupported: () => true, parlonsBlocker: () => "", jarPath: () => "/x/minima.jar", restart: async () => did.push("restart"), snapshot: () => ({}) }, chat: { stopLoop() {} }, walletWork: async () => [], path, require, held: (op) => op(),

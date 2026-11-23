@@ -284,8 +284,10 @@ ipcMain.handle("mcd:appVersion", () => app.getVersion());
 ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, title: flavor.windowTitle, updates: !updater.OFF, loginItem: flavor.loginItem && !flavor.test, basePort: flavor.basePort }));
 ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => saveConfigPatch(patch));
+const NODE_START_KEYS = ["params", "extraArgs", "dataFolder", "basePort", "rpcPortManual", "heapMb", "nodeKind", "contribute", "network", "customConnect"];
 /** The window's config patch, saved (also by a restart that carries one: mcd:nodeRestart, 0.19.287). */
 function saveConfigPatch(patch) {
+  if (patch && Object.keys(patch).some(k => NODE_START_KEYS.includes(k))) notBusy();   // how the node starts: never while an import or a resync runs
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
   const c = config.save(patch || {});
@@ -342,7 +344,7 @@ const imports = importfile.create({ platform: process.platform, t: (s) => (curre
 ipcMain.handle("mcd:pickImport", async (_e, kind) => { requireRunning(); return imports.pick(kind === "megammr" ? "megammr" : "backup"); });
 // Resync from a MegaMMR FILE (which turns MegaMMR on) and Turn MegaMMR off: main/megammrfile.js. One of these, or a restore, at a time.
 const megafile = require("./megammrfile").create({ node, config, status: () => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "status"),
-  call: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), imports, mayStop: () => mayStop(), held, runResync,
+  call: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), imports, mayStop: () => guardStop(), held, runResync,   // inside its own exclusive: the stop guard alone
   // what is open is what restore refuses on (main/restore.js activeWorkList), but this wallet's own standing pools: the import keeps the wallet
   work: async () => (await walletWork()).filter(i => !String(i).endsWith(restore.CONFIRM_HINT)),
   holdEngines: () => node.onEnginesHold(), releaseEngines: () => node.releaseEngines(), fs, totalmem: () => require("os").totalmem(), platform: process.platform,
@@ -350,7 +352,7 @@ const megafile = require("./megammrfile").create({ node, config, status: () => r
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", async () => {
   const r = await restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(), picked: (shown) => imports.confirm("backup", shown),
-    running: node.state === "running", run: async (c) => { await mayStop(); return held(() => runResync(c)); }, work: walletWork });   // the stop guard right before the node gets it (0.19.294)
+    running: node.state === "running", run: async (c) => { await guardStop(); return held(() => runResync(c)); }, work: walletWork });   // the stop guard right before the node gets it (0.19.294)
   if (r && r.status === true) imports.forget("backup");   // restored: a later restore chooses its file again (a refused one, a wrong password, keeps it for the retry)
   return r;
 }));
@@ -363,7 +365,7 @@ ipcMain.handle("mcd:pickFolder", async () => {
 });
 
 ipcMain.handle("mcd:nodeStatus", () => node.snapshot());
-ipcMain.handle("mcd:nodeStart", async () => { await node.start(); return node.snapshot(); });
+ipcMain.handle("mcd:nodeStart", async () => { notBusy(); await node.start(); return node.snapshot(); });
 // Stop whatever node holds our port/data folder (an earlier launch's), then start. Same reclaim as every start.
 ipcMain.handle("mcd:nodeReclaim", async (_e, ack) => { await mayStop(ack, "reclaim"); return held(async () => { await node.stop(); await node.start(); return node.snapshot(); }); });
 ipcMain.handle("mcd:nodeStop", async (_e, ack) => { await mayStop(ack, "stop"); return held(async () => { await node.stop(); return node.snapshot(); }); });
@@ -385,7 +387,14 @@ const stopGuard = inflight.stopGuard({ running: () => node.state === "running", 
     const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("Stop the node anyway"), lang.t("Keep it running")], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle, message: w.title, detail: w.message });
     return r.response === 0;
   } });
-async function mayStop(ack, action) { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); }
+async function mayStop(ack, action) { notBusy(); return guardStop(ack, action); }
+async function guardStop(ack, action) { if (!await stopGuard.pass(ack, action)) throw new Error("The node keeps running: nothing was stopped."); }
+// While a MegaMMR file import, a restore, a MegaMMR switch or a resync runs, nothing else stops, restarts or resets the node, nor
+// changes how it starts: Stop, Restart, Start, the node kind, Startup Params, Resync, Rebuild, the Terminal's stopping commands and the
+// Web Wallet's MegaMMR switch all come through mayStop (or saveConfigPatch / nodeStart), refused with the plain reason. A restart in the
+// middle of an import cuts it after the node reset its chain; a start without -megammr deletes the MegaMMR it is writing.
+const nodeBusy = () => megafile.busy() || !!node.resyncing;
+function notBusy() { if (nodeBusy()) throw new Error(require("./megammrfile").BUSY); }
 node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happened ends the guard's hold (0.19.316)
 // What a yes let go, run so that a failure which left the node running ends the hold (0.19.319): a restore refused for a wrong
 // password, an import that fails fast or a settings save that throws, retried at once, was refused for up to 30 s.
@@ -1117,6 +1126,7 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 //  - Either way the node is then stopped through node.stop(): every engine first finishes what it has at the node,
 //    each within its own bound and 30 s in all (0.18.117), so a transaction posted in the last second is recorded.
 let quitting = false, quitAsking = false;
+const IMPORT_QUIT_WARNING = N_("Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run.");
 const systemQuit = inflight.recently();   // true for about a minute after the system asked: a cancelled shutdown does not silence the question for the session
 app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit.mark(); }); } catch (e) { /* Windows: session-end below */ } });
 app.on("browser-window-created", (_e, w) => { w.on("session-end", () => { systemQuit.mark(); }); w.on("query-session-end", () => { systemQuit.mark(); }); });
@@ -1131,6 +1141,14 @@ app.on("before-quit", (e) => {
   if (quitAsking) { if (win && !win.isDestroyed()) { win.show(); win.focus(); } return; }   // a second Quit while the question is open: show it
   quitAsking = true;
   (async () => {
+    // A MegaMMR file import cut by the quit leaves the chain half-replaced (main/megammrfile.js): asked first, "Stay open" the default.
+    // A quit the system asked for is not held behind it (the import's marker then says what is owed at the next launch).
+    if (megafile.busyWhat() === "import" && !systemQuit.on()) {
+      if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+      const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("Quit anyway"), lang.t("Stay open")], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle,
+        message: lang.t("A MegaMMR import is running"), detail: lang.t(IMPORT_QUIT_WARNING) }).catch(() => ({ response: 1 }));
+      if (r.response !== 0 && !systemQuit.on()) { quitAsking = false; return; }
+    }
     const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l), t: (currentLang(), lang.t),   // the question in the app's language; the log line stays English
       ask: async (w) => {
         if (win && !win.isDestroyed()) { win.show(); win.focus(); }

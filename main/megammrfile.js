@@ -35,9 +35,11 @@ function create(d) {
   /** One of these at a time, and none during a resync the node is already running (node-manager runResync). */
   async function exclusive(what, fn) {
     if (busy || node.resyncing) throw new Error(BUSY);
-    busy = what;
-    try { return await fn(); } finally { busy = ""; }
+    busy = what; said();
+    try { return await fn(); } finally { busy = ""; said(); }
   }
+  /** The window disables what would stop or reset the node meanwhile (main.js refuses it anyway): the node's status carries it. */
+  function said() { node.megafileBusy = busy; if (typeof node.emit === "function" && typeof node.snapshot === "function") node.emit("status", node.snapshot()); }
   /** true / false, or null: the status could not be read, and nothing is decided on an unknown. */
   const keeps = async () => { const st = await Promise.resolve().then(d.status).catch(() => null); return st && st.status === true && st.response ? !!st.response.megammr : null; };
   async function nodeUp(ms) { for (const end = Date.now() + ms; Date.now() < end; await d.sleep(1000)) { if (node.state === "running") return true; if (node.state === "error") return false; } return false; }
@@ -119,7 +121,7 @@ function create(d) {
   }
 
   const freeDisk = (dir) => { try { const st = d.fs.statfsSync(dir); return st.bavail * st.bsize; } catch (e) { return null; } };
-  return { importMegammr, megammrOff, exclusive, busy: () => !!busy };
+  return { importMegammr, megammrOff, exclusive, busy: () => !!busy, busyWhat: () => busy };
 }
 
 module.exports = { create, BUSY, STATUS_UNKNOWN, ENGINES, IMPORT_OPEN, CHECK_FAILED, CHECK_FAILED_BACK, FAILED, FAILED_BACK };

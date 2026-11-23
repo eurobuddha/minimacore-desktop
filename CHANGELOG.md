@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.391] — Nothing stops, restarts or resets the node while a MegaMMR file import (or a restore, a MegaMMR switch, a resync) runs; Quit asks first
+
+- **Refused, with the plain reason** ("A resync, an import, a restore or a MegaMMR switch is already running. Wait for it to finish. Nothing was changed."), while `megafile.busy() || node.resyncing`: Stop, Restart (Node tab, tray, Save & Restart), Start, Start again, the node kind switch, Contribute, Startup Params' Save (any change to how the node starts: params, extra arguments, data folder, ports, memory, kind, network), Resync, Rebuild, the Web Wallet's MegaMMR switch and the Terminal's commands that reset or stop the node. All of them already went through main's `mayStop`; the check is there (and in `saveConfigPatch` / `mcd:nodeStart`). The import and the restore ask the stop guard alone from inside their own exclusive (`guardStop`). A restart in the middle of an import used to cut it after the node had reset its chain; a Startup Params save of MegaMMR off made the import's own restart delete the MegaMMR it was writing.
+- **Quit during an import asks**: "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run." Stay open is the default. A quit the system asked for (logout, power off) is not held behind it.
+- **The window disables** those buttons meanwhile: the node's status carries `megafileBusy` (what main/megammrfile.js is running).
+- Tests: scripts/megafile-guard-test.cjs (new, in test:import; fails on 0.19.390); zh / ru / uk for the two new texts.
+
 ## [0.19.390] — The MegaMMR questions say what is true: a trust warning on the import, no memory claim, what catches the node up; Startup Params' MegaMMR switch asks; Restore says the +256 key uses
 
 - **Resync from a MegaMMR file's question**: adds "Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances." Removes the memory figure (the node's memory is a setting, and the room is checked by the app). No longer suggests Resync node (megammrsync clears the MegaMMR: megammrsync.java). Says what catches the node up: its peers, by itself, as after any restart.
