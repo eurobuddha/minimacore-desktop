@@ -70,6 +70,8 @@
  *               (0.19.414) An UNANSWERED fill not applied yet survives a restart: its fill_unanswered_ record is the
  *               persisted row, found again by its `applied` id (rescanUnknown); a later 'lost' puts back only what was
  *               taken off (its `applied` id on the order), never an amount that was never deducted.
+ *               (0.19.415) DOWNGRADE GUARD (adoptOldFills): a fill an app before 0.19.406 recorded and applied itself
+ *               on this store is listed as applied, never deducted again.
  *   SAID        (0.19.406) a save that did not land (the engine's store lock, a fill not applied, a relock that failed), a
  *               take refused for one of the reasons above: a packet to the screens ({type: save_failed | take_refused |
  *               relock_failed, message}), never only a log line (renderer/dexicon-ui.js shows it).
@@ -161,14 +163,14 @@ function tryBoot() {
                 ME = me; STORE_MINE = true;
                 RELAY = new AX.relay.Client(AX.relay.mdsTransport(AX.mds));
                 AX.prng.init(function (pe) { if (pe) log('PRNG init failed: ' + pe.message + ' — sealed replies will fail until it succeeds'); });
-                loadRelays(function () {
+                loadRelays(function () { adoptOldFills(function () {   // DOWNGRADE GUARD: before anything can reconcile fills
                     AX.mds.kvSet('publicId', ME.publicId(), function () {});
                     AX.mds.kvSet('attest_sign', ATTEST_OFF, function () {});   // ATTEST OFF (header)
                     READY = true;
                     log('booted — publicId ' + ME.publicId() + '; relays: ' + RELAY.relays.length);
                     pdBoot();
                     refreshAddresses(function () { tick(function () {}); });
-                });
+                }); });
             });
           });
         });
@@ -520,7 +522,37 @@ function rescanUnknown(done) {
         });
     });
 }
-function retryFills(done) { rescanUnknown(function () { retryPending(done); }); }
+/** DOWNGRADE GUARD (0.19.415): an app before 0.19.406 (engine 0.0.91) running on this store after this engine set an
+ *  order's fillsFrom applies its fills itself and writes their fill_ records WITHOUT `verified` (every record this
+ *  engine writes has it, since 0.0.145) and without listing them in `fills`. Back on this engine, the refresh deducted
+ *  them a second time (100, fills of 30 here and 20 there: 30 left where 50 was right). Once per engine, before the
+ *  first take, such a record of a live order (ts at or after its fillsFrom, not listed) is listed as applied, so
+ *  reconcileFills skips it. The vendored engine cannot be told; its `fills` list is what it reads. */
+var oldFillsAdopted = false;
+function adoptOldFills(done) {
+    if (oldFillsAdopted) return done();
+    AX.maker.load(AX.mds, function (e, list) {
+        if (e) return done();
+        var live = list.filter(function (o) { return o.status === 'live' && o.fillsFrom > 0 && o.orderId; });
+        if (!live.length) { oldFillsAdopted = true; return done(); }
+        var pats = live.map(function (o) { return "v LIKE '%" + ('"orderId":' + JSON.stringify(String(o.orderId))).split("'").join("''") + "%'"; });
+        AX.mds.sql("SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%' AND (" + pats.join(' OR ') + ")", function (r) {
+            if (!r || !r.status) return done();   // tried again next tick
+            var n = 0;
+            (r.rows || []).forEach(function (row) {
+                var f; try { f = JSON.parse(row.V || row.v); } catch (x) { return; }
+                if (!f || f.role !== 'maker' || f.status === 'lost' || f.hasOwnProperty('verified') || !/^0x[0-9A-Fa-f]{64}$/.test(String(f.txpowid))) return;
+                var o = AX.maker.find(list, f.orderId);
+                if (!o || o.status !== 'live' || !(Number(f.ts) >= o.fillsFrom) || (o.fills || []).indexOf(f.txpowid) >= 0) return;
+                o.fills = (o.fills || []).concat([f.txpowid]); n++;
+                log('fill ' + f.txpowid + ' of ' + f.orderId + ' (' + f.filled + ' MINIMA) was recorded and applied by an older version of this app: it is not deducted again');
+            });
+            if (!n) { oldFillsAdopted = true; return done(); }
+            AX.maker.save(AX.mds, list, function (e2, bumped, lost) { if (!e2 && !(lost || []).length) oldFillsAdopted = true; else log('older fills not listed yet (' + (e2 ? e2.message : 'the orders changed meanwhile') + '); tried again'); done(); });
+        });
+    });
+}
+function retryFills(done) { adoptOldFills(function () { rescanUnknown(function () { retryPending(done); }); }); }
 function retryPending(done) {
     var ids = Object.keys(FILL_PENDING); if (!ids.length) return done();
     AX.maker.load(AX.mds, function (e, list) {

@@ -1505,6 +1505,27 @@ test("0.19.414 (gate review MINOR-6): an unanswered fill whose save never landed
   assert.equal((await stored(Y)).remaining, "100", "never added twice");
 });
 
+test("0.19.415 (gate review MINOR-8): back from an app before 0.19.406, a fill that app recorded and applied itself (no `verified`) is listed as applied, never deducted again; this engine's own unapplied record still is", async () => {
+  const b = await boot({ tickMs: 1e9 }), X = "0x" + "5".repeat(32), Z = "0x" + "6".repeat(32), now = Math.floor(Date.now() / 1000), T = (c) => "0x" + c.repeat(32);
+  const kv = (k, v) => sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + JSON.stringify(v) + "')");
+  const stored = async (id) => JSON.parse((await sql(b.host, "SELECT v FROM ax_kv WHERE k='myorders'"))[0].V).find(o => o.orderId === id);
+  const rec = (id, t, filled, ts, verified) => Object.assign({ role: "maker", orderId: id, side: "sell", price: "0.0123", filled, txpowid: t, coins: [], spent: [], taker: "0xab", ts, status: "settling" }, verified ? { verified } : {});
+  // X: 100, a fill of 30 by this engine (listed), then a fill of 20 by 0.19.401 on the same store (applied there: 50, not listed, no `verified`)
+  // Z: 100, a fill of 10 this engine recorded but whose save never landed (not listed, `verified`): the refresh must still deduct it
+  const order = (id, rem, fills) => ({ orderId: id, side: "sell", price: "0.0123", amount: "100", remaining: rem, coins: ["0x" + "C5".repeat(32)], scripts: [], address: b.node.ADDRESS, seq: now - 5, expiry: now + 3600, status: "live", fillsFrom: now - 100, fills });
+  await kv("myorders", [order(X, "50", [T("A1")]), order(Z, "100", [])]);
+  await kv("fill_" + T("A1"), rec(X, T("A1"), "30", now - 60, "100"));
+  await kv("fill_" + T("B2"), rec(X, T("B2"), "20", now - 30));
+  await kv("fill_" + T("C3"), rec(Z, T("C3"), "10", now - 20, "100"));
+  await b.host.stop(); await b.host.start(); await M.until(() => b.host.status().ready);   // the upgrade back to this build
+  const ctx = b.host._ctx();
+  assert.ok((await stored(X)).fills.includes(T("B2")), "the older app's fill is listed as applied before the engine is ready");
+  ctx.__out = null;
+  vm.runInContext("AX.maker.load(AX.mds, function (e, l) { AX.maker.reconcileFills(AX.mds, l, function (ch) { __out = { x: AX.maker.find(l, '" + X + "').remaining, z: AX.maker.find(l, '" + Z + "').remaining }; }); });", ctx);
+  await M.until(() => ctx.__out);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.__out)), { x: "50", z: "90" }, "X keeps 50 (0.19.414 made it 30); Z's own unapplied fill is still deducted");
+});
+
 test("0.19.406: the FAST backing-coin settings: read and written by the app's own Settings (only what is given), never by the page", async () => {
   const b = await boot();
   assert.deepEqual(b.host.fastCoins(), { legacyFresh: true, coinMaxAge: "", maxAgeLimit: 900 }, "unset: refresh ON, 900 blocks");

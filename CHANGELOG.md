@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.415] — Back from an older build, a fill that build applied itself is never deducted again
+
+- main/dexicon/service.desktop.js DOWNGRADE GUARD: an app before 0.19.406 (engine 0.0.91) running on this store applies its fills itself and records them without `verified` and without listing them on the order. Back on this build, the refresh deducted them a second time (an order of 100 with a fill of 30 here and 20 there was left at 30, not 50). At boot, before the engine is ready, such a record of a live order (from its fillsFrom on, not listed) is listed as applied; this build's own unapplied records (which always carry `verified`) are still deducted. Going back and forth between builds stays discouraged: cancel your FAST orders first.
+
 ## [0.19.414] — An unanswered fill not yet applied survives a restart; a "lost" one never adds back what was never taken off
 
 - main/dexicon/service.desktop.js: a fill whose txnpost the node never answered, and whose afterFill did not save, was pending only in memory: after a restart its order stood at full size and took takes against it (its record has no txpowid, so no refresh deducts it). Once per engine, before the first take, every fill_unanswered_ record of a live order that does not list its `applied` id (status unknown or done) is pending again: the order refuses takes and the retry applies it once. An unanswered fill counts as applied only by that id (never by fillsFrom's time). When the chain says it was never posted, the amount goes back on the order only if it was taken off; before, a fill that was never applied was added on top (100 became 130).
