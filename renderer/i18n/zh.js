@@ -5624,7 +5624,6 @@
   "Turn MegaMMR off?": "关闭 MegaMMR？",
   "MegaMMR is off. The node is restarting as a light node.": "MegaMMR 已关闭。节点正在作为轻节点重新启动。",
   "This node's MegaMMR does not fit its chain": "此节点的 MegaMMR 与其链不匹配",
-  "The node started, but says its MegaMMR does not end where its chain begins (\"MEGAMMR is BROKEN\"): the file was older than, or from another chain than, the chain imported with it. Your wallet, keys and funds are not touched: nothing of the wallet was replaced.\n\nTo go back to a light node: Turn MegaMMR off (the MegaMMR file is deleted at that restart). If the node is then behind, use Resync node to catch up from a MegaMMR node.": "节点已启动，但报告其 MegaMMR 没有在链的起点处结束（\"MEGAMMR is BROKEN\"）：该文件比一同导入的链更旧，或来自另一条链。您的钱包、密钥和资金不会被更改：钱包没有被替换。\n\n要回到轻节点：关闭 MegaMMR（MegaMMR 文件会在那次重新启动时被删除）。如果节点之后落后，请使用“重新同步节点”从 MegaMMR 节点追上。",
   "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。导入它大约需要 {need} MB 的节点内存，而节点设置为 {heap} MB。请在设置中把 Parlons 节点内存提高到至少 {need}，然后重试。未做任何更改。",
   "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.": "节点的数据文件夹剩余 {free} MB，而此次导入大约需要 {need} MB。请腾出空间，然后重试。未做任何更改。"
 }, { review: [
@@ -5636,7 +5635,6 @@
   "Turn MegaMMR off?",
   "MegaMMR is off. The node is restarting as a light node.",
   "This node's MegaMMR does not fit its chain",
-  "The node started, but says its MegaMMR does not end where its chain begins (\"MEGAMMR is BROKEN\"): the file was older than, or from another chain than, the chain imported with it. Your wallet, keys and funds are not touched: nothing of the wallet was replaced.\n\nTo go back to a light node: Turn MegaMMR off (the MegaMMR file is deleted at that restart). If the node is then behind, use Resync node to catch up from a MegaMMR node.",
   "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.",
   "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed."
 ] });
@@ -5670,4 +5668,13 @@
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.",
   "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).": "此节点的 MegaMMR 与其链不匹配（节点报告 \"Your MEGAMMR is BROKEN\"）。您的钱包、密钥和资金没有被更改。\n\n请点击“关闭 MegaMMR”：MegaMMR 文件会被删除，节点作为轻节点重新启动。之后如需再次使用 MegaMMR，请导入一个 MegaMMR 文件（备份与恢复，从 MegaMMR 文件重新同步）。",
+  "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. Press Turn MegaMMR off on this Node tab: the MegaMMR file is deleted and the node starts again as a light node.": "此节点的 MegaMMR 与其链不匹配（节点报告 \"Your MEGAMMR is BROKEN\"），因此节点每次启动都会停止。您的钱包、密钥和资金没有被更改。请在此节点标签页点击“关闭 MegaMMR”：MegaMMR 文件会被删除，节点作为轻节点重新启动。",
+  "This node's chain files do not fit together (the node says \"Your Cascade is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. In Startup Params, set Rescue node to a MegaMMR node (host:port, the one Resync node uses) and press Save, then press Start again: the node rebuilds its chain from that node and stops. Then press Start again once more.": "此节点的链文件彼此不匹配（节点报告 \"Your Cascade is BROKEN\"），因此节点每次启动都会停止。您的钱包、密钥和资金没有被更改。请在启动参数中把“救援节点”设为一个 MegaMMR 节点（host:port，即“重新同步节点”使用的那个）并点击保存，然后点击“重新启动”：节点会从该节点重建它的链并停止。然后再点击一次“重新启动”。"
+}, { review: [
+  "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).",
+  "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. Press Turn MegaMMR off on this Node tab: the MegaMMR file is deleted and the node starts again as a light node.",
+  "This node's chain files do not fit together (the node says \"Your Cascade is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. In Startup Params, set Rescue node to a MegaMMR node (host:port, the one Resync node uses) and press Save, then press Start again: the node rebuilds its chain from that node and stops. Then press Start again once more."
 ] });

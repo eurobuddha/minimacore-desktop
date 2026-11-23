@@ -225,6 +225,7 @@ test("no code decides by matching text that is translated (regex, ===, includes,
     "renderer/mail.js may have been submitted": "main/mail.js's own English error, read from the raw message (never translated)",
     "renderer/dexicon-ui.js CONFIRMED": "the Exchange engine's own stage name (dexicon/lib/activity.js chip), read for its tone before it is translated for the screen",
     "main/node-manager.js  Parlons Node ": "a line of the parlons-node jar's own log",
+    "main/node-manager.js  is BROKEN": "a line of the node's own boot log (MinimaDB.java loadAllDB), quoted in the hint it raises (0.19.389)",
     "main/pandapools.js  MINIMA for ": "the PandaPools engine's English summary of a swap"
   };
   const keys = new Set(); for (const c of OTHERS) { const cat = I18N.catalog(c); for (const k of Object.keys(cat)) if (cat[k] !== k) keys.add(k); }

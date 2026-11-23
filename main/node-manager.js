@@ -43,6 +43,11 @@ const HEALTH_EVERY_MS = 10_000;
 //    as key uses keys!"), and MinimaLogger's prefix "Minima @ dd/MM/yyyy HH:mm:ss [<memory>] : "), anchored at both ends;
 //  - the Parlons Node's status lines by the exact prefix it prints them with (ParlonsNodeMain, MinimaFlags), from the
 //    first character of the line.
+// The node's databases do not fit together (core/minima-core MinimaDB.java loadAllDB). Without -mobile it then HALTS at every start
+// (Runtime.halt(0): exit code 0); with -mobile (the light role) it goes on with a start-up error and the MegaMMR that does not fit.
+// Proven on a private chain (0.19.389): a MegaMMR file whose MegaMMR is newer than its blocks, imported, makes the first.
+const MEGAMMR_BROKEN_HINT = "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. Press Turn MegaMMR off on this Node tab: the MegaMMR file is deleted and the node starts again as a light node.";
+const CASCADE_BROKEN_HINT = "This node's chain files do not fit together (the node says \"Your Cascade is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. In Startup Params, set Rescue node to a MegaMMR node (host:port, the one Resync node uses) and press Save, then press Start again: the node rebuilds its chain from that node and stops. Then press Start again once more.";
 const BLOCK_BOOT_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Using NEW Block number as key uses keys!$/;
 const PARLONS = { version: /^\[parlons-node\] Parlons Node (\d+\.\d+\.\d+) /, up: "[parlons-node] account up: ", cape: "[parlons-node] Maxima cape up on port ",
   failed: ["[parlons-node] account layer FAILED to start: ", "[parlons-node] Maxima cape FAILED to start: "], refusing: "[parlons-node] REFUSING to start: " };
@@ -455,6 +460,7 @@ class NodeManager extends EventEmitter {
     this.fatalHint = "";
     this.parlons = { ready: false, error: "", version: "", cape: false };
     this.megammrBroken = false;   // this start's boot said its MegaMMR does not fit its chain (nodeLine)
+    this.cascadeBroken = false;   // ...or that its cascade does not fit its chain tree
     this.keyModeChecked = false; this.keyModeTries = 0; this.polled = false; this.carry = { out: "", err: "" }; this.cont = { out: null, err: null };
     if (this.keyModeAlert) { this.lastError = this.keyModeAlert; this.log("[app] node NOT started: " + this.keyModeAlert); this.setState("error"); return; }
     // Before anything else: a wallet is only ever started in the key mode it was made in. A block wallet on a
@@ -775,7 +781,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megammrBroken: !!this.megammrBroken,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
@@ -832,10 +838,16 @@ class NodeManager extends EventEmitter {
     // and from then on the `keys` shape check (verifyKeyMode) is the authority.
     if (!this.polled && this.proc && !this.keyModeAlert && BLOCK_BOOT_LINE.test(l) && config.load().keyMode !== "block")
       this.keyModeMismatch("The node started in block key mode", config.load().keyMode, true);
-    // A MegaMMR that does not end where the chain tree starts (core/minima-core MinimaDB.java loadAllDB: "Your MEGAMMR is BROKEN …
-    // please 'reset' your node"; with -mobile the node goes on with a start-up error). A stale MegaMMR file can do it. Said to the user
-    // by Backup & Recovery (main.js mcd:importMegammr, the Turn MegaMMR off page); believed only from the node's boot, as the block line.
-    if (!this.polled && this.proc && /Your MEGAMMR is BROKEN/.test(l)) { this.megammrBroken = true; this.emit("status", this.snapshot()); }
+    // A MegaMMR that does not end where the chain tree starts, or a cascade that does not fit the tree (core/minima-core MinimaDB.java
+    // loadAllDB: "Your MEGAMMR is BROKEN …" / "Your Cascade is BROKEN.. please 'reset' your node"). Without -mobile the node then halts
+    // with exit code 0 at EVERY start, so the reason and the way out are the exit's words (fatalHint); with -mobile it goes on, and the
+    // Node tab says it from the snapshot. Read again at every start, so every later launch says it too. Believed only from the boot.
+    if (!this.polled && this.proc && /Your (MEGAMMR|Cascade) is BROKEN/.test(l)) {
+      const mega = /MEGAMMR/.test(l);
+      if (mega) this.megammrBroken = true; else this.cascadeBroken = true;
+      this.fatalHint = mega ? MEGAMMR_BROKEN_HINT : CASCADE_BROKEN_HINT;
+      this.emit("status", this.snapshot());
+    }
     // The two boot-time deaths a person cannot read out of a stack trace: another node still holds
     // the H2 databases, or the port. Say so in the Node tab, in words, with the way out. (A hint only: it is shown
     // when the node has died by itself, and changes nothing else.)
@@ -883,3 +895,4 @@ class NodeManager extends EventEmitter {
 
 module.exports = new NodeManager();
 module.exports.BLOCK_BOOT_LINE = BLOCK_BOOT_LINE;
+module.exports.MEGAMMR_BROKEN_HINT = MEGAMMR_BROKEN_HINT; module.exports.CASCADE_BROKEN_HINT = CASCADE_BROKEN_HINT;

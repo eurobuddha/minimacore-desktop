@@ -204,6 +204,7 @@ function onStatus(s) {
   if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); futureCashReset(); if (activeView === "futurecash") renderActive(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
+  if (s.megammrBroken && !megaBrokenSaid) { megaBrokenSaid = true; megammrBrokenNotice(); }
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
     const sig = (s.parlons.ready ? "1" : "0") + "|" + (s.parlons.error || "") + "|" + s.state;
@@ -589,7 +590,7 @@ function renderBackup() {
   const head = (h, intro) => `<h2 class="ps-h">${esc(h)}</h2><p class="ps-intro">${esc(intro)}</p>`;
   const field = (id, label, attrs) => `<div class="eyebrow ps-label">${esc(label)}</div><input class="field__input ps-field" id="${id}" autocomplete="off" spellcheck="false" ${attrs || ""}/>`;
   const stopped = `<div class="ps-tile ps-tile--strong" role="status">${th("The node is not running. Start the node before backing up or restoring.")}</div>`;
-  if (BK_PAGE && !running) { host.innerHTML = head(t(BK_TITLE[BK_PAGE]), "") + stopped; return; }
+  if (BK_PAGE && !running && BK_PAGE !== "megaoff") { host.innerHTML = head(t(BK_TITLE[BK_PAGE]), "") + stopped; return; }   // Turn MegaMMR off works stopped
 
   if (BK_PAGE === "") {
     const rows = [["create", t("Create backup"), t("Write an encrypted .bak of this node into its data folder.")],
@@ -601,7 +602,7 @@ function renderBackup() {
       ["keys", t("Private keys"), t("Seed phrase, or rebuild this wallet from a phrase.")]];
     if ((CFG.params || {}).megammr) rows.splice(rows.findIndex(r => r[0] === "megafile") + 1, 0, ["megaoff", t("Turn MegaMMR off"), t("Go back to a light node. The node's MegaMMR file is deleted.")]);
     host.innerHTML = head(t("Backup & Recovery"), t("Save a copy of this node, put it back, or rebuild it from another node.")) + (running ? "" : stopped) +
-      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
+      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${running || r[0] === "megaoff" ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
     host.querySelectorAll(".bk-row").forEach(b => b.onclick = () => {
       const k = b.dataset.bk;
       if (k === "chat") showActionSheet(t("Chat backup"), [{ label: t("Back up chats"), onclick: () => ChatPanel.backup() }, { label: t("Restore chats"), onclick: () => ChatPanel.restore() }]);
@@ -693,7 +694,7 @@ function renderBackup() {
     $("bkGo").onclick = () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
       // the main process switches a light node to MegaMMR mode first, imports, and restarts (main.js mcd:importMegammr)
       // the window's config is read again whatever happened: a failed import may have put the MegaMMR setting back
-      const exec = async () => { let j; try { j = await api.importMegammr(f); } finally { CFG = await api.getConfig().catch(() => CFG); } if (j && j.status === true && j.broken) setTimeout(megammrBrokenNotice, 0); return j; };
+      const exec = async () => { let j; try { j = await api.importMegammr(f); } finally { CFG = await api.getConfig().catch(() => CFG); } return j; };   // a MegaMMR the restarted node finds broken is said from its status (onStatus)
       run("bkGo", t("Import"), { host: CFG.megammrHost, exec }, t("Import this MegaMMR file?"),
       t("Minima will replace this node's chain with the one in {f}.\n\n• A light node is switched to MegaMMR mode first and restarted. It then uses up to 3 GB of memory (more for a large file) and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• The node restarts at the end.", { f: f }), t("Import")); };
     return;
@@ -736,10 +737,17 @@ function renderBackup() {
 
 // What turning MegaMMR off does (core/minima-core MinimaDB.java loadAllDB: a start without -megammr deletes databases/megammr.mmr).
 const MEGAMMR_OFF_WARNING = N_("The node restarts as a light node.\n\n• Its MegaMMR file (megammr.mmr, in the node's data folder) is DELETED at that restart. Turning MegaMMR on again needs a MegaMMR file to import.\n• The Web Wallet tab needs MegaMMR and stops working.\n• Your wallet, keys and funds are not touched.");
-/** After an import, the node said its MegaMMR does not end where its chain begins (main/node-manager.js megammrBroken). */
+/** The node's boot said its MegaMMR does not end where its chain begins (main/node-manager.js megammrBroken): once per launch, from its
+ *  status, whether it stopped (without -mobile it stops at every start) or goes on. The Node tab keeps saying it, with the button. */
+const MEGAMMR_BROKEN_NOTE = N_("This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).");
+let megaBrokenSaid = false;
 function megammrBrokenNotice() {
-  showActionSheet(t("This node's MegaMMR does not fit its chain"), [{ label: t("Turn MegaMMR off"), danger: true, onclick: () => bkOpen("megaoff") }],
-    t("The node started, but says its MegaMMR does not end where its chain begins (\"MEGAMMR is BROKEN\"): the file was older than, or from another chain than, the chain imported with it. Your wallet, keys and funds are not touched: nothing of the wallet was replaced.\n\nTo go back to a light node: Turn MegaMMR off (the MegaMMR file is deleted at that restart). If the node is then behind, use Resync node to catch up from a MegaMMR node."));
+  showActionSheet(t("This node's MegaMMR does not fit its chain"), [{ label: t("Turn MegaMMR off"), danger: true, onclick: megammrOffNow }], t(MEGAMMR_BROKEN_NOTE));
+}
+/** Turn MegaMMR off from anywhere (the Node tab, the notice): the warning, the question, then main (it works with the node stopped). */
+async function megammrOffNow() {
+  if (!await showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true)) return;
+  try { await api.megammrOff(); CFG = await api.getConfig(); toast(t("MegaMMR is off. The node is restarting as a light node."), "ok"); } catch (e) { toast(ipcError(e), "err"); }
 }
 
 // ---- starting / progress screen ---------------------------------------------
@@ -3369,10 +3377,13 @@ function renderNode(s) {
     ${row(t("Network"), esc(CFG.network))}
     ${row(t("RPC port"), esc(s.rpcPort || CFG.basePort + 4))}
     ${s.lastError ? `<div class="home-row"><span class="home-row__k">${th("Error")}</span><span class="home-row__v" style="color:var(--red)">${esc(MainSaid.say(s.lastError))}</span></div>` : ""}
+    ${s.megammrBroken && s.state !== "error" ? `<div class="home-row"><span class="home-row__k">${th("This node's MegaMMR does not fit its chain")}</span><span class="home-row__v" style="color:var(--red);white-space:pre-wrap">${th(MEGAMMR_BROKEN_NOTE)}</span></div>` : ""}
     ${s.portOwner ? row(t("Port {basePort} held by", { basePort: esc(s.portOwner.port || CFG.basePort) }), t("pid {pid} · {command}", { pid: esc(s.portOwner.pid), command: esc(s.portOwner.command) })) : ""}
     <div class="home-actions">
       <button class="btn btn--outline" id="nRestart">${s.state === "stopped" ? th("Start node") : th("Restart node")}</button>
       ${s.state === "error" ? `<button class="btn btn--outline" id="nReclaim">${th("Start again")}</button>` : ""}
+      ${s.megammrBroken ? `<button class="btn btn--danger" id="nMegaOff">${th("Turn MegaMMR off")}</button>` : ""}
+      ${s.cascadeBroken ? `<button class="btn btn--outline" id="nRescue">${th("Startup Params")}</button>` : ""}
       ${CFG.network !== "solo" ? `<button class="btn btn--outline" id="nContrib">${contributing ? th("Stop contributing to the network") : th("Contribute to the network")}</button>` : ""}
       <button class="btn btn--outline" id="nReconfig">${th("Reconfigure node")}</button>
     </div>
@@ -3393,6 +3404,8 @@ function renderNode(s) {
     try { await api.nodeRestart(stopAck(), { contribute: turnOn, params }); CFG = await api.getConfig(); } catch (e) { toast(ipcError(e), "err"); }
   };
   el("nReconfig").onclick = () => selectTab("params");
+  if (el("nMegaOff")) el("nMegaOff").onclick = megammrOffNow;   // with the node stopped too: a broken MegaMMR can stop it at every start
+  if (el("nRescue")) el("nRescue").onclick = () => selectTab("params");
   el("nRestart").onclick = async () => { if (!await nodeStopOk()) return; toast(t("Restarting node…")); api.nodeRestart(stopAck()).catch(e => toast(ipcError(e), "err")); };
   const nReclaim = el("nReclaim");
   if (nReclaim) nReclaim.onclick = async () => { nReclaim.disabled = true; nReclaim.textContent = t("Starting…"); try { await api.nodeReclaim(); toast(t("Node restarting…"), "ok"); } catch (e) { toast(e.message || String(e), "err"); } };

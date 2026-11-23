@@ -271,16 +271,29 @@ test("room for a MegaMMR import: the 460 MB snapshot fits the default 3072 MB; t
   assert.equal(F.roomProblem({ size: 460 * M, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: null }), "", "free disk not known: not refused on it");
 });
 
-test("the node's boot line \"Your MEGAMMR is BROKEN\" is noticed during the boot only, and starts clear at every start", () => {
+test("a broken MegaMMR or Cascade at boot: noticed during the boot only, its way out is the exit's words (the node halts at every start without -mobile), and it is reset at every start", () => {
   const NM = require("../main/node-manager.js"), C = { prototype: Object.getPrototypeOf(NM) };
-  const nm = Object.create(C.prototype); nm.logs = []; nm.cont = { out: null, err: null }; nm.parlons = { ready: true }; nm.emit = () => {}; nm.snapshot = () => ({}); nm.log = () => {}; nm.proc = {}; nm.polled = false;
-  nm.nodeLine("Minima @ 22/11/2026 10:00:00 [ 120.5 MB ] : java.lang.Exception: Your MEGAMMR is BROKEN (does not start 2426000 where tree ends 2426100).. please 'reset' your node.");
-  assert.equal(nm.megammrBroken, true);
-  const later = Object.create(C.prototype); Object.assign(later, { logs: [], cont: { out: null, err: null }, parlons: { ready: true }, emit() {}, snapshot: () => ({}), log() {}, proc: {}, polled: true, megammrBroken: false });
-  later.nodeLine("Your MEGAMMR is BROKEN"); assert.equal(later.megammrBroken, false, "not believed after the boot");
+  const fresh = (o) => Object.assign(Object.create(C.prototype), { logs: [], cont: { out: null, err: null }, parlons: { ready: true }, emit() {}, snapshot: () => ({}), log() {}, proc: {}, polled: false, megammrBroken: false, cascadeBroken: false, fatalHint: "" }, o);
+  // the line as the private chain's node printed it before halting (exit code 0)
+  let nm = fresh(); nm.nodeLine("Minima @ 23/11/2026 00:21:41 [16.0 MB] : java.lang.Exception: Your MEGAMMR is BROKEN (does not start 21 where tree ends 19).. please 'reset' your node.");
+  assert.equal(nm.megammrBroken, true); assert.equal(nm.fatalHint, NM.MEGAMMR_BROKEN_HINT);
+  assert.match(NM.MEGAMMR_BROKEN_HINT, /Press Turn MegaMMR off on this Node tab/); assert.ok(!/the node started|older than/i.test(NM.MEGAMMR_BROKEN_HINT), "no 'started', no guessed cause");
+  nm = fresh(); nm.nodeLine("Minima @ 23/11/2026 00:21:41 [16.0 MB] : java.lang.Exception: Your Cascade is BROKEN.. please 'reset' your node.");
+  assert.equal(nm.cascadeBroken, true); assert.equal(nm.megammrBroken, false); assert.equal(nm.fatalHint, NM.CASCADE_BROKEN_HINT); assert.match(NM.CASCADE_BROKEN_HINT, /set Rescue node/);
+  nm = fresh({ polled: true }); nm.nodeLine("Your MEGAMMR is BROKEN"); nm.nodeLine("Your Cascade is BROKEN"); assert.equal(nm.megammrBroken || nm.cascadeBroken, false, "not believed after the boot"); assert.equal(nm.fatalHint, "");
   const src = fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8");
-  assert.ok(/this\.megammrBroken = false;[^\n]*\n\s*this\.keyModeChecked = false; this\.keyModeTries = 0; this\.polled = false;/.test(src), "reset at every start");
-  assert.ok(/megammrBroken: !!this\.megammrBroken/.test(src), "in the node's snapshot");
+  assert.ok(/this\.fatalHint = "";[\s\S]{0,200}this\.megammrBroken = false;[^\n]*\n\s*this\.cascadeBroken = false;/.test(src), "reset at every start");
+  assert.ok(/megammrBroken: !!this\.megammrBroken, cascadeBroken: !!this\.cascadeBroken/.test(src), "in the node's snapshot");
+  assert.ok(/this\.lastError = this\.fatalHint \|\| \("node exited unexpectedly \(" \+ \(code \?\? sig\) \+ "\)"\);/.test(src), "an exit says the hint, not 'node exited unexpectedly (0)'");
+  // the window: the Node tab offers Turn MegaMMR off whenever the boot said so, stopped or not; the notice once per launch from the status
+  const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8");
+  assert.ok(/\$\{s\.megammrBroken \? `<button class="btn btn--danger" id="nMegaOff">/.test(app) && /if \(el\("nMegaOff"\)\) el\("nMegaOff"\)\.onclick = megammrOffNow;/.test(app));
+  assert.ok(/\$\{s\.cascadeBroken \? `<button class="btn btn--outline" id="nRescue">\$\{th\("Startup Params"\)\}/.test(app));
+  const off = app.slice(app.indexOf("async function megammrOffNow()"), app.indexOf("async function megammrOffNow()") + 400);
+  assert.ok(off.indexOf("await showConfirm(") < off.indexOf("api.megammrOff()"), "asks first");
+  assert.ok(/if \(s\.megammrBroken && !megaBrokenSaid\) \{ megaBrokenSaid = true; megammrBrokenNotice\(\); \}/.test(app), "said from the status, on any launch");
+  assert.ok(/if \(BK_PAGE && !running && BK_PAGE !== "megaoff"\)/.test(app) && /running \|\| r\[0\] === "megaoff" \? "" : " disabled"/.test(app), "Backup & Recovery's Turn MegaMMR off works with the node stopped");
+  assert.ok(!app.includes("The node started, but says its MegaMMR"), "the old wording is gone");
 });
 
 test("the screens: a file is chosen, never typed; each import asks first, saying what is replaced, and only then runs", () => {
@@ -292,7 +305,7 @@ test("the screens: a file is chosen, never typed; each import asks first, saying
   assert.ok(!/id="bkFile"[^>]*>|field\("bkFile"/.test(restorePage) && !/<input[^>]*bkFile/.test(body), "no text field for a path");
   assert.ok(restorePage.includes("The keys and coins this node holds now are GONE unless they are also in that backup."));
   const megaPage = body.slice(body.indexOf('if (BK_PAGE === "megafile")'), body.indexOf("// Private keys"));
-  assert.ok(/const exec = async \(\) => \{ let j; try \{ j = await api\.importMegammr\(f\); \} finally \{ CFG = await api\.getConfig\(\)\.catch\(\(\) => CFG\); \} if \(j && j\.status === true && j\.broken\) setTimeout\(megammrBrokenNotice, 0\); return j; \};\s*run\("bkGo", t\("Import"\), \{ host: CFG\.megammrHost, exec \}, t\("Import this MegaMMR file\?"\)/.test(megaPage), "through the shared question; the window's config read again after any import, failed or not");
+  assert.ok(/const exec = async \(\) => \{ let j; try \{ j = await api\.importMegammr\(f\); \} finally \{ CFG = await api\.getConfig\(\)\.catch\(\(\) => CFG\); \} return j; \};[^\n]*\n\s*run\("bkGo", t\("Import"\), \{ host: CFG\.megammrHost, exec \}, t\("Import this MegaMMR file\?"\)/.test(megaPage), "through the shared question; the window's config read again after any import, failed or not");
   assert.ok(megaPage.includes("A light node is switched to MegaMMR mode first and restarted.") && megaPage.includes("Turn MegaMMR off goes back, and deletes the MegaMMR file."));
   const offPage = body.slice(body.indexOf('if (BK_PAGE === "megaoff")'), body.indexOf("// Private keys"));
   assert.ok(offPage.indexOf('await showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true)') < offPage.indexOf("api.megammrOff()"), "Turn MegaMMR off asks first");

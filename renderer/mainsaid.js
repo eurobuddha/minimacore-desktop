@@ -197,6 +197,8 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["NODE_JAVA", I18N.N_("could not launch java: {error}")],
     ["NODE_EXITED", I18N.N_("node exited unexpectedly ({code})")],
     ["NODE_HINT_PORT", I18N.N_("a port this node needs is already in use (base port {port}). Start again: this app's own earlier node is stopped first; any other program is named and left alone")],
+    ["NODE_MEGAMMR_BROKEN", I18N.N_("This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. Press Turn MegaMMR off on this Node tab: the MegaMMR file is deleted and the node starts again as a light node.")],
+    ["NODE_CASCADE_BROKEN", I18N.N_("This node's chain files do not fit together (the node says \"Your Cascade is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. In Startup Params, set Rescue node to a MegaMMR node (host:port, the one Resync node uses) and press Save, then press Start again: the node rebuilds its chain from that node and stops. Then press Start again once more.")],
     ["NODE_HINT_DB", I18N.N_("another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first")],
     ["PARLONS_SOLO", I18N.N_("The Parlons Node is a mainnet node: a solo/private network needs the plain Minima node.")],
     ["PARLONS_DBPASSWORD", I18N.N_("The Parlons Node cannot take -dbpassword (a wallet DB password): keep the plain Minima node, or set up again without one.")],
