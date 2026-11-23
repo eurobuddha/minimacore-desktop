@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.405] — Pandamonium Desktop has the Pandamonium app's icon (the panda), not Minima Core's
+
+- The owner: "Pandamonium desktop needs the Pandamonium logo/icon as the apk". The icon is drawn from the Pandamonium APK's own launcher vectors (apks/base app/src/main/res/drawable/ic_launcher_background.xml + ic_launcher_foreground.xml, the Pandamonium flavour's orange pupils `launcher_pupil` #F7931A), as Android shows it: the black background, the panda over it, the launcher's visible 72 dp of the 108 dp canvas. On the Mac that square fills the standard icon body (824 px rounded square, corner 22.5 %, 100 px margin in 1024), the same shape and margin as Minima Core's icon.
+- build-pandamonium/icon.icns (16 to 1024, @2x: the Dock, Finder, and the DMG's volume icon), icon.ico (16 to 256: Windows), icon.png (1024: Linux), named in package.json flavors.pandamonium.icons and applied by scripts/build-flavor.cjs; a flavour without icons is refused. The released app (minimaCore) keeps build/icon.*.
+- scripts/pandamonium-icon.py redraws the three from the APK (Pillow + iconutil; vector geometry at 4096 px, reduced to every size: nothing is upscaled).
+- Unchanged: the menu-bar tray icon is the Minima M, which is also the APK's monochrome (themed) icon layer; the in-app logos are the APK's own (it does not show the launcher panda inside the app).
+- Tests: scripts/flavor-test.cjs (the flavour's three icon files exist with every size; the released build's icon paths are not touched).
+
 ## [0.19.401] — The real-node proof script follows 0.19.400 (released only on a matched block), with --cases and --offer-minutes
 
 - scripts/megammr-import-private-chain.cjs: `--cases older,crash,behind,mismatch` runs a subset; `--offer-minutes` shortens the app's 10 minutes for the Keep offer and the "not receiving new blocks" line, and the transcript says so. The older-file case waits for the release or the stuck line (then Resync node); the other-genesis case checks that nothing is released, then presses Keep.

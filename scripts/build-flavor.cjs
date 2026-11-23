@@ -9,7 +9,7 @@
  * What it does, and nothing else: checks the flavour is a whole separate identity (flavor.resolve), checks the
  * flavour's two node jars against the sha256 pinned for it in package.json (a jar that differs is a refusal), and
  * runs electron-builder with a config derived from package.json "build": the flavour's name, bundle id and artifact
- * names, `"flavor": "<id>"` written into the PACKAGED package.json (extraMetadata; the source file is not touched),
+ * names, its own app icons (package.json flavors.<id>.icons), `"flavor": "<id>"` written into the PACKAGED package.json (extraMetadata; the source file is not touched),
  * the flavour's jars as resources/minima.jar and resources/parlons-node.jar, and NO notarization.
  *
  * It downloads nothing: Electron comes from node_modules/electron/dist, native modules are not rebuilt, and nothing is
@@ -39,6 +39,10 @@ function builderConfig(pkg, id, opts = {}) {
   if (opts.adhoc) cfg.mac.identity = "-";
   cfg.win = Object.assign({}, cfg.win, { artifactName: F.artifact + "-${version}-x64.${ext}" });
   cfg.linux = Object.assign({}, cfg.linux, { artifactName: F.artifact + "-${version}-x64.${ext}" });
+  // the flavour's own app icon on all three (the Dock and the DMG's volume icon take mac): never the released app's build/icon.*
+  const I = (pkg.flavors[id] || {}).icons || {};
+  if (!I.mac || !I.win || !I.linux) throw new Error("flavour '" + id + "' has no icons { mac, win, linux }");
+  cfg.mac.icon = I.mac; cfg.win.icon = I.win; cfg.linux.icon = I.linux;
   cfg.extraResources = cfg.extraResources.map(r => (r.to === "minima.jar" ? { from: J.dir + "/minima.jar", to: "minima.jar" } : r.to === "parlons-node.jar" ? { from: J.dir + "/parlons-node.jar", to: "parlons-node.jar" } : r));
   return { F, J, cfg };
 }

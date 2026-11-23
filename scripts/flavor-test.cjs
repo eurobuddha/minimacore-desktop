@@ -269,6 +269,26 @@ test("the build of a flavour: its name, id and artifact names, the flavour writt
   assert.ok(!/notarytool|gh release|curl|wget|https?:\/\//.test(sh), "the flavour build notarizes, uploads and downloads nothing");
 });
 
+test("0.19.403: Pandamonium Desktop has its own app icon (the Pandamonium APK's panda) on all three platforms; the released app keeps build/icon.*", () => {
+  const { builderConfig } = require("./build-flavor.cjs"), { cfg } = builderConfig(PKG, "pandamonium");
+  assert.deepEqual([cfg.mac.icon, cfg.win.icon, cfg.linux.icon], ["build-pandamonium/icon.icns", "build-pandamonium/icon.ico", "build-pandamonium/icon.png"]);
+  assert.deepEqual([PKG.build.mac.icon, PKG.build.win.icon, PKG.build.linux.icon], ["build/icon.icns", "build/icon.png", "build/icon.png"], "the released build is not touched");
+  const read = (f) => fs.readFileSync(path.join(ROOT, f)), pngSide = (b) => (b.toString("latin1", 1, 4) === "PNG" ? b.readUInt32BE(16) : 0);
+  for (const f of [cfg.mac.icon, cfg.linux.icon]) assert.notDeepEqual(read(f), read(f.replace("build-pandamonium/", "build/")), f + " is not the released icon");
+  // macOS: every size from 16 to 1024 (16 and 32 also as 1x, 64 to 1024 as PNG entries of the right side)
+  const icns = read(cfg.mac.icon), got = {}; assert.equal(icns.toString("latin1", 0, 4), "icns"); assert.equal(icns.readUInt32BE(4), icns.length);
+  for (let o = 8; o < icns.length;) { const n = icns.readUInt32BE(o + 4); assert.ok(n >= 8 && o + n <= icns.length); got[icns.toString("latin1", o, o + 4)] = icns.subarray(o + 8, o + n); o += n; }
+  for (const [t, side] of Object.entries({ ic11: 32, ic12: 64, ic07: 128, ic13: 256, ic08: 256, ic14: 512, ic09: 512, ic10: 1024 })) assert.equal(pngSide(got[t] || Buffer.alloc(0)), side, "icns " + t + " is a " + side + " px PNG");
+  assert.ok(got.ic04 && got.ic05, "icns has the 16 and 32 px entries");
+  // Windows: 16 to 256
+  const ico = read(cfg.win.icon), sides = []; assert.deepEqual([ico.readUInt16LE(0), ico.readUInt16LE(2)], [0, 1]);
+  for (let i = 0; i < ico.readUInt16LE(4); i++) sides.push(ico[6 + 16 * i] || 256);
+  for (const s of [16, 24, 32, 48, 64, 128, 256]) assert.ok(sides.includes(s), "ico has " + s + " px");
+  // Linux: one 1024 PNG
+  assert.equal(pngSide(read(cfg.linux.icon)), 1024);
+  assert.throws(() => builderConfig({ ...PKG, flavors: { pandamonium: { ...PKG.flavors.pandamonium, icons: undefined } } }, "pandamonium"), /has no icons/);
+});
+
 // ---- 0.19.106: the Phase 4 messaging work (merged from the other branch) follows the flavour too ----
 test("0.19.106: Parlons in the browser, Mail and Chat follow the flavour: the panel link only on this app's own panel port, the stores only in this app's own folder", () => {
   for (const [id, folder, panel, other] of [["pandamonium", "PandamoniumDesktop", 17587, 12587], ["", "minimaCore", 12587, 17587]]) {

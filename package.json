@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.19.404",
+  "version": "0.19.405",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -202,6 +202,11 @@
       "windowTitle": "Pandamonium Desktop",
       "artifact": "PandamoniumDesktop",
       "autostartFile": "pandamonium-desktop.desktop",
+      "icons": {
+        "mac": "build-pandamonium/icon.icns",
+        "win": "build-pandamonium/icon.ico",
+        "linux": "build-pandamonium/icon.png"
+      },
       "jars": {
         "dir": "resources-pandamonium",
         "parlonsNode": "0.2.160",
