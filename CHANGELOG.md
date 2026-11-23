@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.323] — ETH: the AtomiX tab's Send takes the ETH Wallet's guarded path; fee tiers match the engine's ×9/8 with the ceiling after the multiplier
+
+- The AtomiX tab's wallet Send (`mcd:axSend` / `axSendReview` / `axSendMax`) sent at the RPC's raw gas price with no ceiling (a hostile RPC set the fee), no EIP-55 check, no one-send-at-a-time guard and no "may have gone through" on a cut broadcast. It now calls the ETH Wallet tab's `ethSendReview` / `ethSendExecute` / `ethSendMax` at the Medium tier (ETH, or the USDT contract `0xdac17f958d2ee523a2206206994597c13d831ec7`, known to the send path even when removed from the ETH Wallet's token list). The sent toast names the transaction hash whole.
+- Fee tiers: the vendored engine (AX.ethtx / AX.wallet since AtomiX 0.1.40) applies ×9/8 and floors at baseFee×9/8 + 0.2 gwei; the tier proxy still pre-divided by 1.2, so every tier broadcast about 6% under its preview, and the Max reserve (also ÷1.2) was below the High tier's cost. The proxy now pre-scales ×8/9; a tier's price is `ethCapGas(effBase × mult)` (the 5000 gwei ceiling AFTER the multiplier: High reached about 1.6× the ceiling); the reserve covers 175% with the ceiling, plus the floor tip, rounded up.
+- Tests: scripts/ethwallet-unit.js (test:ethwallet) mirrors the engine's real ×9/8 arithmetic (CHANGED on purpose: it mirrored ×12/10); preview equals broadcast, the reserve covers High, no tier passes the ceiling, the AtomiX Send routes through the guarded path; 24 checks fail on 0.18.322.
+
 ## [0.18.322] — Vestr collect: one at a time per coin; only the node's own refusal of the post is a failure
 
 - main/vestr.js `collect`: a per-coin in-flight set. A second collect of a coin (a second click, the list re-rendered) while the first is being built or posted is refused ("already being sent. Nothing more was sent.") instead of building a second transaction of the same coin.

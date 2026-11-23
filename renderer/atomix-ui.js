@@ -846,7 +846,7 @@
       close();
       if (!await showConfirm("Review — Send " + (asset === "eth" ? "ETH" : "USDT"), `Send  ${amt} ${asset === "eth" ? "ETH" : "USDT"}\nTo  ${to}\n\nNetwork fee ≈ ${r.fee} ETH\nThis cannot be undone.`, "Send now", true)) return;
       const s = await api.axSend(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
-      toast(s && s.err ? s.err : "✓ Sent — tx " + TOK.shortId(s.tx), s && s.err ? "warn" : "ok", (s && !s.err && s.tx) || null);
+      toast(s && s.err ? s.err : "✓ Sent — tx " + s.tx, s && s.err ? "warn" : "ok", (s && !s.err && s.tx) || null);   // the hash whole (0.18.323)
       if (activeView() === "atomix" && axView === "wallet") renderAxWallet();
     };
   }
