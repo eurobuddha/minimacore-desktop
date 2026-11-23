@@ -193,6 +193,9 @@ async function revealSeed(typed, sys, run) {
  * chain's tip read from the node, asked only in block mode for a command naming keyuses:).
  * Throws the reason; returns nothing. The stop guard, the beacon-dust pin and the run stay in main.js, where the node is driven.
  */
+let busyCheck = () => "";   // main.js setBusyCheck(busyRefusal)
+/** main.js: what refuses a Terminal command while an import, a restore, a MegaMMR switch or a resync runs (→ the reason, or ""). */
+function setBusyCheck(fn) { busyCheck = typeof fn === "function" ? fn : () => ""; }
 async function checkCommand(command, io) {
   const R = require("./restore");
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
@@ -202,6 +205,8 @@ async function checkCommand(command, io) {
   const unclear = V.unclear(command); if (unclear) throw new Error(unclear);
   // an escaped ";" (\u003b) the node decodes in a JSON value and a command it builds from it then runs as a second command (0.19.291)
   const smuggled = V.smuggled(command); if (smuggled) throw new Error(smuggled);
+  // a MegaMMR file import, a restore, a MegaMMR switch or a resync is running: megammr*, archive, backup, restore wait (main.js busyRefusal)
+  const busy = (io && typeof io.busy === "function" ? io.busy : busyCheck)(command); if (busy) throw new Error(busy);
   // a value that would rewrite the commands a sendfrom, rawfrom, multisig … builds from it (0.19.299)
   for (const part of V.parts(command)) { const built = V.builtProblem(part); if (built) throw new Error(built); }
   for (const part of V.parts(command)) {
@@ -252,4 +257,4 @@ async function checkCommand(command, io) {
   const bad = R.backupCommandProblem(command);
   if (bad) throw new Error(bad);
 }
-module.exports = { secretKind, classify, refusal, create, revealSeed, masked, scrubReply, checkCommand, SECRET_NAMES, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };
+module.exports = { setBusyCheck, secretKind, classify, refusal, create, revealSeed, masked, scrubReply, checkCommand, SECRET_NAMES, SEED_PHRASE, KEY_PHRASE, CHANGE_PHRASE, PASS_MS };

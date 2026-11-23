@@ -324,7 +324,7 @@
     wwRead: async () => [{ tokenid: "0x00", name: "MINIMA", confirmed: "1250.75", unconfirmed: "0", sendable: "0", decimals: 0 }, { tokenid: MXUSD, name: "whatever", confirmed: "300.50000001", unconfirmed: "12", sendable: "0", decimals: 8 },
       { tokenid: "0x" + "5A1E".repeat(16), name: "0x5A1E5A1E5A", confirmed: "7", unconfirmed: "0", sendable: "0", decimals: 0 }],
     wwKeyuses: async () => ({ keyuses: 3, ack: Q.get("ww") === "ack" }), wwAckKeyuses: async (a, n) => ({ keyuses: n, ack: true }),
-    wwSend: async () => (Q.get("wws") === "unknown" ? { ok: false, ambiguous: true, message: "Send status UNKNOWN (preview)" } : { ok: true, txnid: FAKE_PK("7E") }), wwEnableMegammr: async () => true,
+    wwSend: async () => (Q.get("wws") === "unknown" ? { ok: false, ambiguous: true, message: "Send status UNKNOWN (preview)" } : { ok: true, txnid: FAKE_PK("7E") }),
     // Apps tab: ?frozen=mail,vestr starts with those frozen; freezing Dexicon is refused with the main process's wording
     freezeList: async () => FROZEN_IDS.slice(),
     freezeSet: async (id, on) => { if (on && id === "dexicon") throw new Error("Dexicon is still watching funds in flight. It can be frozen once they settle.\n\n• 1 AtomiX swap not finished.\n• Your AtomiX market is on the book (withdraw it first).");

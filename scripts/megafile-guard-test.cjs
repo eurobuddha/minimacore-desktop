@@ -49,8 +49,8 @@ test("M1: while an import or a resync runs, Stop, Restart, Start, the node kind,
 test("M1: Quit during an import asks first, Stay open the default; a quit the system asked for is not held", () => {
   const { src } = mainParts();
   const q = src.slice(src.indexOf('app.on("before-quit"'));
-  const order = ['quitAsking = true;', 'if (megafile.busyWhat() === "import" && !systemQuit.on())', 'buttons: [lang.t("Quit anyway"), lang.t("Stay open")], defaultId: 1, cancelId: 1',
-    'message: lang.t("A MegaMMR import is running"), detail: lang.t(IMPORT_QUIT_WARNING)', 'if (r.response !== 0 && !systemQuit.on()) { quitAsking = false; return; }', "inflight.decideQuit(", "await node.stop()"].map(x => q.indexOf(x));
+  const order = ['quitAsking = true;', 'if (busyNow && !systemQuit.on())', 'buttons: [lang.t("Quit anyway"), lang.t("Stay open")], defaultId: 1, cancelId: 1',
+    'message: busyNow === "import" ? lang.t("A MegaMMR import is running")', 'if (r.response !== 0 && !systemQuit.on()) { quitAsking = false; return; }', "inflight.decideQuit(", "await node.stop()"].map(x => q.indexOf(x));
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "asked before anything is stopped: " + order);
   assert.ok(/IMPORT_QUIT_WARNING = N_\("Quitting now leaves the chain half-replaced\. Your funds are safe, but the balance will be incomplete until Resync node \(Backup & Recovery\) has run\."\)/.test(src));
 });
@@ -75,4 +75,23 @@ test("main.js gives main/megammrfile.js everything it reads (a comment placed mi
   const walk = (n) => { if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === "megafile" && n.initializer && ts.isCallExpression(n.initializer)) props = n.initializer.arguments[0].properties.map(p => p.name.getText(sf)); ts.forEachChild(n, walk); };
   walk(sf);
   for (const k of ["node", "config", "status", "call", "imports", "mayStop", "held", "runResync", "work", "holdEngines", "releaseEngines", "fs", "totalmem", "platform", "log", "sleep", "upMs"]) assert.ok(props && props.includes(k), "megafile is given " + k + ": " + props);
+});
+
+test("third review: the Terminal's megammr*, archive, backup and restore wait while one runs; Quit says what a quit then leaves; refusals are said, not swallowed", async () => {
+  const { src, calls, decl } = mainParts(), MF = require("../main/megammrfile.js"), G = require("../main/seedgate.js"), V = require("../main/cmdverb.js");
+  assert.ok(decl.busyRefusal, "main.js declares busyRefusal");
+  for (const busy of [true, false]) {
+    const f = new Function("nodeBusy", "cmdverb", "require", decl.busyRefusal + "; return busyRefusal;")(() => busy, V, (m) => (m === "./megammrfile" ? MF : require(m)));
+    for (const c of ["megammr action:import file:\"/a.mmr\"", "megammrsync action:resync host:h:9001", "archive action:export", "backup password:abc", "restore file:/x.bak password:abc", "status;megammr", " MEGAMMR action:info"]) assert.equal(f(c), busy ? MF.BUSY : "", c);
+    for (const c of ["status", "balance", "send amount:1 address:0xA"]) assert.equal(f(c), "", c);
+  }
+  await assert.rejects(G.checkCommand("archive action:export", { busy: () => MF.BUSY, running() {} }), { message: MF.BUSY });
+  assert.ok(/seedgate\.setBusyCheck\(busyRefusal\);/.test(src) && /await seedgate\.checkCommand\(command, \{/.test(calls["mcd:cmd"]), "every Terminal command passes checkCommand, which asks it");
+  G.setBusyCheck(() => MF.BUSY); await assert.rejects(G.checkCommand("megammr action:info", { running() {} }), { message: MF.BUSY }); G.setBusyCheck(null);
+  const q = src.slice(src.indexOf('app.on("before-quit"'));
+  assert.ok(/const busyNow = megafile\.busyWhat\(\) \|\| \(node\.resyncing \? "resync" : ""\);/.test(q) && /half = busyNow === "import" && m && m\.stage === "importing"/.test(q) && /detail: lang\.t\(half \? IMPORT_QUIT_WARNING : busyNow === "import" \? IMPORT_QUIT_EARLY : BUSY_QUIT_WARNING\)/.test(q), "a resync, a restore and Turn off ask too, in words that fit");
+  assert.ok(/IMPORT_QUIT_EARLY = N_\("The import has not replaced anything yet\. Quitting now stops it; the node keeps its chain\."\)/.test(src));
+  assert.ok(/click: \(\) => \{ mayStop\(\)\.then\(\(\) => held\(\(\) => node\.restart\(\)\)\)\.catch\(\(e\) => trayRefused\(e\)\); \}/.test(src) && /function trayRefused\(e\)/.test(src), "the tray's refusal is shown");
+  const app = read("renderer/app.js"); assert.ok(/api\.nodeStart\(\)\.catch\(e => toast\(ipcError\(e\), "err"\)\);/.test(app), "Start node's refusal is said");
+  assert.ok(!/wwEnableMegammr/.test(read("scripts/dev-preview/stub.js")), "the dev preview's stub of a removed call is gone");
 });

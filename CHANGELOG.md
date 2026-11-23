@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.398] — Third review's minors: the Terminal waits too, Quit says what a quit leaves, refusals are said
+
+- While an import, a restore, a MegaMMR switch or a resync runs, the Terminal refuses megammr*, archive, backup and restore with the same plain reason (main/seedgate.js checkCommand asks main's busyRefusal).
+- Quit asks during a Resync node, a restore and Turn MegaMMR off too, and its words fit: only the import's own command can leave the chain half-replaced ("…the balance will be incomplete until Resync node"); before it, "The import has not replaced anything yet…"; otherwise "Quitting now interrupts it. Your funds are safe…".
+- The tray's Restart node and the stopped bar's Start node say a refusal (an import running) instead of swallowing it; the user's own "Keep it running" stays silent.
+- The dev preview's stub of the removed wwEnableMegammr is gone.
+- Tests: scripts/megafile-guard-test.cjs (1 new, 1 updated; both fail on 0.19.397); zh / ru / uk.
+
 ## [0.19.397] — The MegaMMR import's marker, simplified (third review): verify first, no permanent verdicts, an exit that destroys nothing on every banner
 
 - **What is left** (main/megammrfile.js, top of file): one marker, four stages. `switching` (written before the node is first restarted into MegaMMR mode; holds nothing; next launch offers Finish the import or Turn MegaMMR off, and clears itself if MegaMMR is off). `importing` (written right before the import command with the wallet's balance, confirmed per token, and coin count, plus the anchors): a crash, a failure after the reset or a broken MegaMMR leave it, and it means VERIFY FIRST: once the node is up, the same balance and coin count clear it silently and release the engines; only a different one shows "Your balance shows less than before an unfinished MegaMMR import. Your funds are safe." `catchup` (the import's reply was good, or the node printed "All saved.."): released as soon as the node's tip is fresh (its tip block at most 30 minutes old); meanwhile "Catching up after the MegaMMR import: block X", and Keep after 10 minutes. `mismatch`: a recorded height holds ANOTHER block id on the new chain, said as exactly that ("Block N on this node before the import was <id>; after the import it is <id>. One of the two is a fork."), never "the file is from another chain".

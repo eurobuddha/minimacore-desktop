@@ -5818,3 +5818,12 @@
   "Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.",
   "Your balance shows less than before an unfinished MegaMMR import. Your funds are safe."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "A resync, a restore or a MegaMMR switch is running": "Триває синхронізація, відновлення або перемикання MegaMMR",
+  "The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.": "Імпорт ще нічого не замінив. Якщо вийти зараз, він зупиниться; вузол збереже свій ланцюжок.",
+  "Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start.": "Якщо вийти зараз, це буде перервано. Ваші кошти в безпеці; якщо не завершиться, запустіть знову після наступного запуску."
+}, { review: [
+  "A resync, a restore or a MegaMMR switch is running",
+  "The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.",
+  "Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start."
+] });

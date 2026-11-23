@@ -1056,7 +1056,7 @@ function initShell() {
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
-  el("stopStart").onclick = () => { toast(t("Starting the node…")); api.nodeStart(); };
+  el("stopStart").onclick = () => { toast(t("Starting the node…")); api.nodeStart().catch(e => toast(ipcError(e), "err")); };   // a refusal (an import running) is said
 
   el("trayLang").onclick = () => { if (NARROW.matches) setTray(false); chooseLanguage(); };
 
