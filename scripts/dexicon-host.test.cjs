@@ -1429,6 +1429,33 @@ test("0.19.406: page SQL and service SQL are ONE database: a page cancel of Y (t
   assert.deepEqual(refused, [], "every page statement of the lock and the fenced save passed the allow-list");
 });
 
+test("0.19.409 (gate review MINOR-1): the page's FAST create reads the resting engine's input claims (exactly `SELECT coinid FROM pp_posted_inputs`) and never backs an order with a claimed coin", async () => {
+  const { dexSql } = require("../main/dexicon.js"), q = "SELECT coinid FROM pp_posted_inputs";
+  assert.equal(dexSql(q), q);
+  for (const no of ["SELECT * FROM pp_posted_inputs", "SELECT coinid FROM pp_posted_inputs WHERE 1", "select coinid from pp_posted_inputs", "DELETE FROM pp_posted_inputs", "SELECT coinid FROM pp_posted_inputs;"]) assert.throws(() => dexSql(no), /not available/, no);
+  const COIN = (n) => "0x" + String(n).repeat(64), wallet = [1, 2, 3].map(i => ({ coinid: COIN(i), amount: "100", tokenamount: "100", tokenid: "0x00", address: M.ADDRESS, created: "990", state: [], spent: false, storestate: false }));
+  const ok = (r) => ({ status: true, pending: false, response: r });
+  const b = await boot({ node: { on: (c) => {
+    if (/^coins relevant:true checkmempool:true tokenid:0x00$/.test(c)) return ok(wallet);
+    if (/^coins relevant:true checkmempool:true tokenid:0x/.test(c)) return ok([]);
+    const m = /coinid:(0x[0-9A-Fa-f]+)/.exec(c); if (/^coins\b/.test(c) && m) { const w = wallet.find(x => x.coinid === m[1].toUpperCase()); return ok(w ? [w] : []); }
+    if (c === "status") return ok({ megammr: true, version: "1.1.2.31" });
+    return null; } } });
+  await sql(b.host, "CREATE TABLE IF NOT EXISTS pp_posted_inputs (coinid varchar(160) primary key, handle varchar(160))");   // the engine's own DDL (resting/input-claims.js)
+  await sql(b.host, "INSERT INTO pp_posted_inputs (coinid,handle) VALUES ('" + COIN(1) + "','dex_1')");   // coin 1 is an input of a posted on-chain trade
+  const refused = []; b.host.emitter.on("log", (l) => { if (/refused SQL/.test(l)) refused.push(l); });
+  const LIB = ["lib/rhino_shim.js", "vendor/nacl.js", "vendor/blake.js", "vendor/sha256.js", "vendor/sha512.js", "vendor/decimal.js", "lib/hex.js", "lib/flow.js", "crypto/ax_sodium.js", "lib/identity.js", "lib/mdsw.js", "lib/prng.js", "lib/envelope.js", "lib/relay.js", "lib/fill.js", "lib/maker.js"];
+  const pageMds = { log() {}, comms: { solo() {} },
+    sql: (s, cb) => { b.host.command({ op: "sql", query: s }).then((r) => cb && cb(r), (e) => cb && cb({ status: false, error: e.message })); },
+    cmd: (c, cb) => { b.host.command({ op: "cmd", command: c }).then((r) => cb && cb(r), (e) => cb && cb({ status: false, error: e.message })); } };
+  const page = vm.createContext({ MDS: pageMds, console, setTimeout, clearTimeout, setInterval, clearInterval }); page.global = page;
+  for (const f of LIB) vm.runInContext(fs.readFileSync(path.join(M.root, "main/dexicon", f), "utf8"), page, { filename: "page/" + f });
+  vm.runInContext("var __me = AX.identity.fromSeed('0x" + "c3".repeat(32) + "', 'decks'), __relay = { relays: ['https://relay.example'], publish: function (r, cb) { cb([{ url: 'https://relay.example', ok: true }]); }, publishTo: function (u, r, cb) { cb({ ok: true }); } };", page);
+  const made = await new Promise((res) => { page.__res = res; vm.runInContext("AX.maker.create(AX.mds, __relay, __me, { side: 'sell', price: '0.0123', amount: '150' }, function (e, o) { __res({ err: e ? e.message : '', coins: o && o.coins }); });", page); });
+  assert.equal(made.err, ""); assert.deepEqual([...made.coins].sort(), [COIN(2), COIN(3)], "the claimed coin 1 is not a backing coin");
+  assert.deepEqual(refused, []);
+});
+
 test("0.19.406: the FAST backing-coin settings: read and written by the app's own Settings (only what is given), never by the page", async () => {
   const b = await boot();
   assert.deepEqual(b.host.fastCoins(), { legacyFresh: true, coinMaxAge: "", maxAgeLimit: 900 }, "unset: refresh ON, 900 blocks");

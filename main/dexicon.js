@@ -171,7 +171,10 @@ const SQL_OK = [
   "UPDATE `dx_lock` SET `owner`='' WHERE `id`='" + LOCK_ID + "' AND `owner`='" + LOCK_TOK + "'",
   "SELECT `owner` FROM `dx_lock` WHERE `id`='" + LOCK_ID + "'",
   "INSERT INTO ax_kv \\(k, v\\) SELECT 'myorders', '\\[\\]' WHERE NOT EXISTS \\(SELECT 1 FROM ax_kv WHERE k='myorders'\\)",
-  "UPDATE ax_kv SET v=" + SQL_LIT + " WHERE k='myorders' AND EXISTS \\(SELECT 1 FROM `dx_lock` WHERE `id`='myorders' AND `owner`='" + LOCK_TOK + "'\\)"
+  "UPDATE ax_kv SET v=" + SQL_LIT + " WHERE k='myorders' AND EXISTS \\(SELECT 1 FROM `dx_lock` WHERE `id`='myorders' AND `owner`='" + LOCK_TOK + "'\\)",
+  // 0.19.409 (lib/maker.js pageHolds, every FAST create and edit): the resting engine's input claims, read only, so the page
+  // never backs an order with a coin a posted on-chain trade is spending
+  "SELECT coinid FROM pp_posted_inputs"
 ].map(p => new RegExp("^" + p + "$"));
 /** kv keys the page may never write: the store's identity, the service's coin reservations, the attestation settings
  *  (0.19.406: signing stays OFF on this wallet; requiring attestations is not offered yet) and the FAST backing-coin
