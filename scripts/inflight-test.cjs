@@ -233,7 +233,8 @@ test("main: Restore from file asks the stop guard before its resync, and Apply a
     const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async () => { did.push("ask"); if (!allow) throw new Error("The node keeps running: nothing was stopped."); },
       restore: { restoreBackup: async (o, d) => d.run("megammrsync action:resync host:h:1 file:b.bak") }, runResync: async (c) => { did.push("resync"); return {}; },
       config: { load: () => ({ keyMode: "classic", params: {} }), save: (p) => did.push("save " + JSON.stringify(p)) }, saveConfigPatch: (p) => did.push("patch " + JSON.stringify(p)),
-      node: { state: "running", blockKeysSupported: () => true, parlonsBlocker: () => "", jarPath: () => "/x/minima.jar", restart: async () => did.push("restart"), snapshot: () => ({}) }, chat: { stopLoop() {} }, walletWork: async () => [], path, require, held: (op) => op() };
+      node: { state: "running", blockKeysSupported: () => true, parlonsBlocker: () => "", jarPath: () => "/x/minima.jar", restart: async () => did.push("restart"), snapshot: () => ({}) }, chat: { stopLoop() {} }, walletWork: async () => [], path, require, held: (op) => op(),
+      megafile: { exclusive: (what, fn) => fn() }, imports: { confirm: (k, shown) => shown, forget() {} } };
     for (const n of ["mcd:restoreBackup", "mcd:setNodeKind"]) new Function("env", "with (env) { " + calls[n] + "; }")(env);
     await h["mcd:restoreBackup"](null, { file: "b.bak" }).catch(() => {});
     assert.deepEqual(did, allow ? ["ask", "resync"] : ["ask"], "restore: " + allow); did.length = 0;

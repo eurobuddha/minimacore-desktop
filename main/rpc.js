@@ -37,7 +37,8 @@ function timeoutFor(command) {   // the verb read as the node reads it, in every
   const ps = V.parts(command);
   if (ps.some(part => V.is(part, "megammrsync") && V.fold(V.paramValue(part, "action") || "") === "resync")) return RESYNC_TIMEOUT_MS;
   // megammr action:import reads a whole MegaMMR file (1.6 GB for the mainnet one) in batches of 256 blocks, each allowed 10 minutes (megammr.java)
-  if (ps.some(part => V.is(part, "megammr") && V.fold(V.paramValue(part, "action") || "") === "import")) return RESYNC_TIMEOUT_MS;
+  // and action:integrity reads the same whole file at once and checks every coin's proof in it (megammr.java)
+  if (ps.some(part => V.is(part, "megammr") && ["import", "integrity"].includes(V.fold(V.paramValue(part, "action") || "")))) return RESYNC_TIMEOUT_MS;
   return ps.some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 

@@ -5626,9 +5626,7 @@
   "This node's MegaMMR does not fit its chain": "此节点的 MegaMMR 与其链不匹配",
   "The node started, but says its MegaMMR does not end where its chain begins (\"MEGAMMR is BROKEN\"): the file was older than, or from another chain than, the chain imported with it. Your wallet, keys and funds are not touched: nothing of the wallet was replaced.\n\nTo go back to a light node: Turn MegaMMR off (the MegaMMR file is deleted at that restart). If the node is then behind, use Resync node to catch up from a MegaMMR node.": "节点已启动，但报告其 MegaMMR 没有在链的起点处结束（\"MEGAMMR is BROKEN\"）：该文件比一同导入的链更旧，或来自另一条链。您的钱包、密钥和资金不会被更改：钱包没有被替换。\n\n要回到轻节点：关闭 MegaMMR（MegaMMR 文件会在那次重新启动时被删除）。如果节点之后落后，请使用“重新同步节点”从 MegaMMR 节点追上。",
   "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。导入它大约需要 {need} MB 的节点内存，而节点设置为 {heap} MB。请在设置中把 Parlons 节点内存提高到至少 {need}，然后重试。未做任何更改。",
-  "This computer has {ram} MB of memory, and the node would use up to {heap} MB of it for the MegaMMR, which leaves too little for everything else. Nothing was changed.": "这台电脑有 {ram} MB 内存，节点会为 MegaMMR 使用其中最多 {heap} MB，剩下的内存太少。未做任何更改。",
-  "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.": "节点的数据文件夹剩余 {free} MB，而此次导入大约需要 {need} MB。请腾出空间，然后重试。未做任何更改。",
-  "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back to a light node. Look at the Logs, and start the node again from the Node tab if it is stopped.": "节点没有以 MegaMMR 模式重新运行，因此没有导入任何内容，设置已改回轻节点。请查看日志；如果节点已停止，请从节点标签页重新启动它。"
+  "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.": "节点的数据文件夹剩余 {free} MB，而此次导入大约需要 {need} MB。请腾出空间，然后重试。未做任何更改。"
 }, { review: [
   "Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.",
   "Turn MegaMMR off",
@@ -5640,7 +5638,36 @@
   "This node's MegaMMR does not fit its chain",
   "The node started, but says its MegaMMR does not end where its chain begins (\"MEGAMMR is BROKEN\"): the file was older than, or from another chain than, the chain imported with it. Your wallet, keys and funds are not touched: nothing of the wallet was replaced.\n\nTo go back to a light node: Turn MegaMMR off (the MegaMMR file is deleted at that restart). If the node is then behind, use Resync node to catch up from a MegaMMR node.",
   "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.",
-  "This computer has {ram} MB of memory, and the node would use up to {heap} MB of it for the MegaMMR, which leaves too little for everything else. Nothing was changed.",
-  "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.",
-  "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back to a light node. Look at the Logs, and start the node again from the Node tab if it is stopped."
+  "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。导入它大约需要 {need} MB 的节点内存，而普通 Minima 节点在这里只有 {heap} MB（这台电脑内存的四分之一）。请在设置中切换到 Parlons 节点，并把它的内存设为至少 {need} MB，然后重试。未做任何更改。",
+  "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.": "这台电脑有 {ram} MB 内存。节点需要其中的 {heap} MB 来处理此 MegaMMR 文件，剩下的内存太少，因此无法在这台电脑上导入。未做任何更改。",
+  "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.": "节点没有以 MegaMMR 模式重新运行，因此没有导入任何内容，设置已恢复原样。请查看日志；如果节点已停止，请从节点标签页重新启动它。",
+  "Unknown kind of file.": "未知的文件类型。",
+  "This file is inside the node's own databases folder, which the import replaces. Copy it to another folder first, then choose the copy. Nothing was sent.": "此文件位于节点自己的数据库文件夹中，而导入会替换该文件夹的内容。请先把它复制到其他文件夹，然后选择那个副本。未发送任何内容。",
+  "This is not a MegaMMR file: it does not begin as a MegaMMR export does. Nothing was sent.": "这不是 MegaMMR 文件：它的开头与 MegaMMR 导出文件不同。未发送任何内容。",
+  "A resync, an import, a restore or a MegaMMR switch is already running. Wait for it to finish. Nothing was changed.": "已有一个重新同步、导入、恢复或 MegaMMR 切换正在进行。请等待它完成。未做任何更改。",
+  "The node's status could not be read, so it is not known whether it keeps a MegaMMR. Nothing was changed. Try again in a moment.": "无法读取节点的状态，因此不知道它是否保存了 MegaMMR。未做任何更改。请稍后重试。",
+  "The trading engines could not be stopped ({error}), so nothing was imported. Nothing was changed.": "无法停止交易引擎（{error}），因此没有导入任何内容。未做任何更改。",
+  "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.": "此次导入会替换节点的链，并在完成之前停止交易引擎，而仍有需要它们的工作未完成：\n\n• {items}\n\n未做任何更改。请等待这些完成或撤回它们，然后重试。",
+  "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.": "节点读取了整个文件并拒绝了它：{why}。没有导入任何内容，节点的链没有被更改。请使用由您信任的节点导出的完整 MegaMMR 文件。",
+  "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.": "节点读取了整个文件并拒绝了它：{why}。没有导入任何内容，节点的链没有被更改。节点已按之前的状态重新启动（MegaMMR 关闭）。请使用由您信任的节点导出的完整 MegaMMR 文件。",
+  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "导入在中途失败（{why}）。节点已重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。",
+  "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "导入在中途失败（{why}）。节点已按之前的状态作为轻节点重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。"
+}, { review: [
+  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.",
+  "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.",
+  "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.",
+  "Unknown kind of file.",
+  "This file is inside the node's own databases folder, which the import replaces. Copy it to another folder first, then choose the copy. Nothing was sent.",
+  "This is not a MegaMMR file: it does not begin as a MegaMMR export does. Nothing was sent.",
+  "A resync, an import, a restore or a MegaMMR switch is already running. Wait for it to finish. Nothing was changed.",
+  "The node's status could not be read, so it is not known whether it keeps a MegaMMR. Nothing was changed. Try again in a moment.",
+  "The trading engines could not be stopped ({error}), so nothing was imported. Nothing was changed.",
+  "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.",
+  "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.",
+  "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.",
+  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.",
+  "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node."
 ] });

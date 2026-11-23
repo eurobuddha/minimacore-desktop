@@ -692,7 +692,8 @@ function renderBackup() {
     wirePick("megammr");
     $("bkGo").onclick = () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
       // the main process switches a light node to MegaMMR mode first, imports, and restarts (main.js mcd:importMegammr)
-      const exec = async () => { const j = await api.importMegammr(f); if (j && j.status === true && j.broken) setTimeout(megammrBrokenNotice, 0); return j; };
+      // the window's config is read again whatever happened: a failed import may have put the MegaMMR setting back
+      const exec = async () => { let j; try { j = await api.importMegammr(f); } finally { CFG = await api.getConfig().catch(() => CFG); } if (j && j.status === true && j.broken) setTimeout(megammrBrokenNotice, 0); return j; };
       run("bkGo", t("Import"), { host: CFG.megammrHost, exec }, t("Import this MegaMMR file?"),
       t("Minima will replace this node's chain with the one in {f}.\n\n• A light node is switched to MegaMMR mode first and restarted. It then uses up to 3 GB of memory (more for a large file) and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• The node restarts at the end.", { f: f }), t("Import")); };
     return;

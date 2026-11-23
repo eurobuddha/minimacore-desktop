@@ -464,6 +464,9 @@ class NodeManager extends EventEmitter {
     // THE gate, on the argv as it will really be run (either node kind): the key-mode tokens in it must be
     // exactly the recorded mode's, whatever field they came from. See keymode.argvProblem.
     const args = this.buildArgs();
+    // the memory this start gives the node (the Parlons Node's -Xmx; 0 = Java's own default, the plain node): a MegaMMR import
+    // reads it to tell whether a changed memory setting is not applied yet (main/megammrfile.js)
+    const xmx = args.find(a => /^-Xmx\d+m$/.test(a)); this.heapMbNow = xmx ? parseInt(xmx.slice(4), 10) : 0;
     const argvWhy = keymode.argvProblem(args, config.load().keyMode, this.dataDir());
     if (argvWhy) { this.lastError = argvWhy; this.log("[app] node NOT started: " + argvWhy); this.setState("error"); return; }
     // A fact of THIS launch, for the first-run seed step (main.js mcd:firstRunSeed, 0.19.220): did the data folder hold no

@@ -244,6 +244,15 @@ test("A file the node is told to read (main/importfile.js): every refusal, said 
     check(F.roomProblem({ size: 1.6 * G, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: 100 * G })); check(F.roomProblem({ size: 0.45 * G, heapMb: 3072, ramBytes: 3 * G, freeDiskBytes: 100 * G }));
     check(F.roomProblem({ size: 0.45 * G, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: 0.5 * G }));
     check(await rejected(Promise.resolve().then(() => F.create({ fs, showOpen: async () => ({ canceled: true }) }).confirm("backup", "/x.bak"))));
+    check(F.roomProblem({ kind: "minima", size: 1.6 * G, heapMb: 4096, ramBytes: 16 * G, freeDiskBytes: 100 * G }));
+    check(why("nope", "/x")); check(F.IN_DATABASES);
+    try { F.megammrHeader(f("e.mmr", 4096), fs); assert.fail("expected a refusal"); } catch (e) { check(e.message); }
+    // main/megammrfile.js: every refusal and failure it says (a node's own reason, {why}/{error}, is carried as it came)
+    const MF = require("../main/megammrfile.js");
+    for (const m of [MF.BUSY, MF.STATUS_UNKNOWN]) check(m);
+    check(F.say(MF.ENGINES, { error: "dexicon did not stop" }));
+    check(F.say(MF.IMPORT_OPEN, { items: ["1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0xabc", "AtomiX could not be asked whether a swap is in flight. Wait a moment and try again."].join("\n• ") }));
+    for (const m of [MF.CHECK_FAILED, MF.CHECK_FAILED_BACK, MF.FAILED, MF.FAILED_BACK]) check(F.say(m, { why: "MegaMMR import failed : java.io.EOFException .. RESTART Minima before retrying" }));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  for (const c of MS.codes().filter(c => /^IMPORT_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js: " + c);
+  for (const c of MS.codes().filter(c => /^(IMPORT|MEGAFILE)_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js or main/megammrfile.js: " + c);
 });

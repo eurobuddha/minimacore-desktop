@@ -337,50 +337,25 @@ node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandap
 node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // A file the node is told to read (main/importfile.js): only one the user chose in the system's open dialog, kept here, never copied.
 const importfile = require("./importfile");
-const nodeKeepsMegammr = async () => { const st = await rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "status").catch(() => null); return !!(st && st.response && st.response.megammr); };
 const imports = importfile.create({ platform: process.platform, t: (s) => (currentLang(), lang.t(s)), defaultPath: () => config.load().dataFolder || config.defaultDataFolder(),
-  showOpen: (o) => dialog.showOpenDialog(win, o) });
+  dataDir: () => node.dataDir(), showOpen: (o) => dialog.showOpenDialog(win, o) });
 ipcMain.handle("mcd:pickImport", async (_e, kind) => { requireRunning(); return imports.pick(kind === "megammr" ? "megammr" : "backup"); });
+// Resync from a MegaMMR FILE (which turns MegaMMR on) and Turn MegaMMR off: main/megammrfile.js. One of these, or a restore, at a time.
+const megafile = require("./megammrfile").create({ node, config, status: () => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), "status"),
+  call: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), imports, mayStop: () => mayStop(), held, runResync,
+  // what is open is what restore refuses on (main/restore.js activeWorkList), but this wallet's own standing pools: the import keeps the wallet
+  work: async () => (await walletWork()).filter(i => !String(i).endsWith(restore.CONFIRM_HINT)),
+  holdEngines: () => node.onEnginesHold(), releaseEngines: () => node.releaseEngines(), fs, totalmem: () => require("os").totalmem(), platform: process.platform,
+  log: (l) => node.log(l), sleep: (ms) => new Promise(r => setTimeout(r, ms)), upMs: 10 * 60 * 1000 });
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
-ipcMain.handle("mcd:restoreBackup", (_e, o) => restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(), picked: (shown) => imports.confirm("backup", shown),
-  running: node.state === "running", run: async (c) => { await mayStop(); return held(() => runResync(c)); }, work: walletWork }));   // the stop guard right before the node gets it (0.19.294)
-// Resync from a MegaMMR FILE, which also turns MegaMMR on (owner, 2026-11-22: the node stays light by default, MegaMMR is an option).
-// `megammr action:import file:` runs only on a node that keeps the MegaMMR (core/minima-core megammr.java: "MegaMMR not enabled"), and a
-// normal sync never fills one: so a light node is first switched to MegaMMR mode, the setting SAVED before its restart (a start without
-// -megammr deletes databases/megammr.mmr, MinimaDB.java loadAllDB), and that restart takes the MegaMMR heap (3072 MB unless set). Then
-// the import, run as a resync: it ends by stopping the node, which is started again with the setting already saved. Room (node memory,
-// this computer's memory, disk) is checked before anything changes. The answer says whether the restarted node found its MegaMMR broken.
-const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
-async function nodeUp(ms) { for (const end = Date.now() + ms; Date.now() < end; await sleepMs(1000)) { if (node.state === "running") return true; if (node.state === "error") return false; } return false; }
-const freeDisk = (dir) => { try { const st = fs.statfsSync(dir); return st.bavail * st.bsize; } catch (e) { return null; } };
-ipcMain.handle("mcd:importMegammr", async (_e, shown) => {
-  requireRunning();
-  const file = imports.confirm("megammr", shown), c = config.load(), on = await nodeKeepsMegammr();
-  const room = importfile.roomProblem({ size: fs.statSync(file).size, heapMb: importfile.megammrHeapMb(c.heapMb), ramBytes: require("os").totalmem(), freeDiskBytes: freeDisk(node.dataDir()) });
-  if (room) throw new Error(room);
-  const cmd = importfile.megammrImportCommand(file, process.platform);
-  await mayStop();
-  if (!on) {
-    node.log("[app] MegaMMR file import: switching the node to MegaMMR mode first (saved before the restart)");
-    await held(async () => { config.save({ params: Object.assign({}, c.params, { megammr: true }) }); await node.restart(); });
-    if (!await nodeUp(10 * 60 * 1000) || !await nodeKeepsMegammr()) {
-      config.save({ params: Object.assign({}, config.load().params, { megammr: false }) });   // it had no MegaMMR to lose: back as it was
-      node.log("[app] MegaMMR file import: the node did not come back in MegaMMR mode; the setting is light again");
-      throw new Error(importfile.ON_FAILED);
-    }
-    await mayStop();
-  }
-  const j = await held(() => runResync(cmd));
-  const ok = !!(j && j.status === true), up = ok ? await nodeUp(10 * 60 * 1000) : node.state === "running";
-  if (ok) node.log("[app] MegaMMR file import finished; the node " + (up ? "is running" : "has not come back yet") + (node.megammrBroken ? "; it says its MegaMMR is BROKEN" : ""));
-  return Object.assign({ status: ok, broken: !!node.megammrBroken, on: true }, j && j.error ? { error: String(j.error) } : {});
-});
-// Turn MegaMMR off: the setting saved, then the restart, at which the node DELETES its megammr.mmr (MinimaDB.java loadAllDB). The wallet is
-// not touched. The screen has said all of that and asked first; the stop guard asks again when anything is in flight.
-ipcMain.handle("mcd:megammrOff", async () => {
-  await mayStop();
-  return held(async () => { const c = config.load(); config.save({ params: Object.assign({}, c.params, { megammr: false }) }); node.log("[app] MegaMMR turned off: the node deletes its MegaMMR file at this restart"); await node.restart(); return node.snapshot(); });
-});
+ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", async () => {
+  const r = await restore.restoreBackup(o, { keyMode: config.load().keyMode, supported: node.blockKeysSupported(), picked: (shown) => imports.confirm("backup", shown),
+    running: node.state === "running", run: async (c) => { await mayStop(); return held(() => runResync(c)); }, work: walletWork });   // the stop guard right before the node gets it (0.19.294)
+  if (r && r.status === true) imports.forget("backup");   // restored: a later restore chooses its file again (a refused one, a wrong password, keeps it for the retry)
+  return r;
+}));
+ipcMain.handle("mcd:importMegammr", (_e, shown) => megafile.importMegammr(shown));
+ipcMain.handle("mcd:megammrOff", () => megafile.megammrOff());
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -437,7 +412,7 @@ const freeze = require("./freeze").create({
     dexicon: { gate: async () => { dexicon.gate(); await Promise.all([atomix.hold(), pandapools.hold()]); }, start: () => node.onEnginesRelease(), stop: () => node.onEnginesHold() }
   },
   // A wallet-replacing megammrsync holds the same engines (node-manager runResync): from before its hold until its settle has released them.
-  replacing: () => !!node.replacingWallet || !!(node.walletCheck && node.walletCheck.held),
+  replacing: () => !!node.replacingWallet || !!(node.walletCheck && node.walletCheck.held) || megafile.busy(),   // a MegaMMR file import holds the engines too
   dexiconWork: async () => Object.assign(await inFlightWork(), { ownPools: await pandapools.ownPools().catch(() => null), holds: (() => { try { return dexicon.coinHolds(); } catch (e) { return null; } })() })
 });
 ethwallet.setFrozen(() => freeze.isFrozen("dexicon"));

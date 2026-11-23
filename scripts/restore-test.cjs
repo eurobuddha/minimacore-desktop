@@ -89,7 +89,7 @@ test("M1: a seed restore on the general command channel is recognised, and main.
   assert.ok(order.every((n, i) => n >= 0 && (i === 0 || n > order[i - 1])), "refusals in order: " + order);
   assert.ok(cmd.indexOf(CALLS_CHECKS) > 0 && cmd.indexOf(CALLS_CHECKS) < cmd.indexOf("seedgate.scrubReply(await run(pinned), command)"), "every check before the node gets anything");
   assert.ok(/const walletWork = async \(skipDexicon = Date\.now\(\) < dexSkipUntil\) => restore\.activeWorkList\(\{ atomix: await atomix\.activeWork\(\)\.catch\(\(\) => null\), pools: await pandapools\.activeWork\(\)\.catch\(\(\) => null\),/.test(main), "asked of the existing read models; a failed read is null, which refuses");
-  assert.ok(/work: walletWork \}\)\);/.test(main), "and the backup-file restore asks the same");
+  assert.ok(/work: walletWork \}\);/.test(main), "and the backup-file restore asks the same");
 });
 
 test("M1: a store of the old wallet is moved aside under a dated name, never deleted and never overwritten", () => {
