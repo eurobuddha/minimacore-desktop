@@ -1066,3 +1066,47 @@ test("0.19.375: the investigator's repro on the Trade screen: the FAST row under
   u.els.dxAmount.value = "1000"; u.els.dxAmount.oninput(); await u.settle(); await u.settle();
   assert.equal(sw.hidden, true);
 });
+
+// 0.19.404: History is ONE list by time (the owner asked whether to merge it, as Activity is): FAST fills, on-chain trades
+// (the engine's my_trades), finished AtomiX swaps and finished pool operations, paged together by date
+test("0.19.404: History is one chronological list of every kind; NET counts FAST fills only; Show more pages every kind by date, no pool row dropped", async () => {
+  const vm = require("node:vm"), H = (c) => "0x" + c.repeat(64), now = new Date(2026, 10, 22, 12).getTime(), MIN = 60000;
+  const FILL = { txpowid: H("A"), role: "taker", side: "buy", filled: "500", price: "0.0031", maker: H("B"), orderId: H("C"), coins: [H("D")], status: "done", block: 2417300, ts: (now - 3 * MIN) / 1000 };
+  const TRADE = { spentcoin: H("E"), timems: now - 2 * MIN, block: 2417301, price: "0.0032", size: "100", buy: 0, maker: 1, orderid: H("F"), txpowid: H("1"), verification_status: "verified" };
+  const item = (kind, key, ts, id) => ({ kind, key, ts, block: 0, pending: false, tag: kind.toUpperCase(), html: `<div id="${id}"></div>` });
+  // 70 finished pool rows older than everything else: the first page holds the newest 60 rows of ALL kinds; none is lost
+  const pools = Array.from({ length: 70 }, (_, i) => item("pool", "pp:" + i, now - (10 + i) * MIN, "PP" + i));
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, showModal() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
+  const els = {}, win = { DexCore: C, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date: class extends Date { static now() { return now; } },
+    DexPools: { tick() {}, render() {}, shared() {}, part: () => "", activityItems: () => [], historyItems: () => pools },
+    DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false, activityItems: () => [], historyItems: () => [item("atomix", "ax:" + H("9"), now - MIN, "AXDONE")] },
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener() {} };
+  win.window = win;
+  win.mcd = { dxStatus: async () => ({ version: "0.0.153", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {}, block: 2417310 }), onDexicon() {}, clip: async () => true,
+    dxBook: async () => ({ fast: [], book: [], poolAsks: [], poolBids: [], pools: [] }), dxMine: async () => ({ orders: [], pending: [] }), cmd: async () => ({ status: true, response: [] }),
+    dxCommand: async (a) => ({ status: true, rows: /fill_%/.test(a.query) ? [{ K: "fill_" + FILL.txpowid, V: JSON.stringify(FILL) }] : [{ K: "activity", V: "[]" }] }) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
+  vm.createContext(win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/lib/activity.js"), "utf8"), win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
+  win.document.getElementById("shell").dataset.mode = "dex";
+  win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+  win.DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { myTrades: [TRADE, Object.assign({}, TRADE, { fast: true, spentcoin: H("7") })] } }));
+  win.DexUI.paint("dexicon"); win.DexUI.pickTab("history"); await settle();
+  let html = els.dxBody.innerHTML;
+  assert.ok(html.includes("NET · SETTLED FAST-BOOK FILLS"), "the net says it counts FAST fills only");
+  const where = ["AXDONE", TRADE.txpowid, 'data-fill="0"', "PP0"].map(s => html.indexOf(s));
+  assert.ok(where.every((x, i) => x > 0 && (i === 0 || x > where[i - 1])), "newest first, every kind mixed: AtomiX, on-chain trade, FAST fill, pool " + JSON.stringify(where));
+  assert.ok(html.includes(TRADE.spentcoin) && html.includes(TRADE.orderid) && !html.includes(H("7")), "the on-chain trade with its identifiers whole; a FAST row of my_trades is not drawn twice");
+  const kinds = [...html.matchAll(/<div class="dx-mix" data-kind="(\w+)">/g)].map(m => m[1]);
+  assert.equal(kinds.length, 60, "one page of 60 rows"); assert.deepEqual(kinds.slice(0, 4), ["atomix", "chain", "fast", "pool"]);
+  assert.ok(!/ATOMIX SWAPS|POOL OPERATIONS/.test(html), "no separate sections");
+  assert.match(html, /data-hmore="1">Show more \(13 remaining\) ▾<\/button>/);
+  assert.ok(html.includes("PP56") && !html.includes("PP57"));
+  await els.dxBody.onclick({ target: { closest: (sel) => (sel === "button" ? { dataset: { hmore: "1" } } : null) } }); await settle();
+  html = els.dxBody.innerHTML;
+  assert.ok(html.includes("PP69") && !/data-hmore/.test(html), "the older pool rows are there after Show more, none dropped by a 60 cap");
+  const heads = [...html.matchAll(/<div class="dx-day">([^<]*)<\/div>/g)].map(m => m[1]); assert.ok(heads.every((d, i) => heads.indexOf(d) === i), "each day header once");
+});

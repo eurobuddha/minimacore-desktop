@@ -536,22 +536,45 @@ const DexUI = (() => {
     }
     return out.join("");
   }
-  const HIST_INFO = L_("Every trade this node made on the Exchange, newest first, then every finished AtomiX swap of the market the ⇄ pill is on. One line each: click a line for the amounts, the block and the full on-chain identifiers. Net counts settled trades only. A trade that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Export CSV saves every fill for your accounts; AtomiX swaps have their own file in Activity.");
+  const HIST_INFO = L_("Everything this node finished trading, in one list by time, newest first: Exchange fills on the fast book, your on-chain trades, finished AtomiX swaps (and any you hid, with Unhide) and finished pool operations, each line marked with its kind. Click a fill for the amounts, the block and the full on-chain identifiers. The net above counts settled fast-book fills only. A fill that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Show more pages the whole list by date. Export CSV saves every fast-book fill for your accounts; AtomiX swaps have their own file in Activity.");
+  const HIST_PAGE = 60;   // History shows this many rows of the mixed list, then "Show more" pages every kind together by date
+  const kindLabel = (tag, pending) => tag + (pending ? " · " + th("PENDING") : "");
+  /** A mixed list (Activity, History) drawn in its one order, a day header over each day's run, each row marked with its kind. */
+  function mixRows(list, now) {
+    let day = ""; const out = [];
+    for (const it of list) {
+      const d = it.ts ? C.dayLabel(it.ts, now) : th("UNDATED");
+      if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
+      out.push(`<div class="dx-mix" data-kind="${it.kind}"><div class="dx-mix__k"${it.pending ? " data-pending" : ""}${it.srInside ? ' aria-hidden="true"' : ""}>${kindLabel(it.tag, it.pending)}</div>${it.html}</div>`);
+    }
+    return out.join("");
+  }
+  /** History's ONE list (0.19.404; the owner asked whether to merge it: one list, as Activity): the Exchange's fast-book fills, this
+   *  node's on-chain trades (the engine's my_trades, in the service's STATE), finished AtomiX swaps and finished pool operations,
+   *  newest first by DexCore.activityMix. A fill is placed by its own time and, once done, its block. */
+  function historyItems() {
+    const fills = X.fills.map((f, i) => {
+      const ms = (Number(f.ts) || 0) * 1000, buy = f.side === "buy", fs = C.fillState(f), t = new Date(ms), done = f.status === "done", pending = !done && f.status !== "lost", tag = th("fast book");
+      return { kind: "fast", key: "fill:" + String(f.txpowid || i), ts: ms, block: done ? Number(f.block) || 0 : 0, pending, tag, srInside: true,
+        html: `<button class="dx-card dx-led" data-fill="${i}"><span class="dx-sr">${kindLabel(tag, pending)}: </span><span class="dx-led__ic" data-tone="${fs.tone}">⇄</span><span class="dx-led__m"><b>${done ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))}</b>`
+          + `<span class="dx-led__a">${buy ? tr("{f} MxUSD → {filled} MINIMA", { f: esc(C.fmt(C.fillUsd(f))), filled: esc(f.filled) }) : tr("{filled} MINIMA → {f} MxUSD", { filled: esc(f.filled), f: esc(C.fmt(C.fillUsd(f))) })}</span>`
+          + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? th("you were the maker") : th("fast book")} · ${esc(fs.text)}</span></span>`
+          + `<span class="dx-led__r">${done ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${th(fs.chip)}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>` };
+    });
+    const chain = (X.svc && Array.isArray(X.svc.myTrades) ? X.svc.myTrades : []).filter(t => t && !t.fast).map((t, i) => ({ kind: "chain", key: "chain:" + String(t.spentcoin || t.txpowid || i), ts: Number(t.timems) || 0, block: Number(t.block) || 0, pending: false, tag: th("on-chain"),
+      html: `<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${t.buy ? "buy" : "sell"}">${tr("{buy}{size} MINIMA @ {price}", { buy: t.buy ? (th("BUY") + " ") : (th("SELL") + " "), size: esc(t.size), price: esc(t.price) })}</span></div>`
+        + `<div class="dx-sub">${tr("{timems}   ON-CHAIN {maker}   {sourcekind}", { timems: stamp(Number(t.timems) || 0), maker: t.maker ? th("MAKER") : th("TAKER"), sourcekind: esc(t.verification_status || t.source_kind || "") })}</div>${idLine("txpow", t.txpowid)}${idLine("order", t.orderid)}${idLine("coin", t.spentcoin)}</div>` }));
+    return C.activityMix(fills.concat(chain, DexAx.historyItems(), DexPools.historyItems()));
+  }
   function historyHtml() {
     const net = C.netSettled(X.fills), now = Date.now(), tone = (n) => (n.sign > 0 ? "in" : n.sign < 0 ? "out" : "");
     const out = [`<div class="dx-title"><h2>${th("History")}</h2><button class="dx-info" data-info="hist" aria-label="${th("About History")}">i</button></div>`,
-      `<div class="dx-card"><div class="dx-row"><div><div class="dx-label">${th("NET · SETTLED TRADES")}</div><div class="dx-net" data-tone="${tone(net.minima)}">${net.minima.text} MINIMA</div><div class="dx-net" data-tone="${tone(net.mxusd)}">${net.mxusd.text} MxUSD</div>`
+      `<div class="dx-card"><div class="dx-row"><div><div class="dx-label">${th("NET · SETTLED FAST-BOOK FILLS")}</div><div class="dx-net" data-tone="${tone(net.minima)}">${net.minima.text} MINIMA</div><div class="dx-net" data-tone="${tone(net.mxusd)}">${net.mxusd.text} MxUSD</div>`
       + `<div class="dx-counts">${net.count ? tr("{done} settled", { done: net.count + (net.count === 1 ? (" " + th("fill ·") + " ") : (" " + th("fills ·") + " ")) + net.done }) : X.loaded ? th("No fills yet.") : "…"}</div></div><button class="dx-btn dx-btn--side" data-csv="1"${net.count ? "" : " disabled"}>${th("Export CSV")}</button></div></div>`];
-    let day = "";
-    X.fills.forEach((f, i) => {
-      const ms = (Number(f.ts) || 0) * 1000, d = C.dayLabel(ms, now), buy = f.side === "buy", fs = C.fillState(f), t = new Date(ms);
-      if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
-      out.push(`<button class="dx-card dx-led" data-fill="${i}"><span class="dx-led__ic" data-tone="${fs.tone}">⇄</span><span class="dx-led__m"><b>${f.status === "done" ? (buy ? th("Bought") : th("Sold")) : (buy ? th("Buy") : th("Sell"))}</b>`
-        + `<span class="dx-led__a">${buy ? tr("{f} MxUSD → {filled} MINIMA", { f: esc(C.fmt(C.fillUsd(f))), filled: esc(f.filled) }) : tr("{filled} MINIMA → {f} MxUSD", { filled: esc(f.filled), f: esc(C.fmt(C.fillUsd(f))) })}</span>`
-        + `<span class="dx-led__s">@ ${esc(C.fmtPrice(C.dec(f.price)))} · ${f.role === "maker" ? th("you were the maker") : th("fast book")} · ${esc(fs.text)}</span></span>`
-        + `<span class="dx-led__r">${f.status === "done" ? "" : `<span class="dx-chip" data-tone="${fs.tone}">${th(fs.chip)}</span>`}<span class="dx-led__t">${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")} ▸</span></span></button>`);
-    });
-    return out.join("") + DexAx.part("history") + DexPools.part("history");
+    const items = historyItems(), shown = X.histShown || HIST_PAGE;
+    out.push(mixRows(items.slice(0, shown), now));
+    if (items.length > shown) out.push(`<button class="pp-link pp-link--row" data-hmore="1">${tr("Show more ({shown} remaining) ▾", { shown: items.length - shown })}</button>`);
+    return out.join("");
   }
   function fillFacts(f) {
     const buy = f.side === "buy", fs = C.fillState(f);
@@ -566,6 +589,7 @@ const DexUI = (() => {
     if (ds.sub != null) { X.sub = Number(ds.sub); return draw(); }
     if (ds.oact) return money(() => orderAction(ds.oact, ds.kind, ds.id, ds.price));
     if (ds.info) return void dialog(I18N.t("History"), HIST_INFO, "");
+    if (ds.hmore) { X.histShown = (X.histShown || HIST_PAGE) + HIST_PAGE; return draw(); }
     if (ds.fill != null) return void dialog(I18N.t("Trade"), fillFacts(X.fills[Number(ds.fill)]), "");
     if (ds.csv) { try { const saved = await api.exportCsv(C.csv(X.fills), "dexicon-trades-" + new Date().toISOString().slice(0, 10) + ".csv"); if (saved) say(I18N.t("Saved {fills} fills.", { fills: X.fills.length }), "note"); } catch (err) { say(err && err.message); } return; }
     if (ds.asub != null) { X.asub = Number(ds.asub); return draw(); }
@@ -607,7 +631,6 @@ const DexUI = (() => {
       // The Exchange's rows are the page's own merge (AX.activity.merge, ui/activity.js all()): the activity rows plus every
       // FAST fill that has no row of its own (the maker's side), as the page's and the phone's Activity show them.
       const m = A(), rows = X.actRows = m ? m.merge(X.acts, X.fills) : X.acts.slice();
-      const kindLabel = (tag, pending) => tag + (pending ? " · " + th("PENDING") : "");
       const items = C.activityMix(rows.map((a, i) => {
         const ms = Number(a.ts) || 0, buy = a.side === "buy" || a.buy === true, fast = a.route === "FAST";
         const chip = m ? m.chip(a, tip) : String(a.stage || ""), status = m ? m.status(a, tip, now) : String(a.stage || ""), tone = /DONE|CONFIRMED/.test(chip) ? "ok" : /FAILED|REFUSED|DROPPED|LOST/.test(chip) ? "bad" : "live";
@@ -624,11 +647,7 @@ const DexUI = (() => {
       const open = items.filter((it) => it.pending || it.unfinished);
       if (!open.length) X.onlyOpen = false;
       if (open.length) out.push(`<button class="pp-link pp-link--row" data-aopen="1" aria-pressed="${!!X.onlyOpen}">${X.onlyOpen ? tr("Showing only the {n} unfinished — show all", { n: open.length }) : tr("{n} unfinished — show", { n: open.length })}</button>`);
-      for (const it of X.onlyOpen ? open : items) {
-        const d = it.ts ? C.dayLabel(it.ts, now) : th("UNDATED");
-        if (d !== day) { day = d; out.push(`<div class="dx-day">${d}</div>`); }
-        out.push(`<div class="dx-mix" data-kind="${it.kind}"><div class="dx-mix__k"${it.pending ? " data-pending" : ""}${it.srInside ? ' aria-hidden="true"' : ""}>${kindLabel(it.tag, it.pending)}</div>${it.html}</div>`);
-      }
+      out.push(mixRows(X.onlyOpen ? open : items, now));
     } else {
       const tape = X.svc && Array.isArray(X.svc.tape) ? X.svc.tape : [];
       if (!tape.length && !ax) out.push(`<div class="dx-card dx-none"><b>${th("No trades seen yet")}</b><span>${th("Fills this node sees on the on-chain book are listed here. There is no server and no back-fill.")}</span></div>`);

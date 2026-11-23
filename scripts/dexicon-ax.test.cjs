@@ -394,7 +394,7 @@ test("M3: a hidden swap is always reachable: History lists every finished swap a
   assert.deepEqual(list.map((x) => x.hash), [PK("52"), PK("53")], "the hidden swap in flight first, then the finished one; a visible swap in flight stays in Activity");
   assert.match(AX.HIDE_ASK(false), /It stays in History, with Check now, Refund now and Unhide\.$/); assert.match(AX.HIDE_ASK(true), /Check now and Unhide/);
   const src = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "dexicon-ax.js"), "utf8"));
-  assert.match(src, /historyList\(swaps, S\.hidden\)[^\n]*swapCard\(x, false, S\.hidden\.has\(x\.hash\)\)/, "History draws them with the Unhide button");
+  assert.match(src, /historyList\(S\.swaps, S\.hidden\)[^\n]*swapCard\(x, false, S\.hidden\.has\(x\.hash\)\)/, "History draws them with the Unhide button (0.19.404: rows of History's one list)");
   assert.match(src, /data-axunhide="\$\{esc\(it\.hash\)\}"/); assert.match(src, /if \(ds\.axunhide\) \{ S\.hidden\.delete\(ds\.axunhide\)/);
 });
 test("M4: the halt card is written from the facts: which key, what still settles, which swaps cannot and their deadlines, and no instruction without a tool", () => {

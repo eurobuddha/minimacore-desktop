@@ -876,10 +876,16 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
    *  every swap not hidden, each with its whole card. A swap spans two chains, so it has no one block: it is placed by the
    *  time it was created, and is pending until it has finished. Its label names its own Minima-side token (0.19.385), not
    *  the market the ⇄ pill is on now. */
+  const axSide = (x) => [tok(x.selltoken), tok(x.buytoken)].find((t) => t === "MINIMA" || t === "MxUSD") || ccy();
   function activityItems() {
     if (!up()) return [];
-    const side = (x) => [tok(x.selltoken), tok(x.buytoken)].find((t) => t === "MINIMA" || t === "MxUSD") || ccy();
-    return (S.swaps || []).filter((x) => !S.hidden.has(x.hash)).map((x) => ({ kind: "atomix", key: "ax:" + x.hash, ts: Number(x.created) || 0, block: 0, pending: !terminal(x), tag: tr("ATOMIX · USDT ⇄ {c}", { c: esc(side(x)) }), html: swapCard(x, true) }));
+    return (S.swaps || []).filter((x) => !S.hidden.has(x.hash)).map((x) => ({ kind: "atomix", key: "ax:" + x.hash, ts: Number(x.created) || 0, block: 0, pending: !terminal(x), tag: tr("ATOMIX · USDT ⇄ {c}", { c: esc(axSide(x)) }), html: swapCard(x, true) }));
+  }
+  /** AtomiX's rows of History's ONE list (0.19.404; dexicon-ui.js mixes them by time with DexCore.activityMix): historyList, every
+   *  finished swap and every hidden one (a hidden swap not finished is pending, and keeps Check now, Refund now and Unhide). */
+  function historyItems() {
+    if (!up()) return [];
+    return historyList(S.swaps, S.hidden).map((x) => ({ kind: "atomix", key: "ax:" + x.hash, ts: Number(x.created) || 0, block: 0, pending: !terminal(x), tag: tr("ATOMIX · USDT ⇄ {c}", { c: esc(axSide(x)) }), html: swapCard(x, false, S.hidden.has(x.hash)) }));
   }
   function part(tab, sub) {
     if (!up()) return tab === "assets" ? `<div class="dx-card"><div class="dx-label">${th("ETHEREUM")}</div><div class="dx-sub dx-sub--sans">${D.running() ? th("AtomiX is still starting: the Ethereum wallet appears when it is ready.") : th("The node is stopped. The Ethereum wallet appears when it runs.")}</div></div>` : "";
@@ -888,7 +894,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
       if (sub === 1) { const rec = (S.mh && S.mh.recent) || []; return rec.length ? `<div class="dx-day">${tr("ATOMIX · USDT ⇄ {c}", { c: esc(c) })}</div>` + rec.map((t) => `<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline">${fmtPx(t.price)} USDT</span><span class="dx-chip" data-tone="${t.status === "EXECUTED" ? "ok" : t.status === "REFUNDED" ? "bad" : "live"}">${t.status === "EXECUTED" ? th("FILLED") : t.status === "REFUNDED" ? th("REFUNDED") : th("OPEN")}</span></div><div class="dx-sub">${tr("{sizeMinima} {c} · block {createdBlock}", { sizeMinima: esc(t.sizeMinima), c: esc(c), createdBlock: esc(t.createdBlock) })}</div></div>`).join("") : ""; }
       return "";   // My activity: the swaps are rows of the one mixed list (activityItems)
     }
-    if (tab === "history") { const list = historyList(swaps, S.hidden); return list.length ? `<div class="dx-day">${tr("ATOMIX SWAPS · USDT ⇄ {c}", { c: esc(c) })}</div>` + list.map((x) => swapCard(x, false, S.hidden.has(x.hash))).join("") : ""; }
+    if (tab === "history") return "";   // the swaps are rows of History's one mixed list (historyItems)
     if (tab === "assets") {
       const w = S.wallet, b = (w && w.bals) || {}, m = b.meta, warn = coinWarn(S.st.currency, m && m.coins), addr = S.st.eth || (w && w.addr) || "";
       const locked = m ? Math.max(0, (Number(m.confirmed) || 0) - (Number(m.sendable) || 0)) : 0;
@@ -954,6 +960,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     const b = body(); if (b && SCREENS[S.tab] && b.dataset.tab === S.tab) { b.innerHTML = ""; render(S.tab, b); } else load("").then(D.repaintStrip, D.repaintStrip);
   }
 
-  return Object.assign({ Act, init: (deps) => { D = deps; api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, render, onUpdate, reset, tick, click, switchCurrency, part, activityItems, shared,
+  return Object.assign({ Act, init: (deps) => { D = deps; api().axStatus().then((s) => { if (s) { S.st = s; D.repaintStrip(); } }).catch(() => {}); }, render, onUpdate, reset, tick, click, switchCurrency, part, activityItems, historyItems, shared,
     pill: () => ({ text: "⇄  " + (S.switching ? I18N.t("Switching…") : ccy()), currency: S.st.currency || "", busy: !!S.switching, label: I18N.t("Trading {ccy}. Activate to switch to {currency}.", { ccy: ccy(), currency: (S.st.currency === "minima" ? "MxUSD" : "MINIMA") }) }) }, core);
 });

@@ -550,7 +550,7 @@ test("Activity: every pool operation with its state, its transaction id whole, t
   assert.match(PP.feedItem({ pool: PK("B1"), kind: "SWAP", minimaAmt: "40", tokenAmt: "0.128", tokenLabel: "USDT", ts: now, observed: true }, now).title, /observation \(unverified\)/);
   const pp = src("dexicon-pp.js"), ui_ = src("dexicon-ui.js");
   assert.match(ui_, /DexAx\.part\("activity", X\.asub\) \+ \(X\.asub === 0 \? DexPools\.part\("activity"\) : ""\)/, "pool operations are in the shared Activity");
-  assert.match(ui_, /DexAx\.part\("history"\) \+ DexPools\.part\("history"\)/, "and the finished ones in History");
+  assert.match(ui_, /C\.activityMix\(fills\.concat\(chain, DexAx\.historyItems\(\), DexPools\.historyItems\(\)\)\)/, "and the finished ones in History's one list (0.19.404)");
   assert.match(pp, /PandaPools has not started yet, so your pool operations could not be checked/, "an engine that has not started is said, not shown as nothing");
 });
 test("the Shutdown warning and the restore gate count pool operations truthfully: 'could not be checked' when the engine has not started", async () => {

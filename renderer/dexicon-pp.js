@@ -712,9 +712,21 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function part(tab) {
     if (!D || !D.running()) return "";
     if (!S.st || !S.st.ready) return tab === "activity" ? `<div class="dx-day">${th("POOL OPERATIONS · ② POOLS")}</div><div class="dx-state dx-state--note" role="status">${th("PandaPools has not started yet, so your pool operations could not be checked. They are listed here when it has.")}</div>` : "";
-    if (tab === "activity") return "";   // the rows are in Activity's one mixed list (activityItems)
-    const now = Date.now(), list = (S.acts || []).filter((a) => a.type !== "STATUS").map((a) => actItem(a, now)).filter((x) => x.done);
-    return list.length ? `<div class="dx-day">${th("POOL OPERATIONS · ② POOLS")}</div>` + list.slice(0, 60).map(itemHtml).join("") : "";
+    return "";   // the rows are in Activity's and History's one mixed lists (activityItems, historyItems)
+  }
+  /** One pool operation as a row of a mixed list (Activity, History). */
+  function poolRow(a, i, now) {
+    const it = actItem(a, now), block = Number(a.verifiedDepth) >= 0 && Number(a.inclusionBlock) > 0 ? Number(a.inclusionBlock) : 0;
+    const open = !a.failed && !a.confirmed && !(Number(a.verifiedDepth) >= 0), noId = open && !a.txpowid, notFound = open && !noId && !!a.verifiedAt;
+    return { kind: "pool", key: "pp:" + (a.txpowid ? String(a.txpowid).toLowerCase() : "#" + i), ts: Number(a.ts) || 0, block, pending: open && !noId && !notFound, unfinished: notFound,
+      tag: th("POOL") + (noId ? " · " + th("No transaction ID saved") : notFound ? " · " + th("Not found on this node") : ""), html: itemHtml(it), done: it.done };
+  }
+  /** PandaPools' rows of History's ONE list (0.19.404): every finished operation (confirmed or failed), none dropped: the screen pages
+   *  the mixed list by date ("Show more"), never one kind by its own count. */
+  function historyItems() {
+    if (!up()) return [];
+    const now = Date.now();
+    return (S.acts || []).filter((a) => a.type !== "STATUS").map((a, i) => poolRow(a, i, now)).filter((x) => x.done);
   }
   /** PandaPools' rows of the shared Activity's ONE list (0.19.384; dexicon-ui.js mixes them by time with DexCore.activityMix):
    *  the 60 newest and every one not finished, each with its whole card. block: the block the node's own check found the
@@ -725,12 +737,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   function activityItems() {
     if (!up()) return [];
     const now = Date.now();
-    return (S.acts || []).filter((a) => a.type !== "STATUS").map((a, i) => {
-      const it = actItem(a, now), block = Number(a.verifiedDepth) >= 0 && Number(a.inclusionBlock) > 0 ? Number(a.inclusionBlock) : 0;
-      const open = !a.failed && !a.confirmed && !(Number(a.verifiedDepth) >= 0), noId = open && !a.txpowid, notFound = open && !noId && !!a.verifiedAt;
-      return { kind: "pool", key: "pp:" + (a.txpowid ? String(a.txpowid).toLowerCase() : "#" + i), ts: Number(a.ts) || 0, block, pending: open && !noId && !notFound, unfinished: notFound,
-        tag: th("POOL") + (noId ? " · " + th("No transaction ID saved") : notFound ? " · " + th("Not found on this node") : ""), html: itemHtml(it), keep: i < 60 || !it.done };
-    }).filter((x) => x.keep);
+    return (S.acts || []).filter((a) => a.type !== "STATUS").map((a, i) => Object.assign(poolRow(a, i, now), { keep: i < 60 })).filter((x) => x.keep || !x.done);
   }
   /** the shared screens ask for PandaPools' part of their data: at once when one opens, then once a minute */
   function shared(force) { if (!D || (!force && Date.now() - S.sharedAt < 60000)) return; S.sharedAt = Date.now(); (async () => { S.st = await api().ppStatus().catch(() => null); if (up()) S.acts = await api().ppActivity().catch(() => S.acts); })().then(D.redraw, D.redraw); }
@@ -915,5 +922,5 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     if (ds.ppclose) { const p = pool(ds.ppclose); return p ? act(() => Act.withdraw(api(), ui, p)) : say(I18N.t("That pool is no longer in the list. Nothing was sent."), "note"); }
   }
 
-  return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick, part, activityItems, shared }, core);
+  return Object.assign({ Act, init: (deps) => { D = deps; }, render, onUpdate, reset, tick, part, activityItems, historyItems, shared }, core);
 });

@@ -5847,3 +5847,10 @@
   "Switch to the dark theme",
   "Follow the system again: Settings › Appearance"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Everything this node finished trading, in one list by time, newest first: Exchange fills on the fast book, your on-chain trades, finished AtomiX swaps (and any you hid, with Unhide) and finished pool operations, each line marked with its kind. Click a fill for the amounts, the block and the full on-chain identifiers. The net above counts settled fast-book fills only. A fill that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Show more pages the whole list by date. Export CSV saves every fast-book fill for your accounts; AtomiX swaps have their own file in Activity.": "此节点完成的所有交易，按时间排成一个列表，最新的在前：快速订单簿上的交易所成交、您的链上交易、已完成的 AtomiX 兑换（以及您隐藏的兑换，带“取消隐藏”）和已完成的资金池操作，每行都标明其类型。点击一笔成交可查看金额、区块和完整的链上标识符。上方的净额只计算已结算的快速订单簿成交。已联合签名并发布的成交在区块收录之前显示为等待中。txpow id 是挖矿前的 id；结算由输出币证明。“显示更多”按日期翻页整个列表。导出 CSV 会保存每一笔快速订单簿成交供您记账；AtomiX 兑换在“活动”中有自己的文件。",
+  "NET · SETTLED FAST-BOOK FILLS": "净额 · 已结算的快速订单簿成交"
+}, { review: [
+  "Everything this node finished trading, in one list by time, newest first: Exchange fills on the fast book, your on-chain trades, finished AtomiX swaps (and any you hid, with Unhide) and finished pool operations, each line marked with its kind. Click a fill for the amounts, the block and the full on-chain identifiers. The net above counts settled fast-book fills only. A fill that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Show more pages the whole list by date. Export CSV saves every fast-book fill for your accounts; AtomiX swaps have their own file in Activity.",
+  "NET · SETTLED FAST-BOOK FILLS"
+] });
