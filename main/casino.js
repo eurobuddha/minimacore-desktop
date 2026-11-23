@@ -40,11 +40,13 @@ const RETRY_BLOCKS = 8;                 // a posted txn mines asynchronously —
 // value into the covenant. createBet posts with `send`; takeBet and the offer renewal both write an output to
 // the covenant. The only covenant output settling needs is the house reveal (same coin, same amount, phase 1→2).
 const TO_COVENANT = ("address:" + CONTRACT).toUpperCase();
+// The verb is read the way the node reads it (main/cmdverb.js: any case, quoted, trimmed — 0.19.418; /^send\b/ let `SEND` by),
+// in every piece of a chain; a chain itself is refused before this by cmdverb.refuse (the node runs what follows a ";").
+const V = require("./cmdverb");
 function refused(c) {
-  return String(c).split(";").some(part => {
-    const p = part.trim();
-    if (/^send\b/.test(p)) return true;
-    return /^txnoutput\b/.test(p) && p.toUpperCase().includes(TO_COVENANT) && !/^txnoutput id:svc_reveal_/.test(p);
+  return V.parts(c).some(p => {
+    if (V.beginsAs(p, "send")) return true;
+    return V.is(p, "txnoutput") && p.toUpperCase().includes(TO_COVENANT) && !/^txnoutput id:svc_reveal_/.test(p);
   });
 }
 
@@ -93,6 +95,7 @@ function buildMds() {
       // the donor calls cmd WITHOUT a callback in places (newscript, txndelete) — valid in the browser shim, so no-op.
       const done = typeof cb === "function" ? cb : () => {};
       let c = String(command);
+      { const why = V.refuse("P2P Chance", c); if (why) { done(toVm({ status: false, error: why })); return; } }   // one command (0.19.418)
       if (/^checkmode\b/.test(c)) { done(toVm({ status: true, response: { mode: "WRITE" } })); return; }  // admin RPC is always WRITE
       // Normalise every donor newscript to trackall:false: the row is needed for txnbasics ScriptProofs
       // (track-flag-blind), but trackall:true adopts every stranger's bet into the balance forever — and a

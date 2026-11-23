@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.418] — SECURITY: a stranger's coin state can no longer become a node command
+
+- The node splits every command text on ";" (even inside quotes) and runs each piece. A PandaPools beacon at the public sentinel whose state port 2 held `0x00;send …;` turned ONE discovery `runscript` into FOUR admin `send`s (the token appears 4 times in the covenant), and a P2P Chance taker's state 9 `0;SEND …` ran through auto-reveal (the shim refused only a lower-case `send`).
+- main/cmdverb.js `refuse(source, text)`: a command holding ";", CR, LF or NUL is refused, nothing is sent. It runs under every caller in main/rpc.js (`rpcCall` and the raw call under `rpcRead`) and first in each engine shim (main/pandapools.js, main/atomix.js, main/dexicon.js, main/casino.js). An app or engine refused so is said in a notification naming it (main/main.js, once a minute per source); the Terminal refuses a chain before any gate or question: "send the commands one at a time" (renderer/mainsaid.js RPC_UNSAFE, zh / ru / uk).
+- Re-vendored: PandaPools engine 0.6.46 (beacon and tracked-covenant fields strict hex / number where read; `PoolRuntimeGuard` refuses ";" / CR / LF / NUL and logs it), P2P Chance service.js 2.9.4 (state read only as 0x hex or a number; reveal / resolve skip a bet whose state is anything else; txnbasics and txnpost as two commands), AtomiX 0.1.61 (refusals logged; HTLC validators no longer trim).
+- main/casino/engine.js (desktop glue): the same clean state reads and checks, and its five `txnbasics;txnpost` chains are two commands. main/casino.js reads the verb as the node does (cmdverb: `SEND`, `"send"`, padded).
+- main/pandapools.js migrate: refused for a pool whose token is not MxUSD (as createPool).
+- Tests: scripts/engine-inject.test.cjs (in test:inject) drives the real host shims over the real engines against scripts/node-standin.cjs, a stand-in node that splits commands like the real one; it fails on 0.19.417. Chain expectations in rpc-test, inflight-test and seedgate-test now expect the refusal; casino-timeout-test's service / engine fixtures use hex keys.
+
 ## [0.19.417] — The MegaMMR file import no longer refuses itself ("Dexicon has not finished starting")
 
 - main/megammrfile.js: since 0.19.395 the import held the trading engines (and Future Cash Next was already stopped by the import's own start) and only then asked them what was open; a held engine does not answer, so every import was refused with "Dexicon has not finished starting" and "Future Cash Next has not started (or is frozen)" although both were running. Now what is open is read while the engines run, refused if anything is; then the stop guard is asked, still with the engines running; then the hold; then the same read again, of the engines as held, so work that started between the first read and the hold refuses too and the engines are let go (the stop guard's hold is ended with it, so a retry is not refused as a stop already under way).

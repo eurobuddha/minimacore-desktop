@@ -45,6 +45,7 @@ function timeoutFor(command) {   // the verb read as the node reads it, in every
 /** One HTTP round trip to the node, ungated. Only rpcCall below may call this. */
 function rawCall(port, secret, command) {
   return new Promise((resolve, reject) => {
+    if (/[;\r\n\u0000]/.test(String(command))) { reject(new Error(V.UNSAFE)); return; }   // the backstop under rpcRead too (0.19.418)
     const auth = "Basic " + Buffer.from("minima:" + secret).toString("base64");
     const ascii = ASCII.test(command), path = "/" + encodeURIComponent(command);
     const usePost = ascii && command.length > GET_MAX;
@@ -108,6 +109,8 @@ const lost = (e) => !(e && (e.code === "ECONNREFUSED" || /RPC authentication fai
  *  node command of every caller passes, and INSIDE the signing queue: a command is checked against the reservations
  *  when it is really sent, not when it was queued. A coin another owner holds is refused there, before the node. */
 function rpcCall(port, secret, command, opts) {
+  const unsafe = V.refuse(opts && opts.owner, command);   // 0.19.418: one command, from every caller (main/cmdverb.js refuse)
+  if (unsafe) return Promise.reject(new Error(unsafe));
   let r = runners.get(port);
   if (!r) { r = createNodeRunner(null, { lost, minHoldMs }); runners.set(port, r); }
   const raw = (c) => rawCall(port, secret, c);

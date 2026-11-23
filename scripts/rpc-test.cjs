@@ -79,13 +79,14 @@ test('signing commands are serialised process-wide; reads are not held behind th
   try {
     const first = rpcCall(port, 's', 'send amount:1 address:0x00');
     const second = rpcCall(port, 's', 'txnsign id:a publickey:auto');
-    const chained = rpcCall(port, 's', 'txncreate id:b;txnsign id:b publickey:auto');
+    const chained = rpcCall(port, 's', 'txnsign id:b publickey:auto');
+    await assert.rejects(rpcCall(port, 's', 'txncreate id:c;txnsign id:c publickey:auto'), /send the commands one at a time/);   // a chain never reaches the node (0.19.418)
     await rpcCall(port, 's', 'balance');                       // a read goes straight through
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.deepEqual([...seen].sort(), ['balance', 'send amount:1 address:0x00'], 'the read went through; the second signer has not reached the node yet');
     releaseFirst();
     await Promise.all([first, second, chained]);
-    assert.deepEqual(seen.slice(2), ['txnsign id:a publickey:auto', 'txncreate id:b;txnsign id:b publickey:auto'], 'signers ran one at a time, in order');
+    assert.deepEqual(seen.slice(2), ['txnsign id:a publickey:auto', 'txnsign id:b publickey:auto'], 'signers ran one at a time, in order');
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 });
 

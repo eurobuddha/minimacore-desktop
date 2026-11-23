@@ -469,6 +469,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     // ---- the commands that show what controls the funds (main/main.js, main/seedgate.js, 0.19.176) ----
     ["HTTP_TOO_LONG_NONASCII", I18N.N_("This command holds characters outside plain ASCII and is too long for the node's command line (over 65,536 characters once encoded). Shorten it, or write those characters in plain ASCII. Nothing was sent.")],   // main/rpc.js (0.19.305)
     ["RPC_ONE_COMMAND", I18N.N_("This command holds \";\", which would start a second command. Nothing was sent.")],
+    ["RPC_UNSAFE", I18N.N_("This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.")],
     ["RPC_SMUGGLED", I18N.N_("This command holds a character written as an escape code (a semicolon or a control character), which the node would decode and could run as a second command. Nothing was run.")],
     ["RPC_BUILT", I18N.N_("This command builds further commands from its values, and one of them holds white space, a colon, a quote or a backslash escape that would change those commands. Nothing was run.")],
     ["RPC_TXNDATA", I18N.N_("The data: of this command must be 0x hex holding a transaction whose id is plain letters, digits, \".\", \"-\" or \"_\": the node pastes that id into the commands it runs itself. Nothing was run.")],

@@ -153,7 +153,8 @@ test("Show seed phrase (Backup & Recovery): the same checks before the node is a
 test("main: the general command channel refuses vault and seedrandom without a pass; the window reaches the seed only through the gates", () => {
   const main = SRC("main/main.js"), h = main.slice(main.indexOf('ipcMain.handle("mcd:cmd"'));
   // changed on purpose (0.19.327): the handler's first step is seedgate.js checkCommand, which holds the same checks in the same order
-  assert.ok(h.startsWith('ipcMain.handle("mcd:cmd", async (_e, command) => {\n') && /^ipcMain[^\n]*\n(?:  \/\/[^\n]*\n)*  await seedgate\.checkCommand\(command, \{ take: secretGate\.take, running: requireRunning, walletWork, keyMode: \(\) => config\.load\(\)\.keyMode,\n    tip: async \(\) => \{ const r = await rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), "block"\);/.test(h), "the handler checks first, through checkCommand (0.19.329: and the tip)");
+  // (0.19.418: before it only the one-command refusal, cmdverb.refuse: a ";", line break or NUL is refused before any question)
+  assert.ok(h.startsWith('ipcMain.handle("mcd:cmd", async (_e, command) => {\n') && /^ipcMain[^\n]*\n(?:  \{ const why = cmdverb\.refuse\("", command\); if \(why\) throw new Error\(why\); \}[^\n]*\n)?(?:  \/\/[^\n]*\n)*  await seedgate\.checkCommand\(command, \{ take: secretGate\.take, running: requireRunning, walletWork, keyMode: \(\) => config\.load\(\)\.keyMode,\n    tip: async \(\) => \{ const r = await rpc\.rpcCall\(node\.rpcPort\(\), config\.rpcSecret\(\), "block"\);/.test(h), "the handler checks first, through checkCommand (0.19.329: and the tip)");
   const gsrc = SRC("main/seedgate.js"), chk = gsrc.slice(gsrc.indexOf("async function checkCommand("));
   assert.ok(/^async function checkCommand\(command, io\) \{\n  const R = require\("\.\/restore"\);\n  if \(typeof command !== "string" \|\| !command\.trim\(\)\) throw new Error\("empty command"\);\n[^\n]*\n  if \(\/\[\\x00-\\x08\\x0b-\\x1f\\x7f\]\/\.test\(command\)\) throw new Error\("This command holds a control character\. Type it again without one\."\);\n(?:[^\n]*\n){0,80}?  io\.running\(\);\n[^\n]*\n  const gated = refusal\(command, io\.take\); if \(gated\) throw new Error\(gated\);/.test(chk), "control characters first, then the node, then the gate: the first things checked");
   assert.ok(/ipcMain\.handle\("mcd:secretGate", \(_e, command, typed\) => \{ requireRunning\(\); return secretGate\.open\(command, typed\); \}\);/.test(main));
@@ -449,7 +450,7 @@ test("rpc enable / password / adduser / removeuser, slavenode enable, webhooks a
     { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, c) => c, async () => {});
   for (const c of ["rpc enable:true", "rpc enable:true password:x", "rpc enable:false", "rpc action:adduser username:u password:p mode:write", "rpc action:removeuser username:u", "rpc ssl:true", "rpc action:listusers enable:true",
     "slavenode enable:true host:10.0.0.1:9001", "slavenode enable:false", "webhooks action:add hook:http://x.example/h", "mds action:install file:x.mds.zip", "mds action:publicmds enable:true", "mds action:permission uid:0x01 trust:write", "status;rpc enable:true"])
-    await assert.rejects(hs["mcd:cmd"](null, c), /open this node to someone else/, c);
+    await assert.rejects(hs["mcd:cmd"](null, c), c.includes(";") ? /send the commands one at a time/ : /open this node to someone else/, c);   // a chain: refused first (0.19.418)
   assert.deepEqual(sent, []);
   for (const c of ["rpc", "rpc action:listusers", "mds", "slavenode", "webhooks", "webhooks action:list", "webhooks action:clear", "network action:list"]) { sent.length = 0; await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c); }
 });

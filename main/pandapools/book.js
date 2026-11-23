@@ -69,7 +69,7 @@ var Book = (function () {
             var sc = s ? (s.script || "") : "";
             if (sc.indexOf("VERIFYOUT(@INPUT @ADDRESS") < 0 || sc.indexOf("GTE MAX(x*y") < 0) continue;
             var opk = group(P_OPK, sc), oadr = group(P_OADR, sc), tok = group(P_TOK, sc), kmin = group(P_KMIN, sc);
-            if (!opk || !oadr || !tok || !kmin) continue;
+            if (!PoolRuntimeGuard.poolParams(opk, oadr, tok, kmin)) continue;   // strict hex / number before any use
             var key = opk + "|" + tok + "|" + kmin;
             // carry the ACTUAL tracked covenant script — derivePools runscripts it to confirm it compiles
             // and get its address; a non-parsing (corrupt) script is filtered there.
@@ -87,7 +87,9 @@ var Book = (function () {
             for (var i = 0; i < coins.length; i++) {
                 var c = coins[i];
                 var tok = readState(c, 2), oadr = readState(c, 3), opk = readState(c, 4), kmin = readState(c, 5);
-                if (!tok || !oadr || !opk || !kmin) continue;
+                // ANYONE can put a coin at the sentinel: its state is a stranger's text. Strict hex / number, or the
+                // beacon is skipped — it must never reach runscript (the node runs what follows a ";" as a command).
+                if (!PoolRuntimeGuard.poolParams(opk, oadr, tok, kmin)) continue;
                 var key = opk + "|" + tok + "|" + kmin;
                 if (!params[key]) params[key] = { opk: opk, oadr: oadr, tok: tok, kmin: kmin };   // tracked wins (putIfAbsent)
             }

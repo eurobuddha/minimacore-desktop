@@ -212,6 +212,14 @@ function requireRunning() {
 // The commands that show what controls the funds (main/seedgate.js, 0.19.176): `vault` and `seedrandom` run from a window
 // only once the phrase typed for that exact command, and the system's prompt where there is one, were checked here.
 const seedgate = require("./seedgate"), cmdverb = require("./cmdverb");
+// 0.19.418: a command holding ";", a line break or NUL is refused under every caller (main/cmdverb.js refuse, main/rpc.js). An app or
+// engine refused so is said in a notification naming it (at most once a minute per source); the Terminal says it in its own output.
+const refusedSaid = new Map();
+cmdverb.onRefused((source) => {
+  if (!source) return;   // the Terminal or the wallet: the refusal is the answer on screen
+  const now = Date.now(); if (now - (refusedSaid.get(source) || 0) < 60000) return; refusedSaid.set(source, now);
+  try { const n = new Notification({ title: source, body: lang.t("A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it."), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ }
+});
 // The system's own check of every secret gate (main/syscheck.js, 0.19.188): Touch ID; refused while a Touch ID that worked
 // before cannot be asked; a main-process message box naming what is shown where there never was one.
 const systemCheck = require("./syscheck").forElectron(require("electron"), () => win);
@@ -243,6 +251,7 @@ ipcMain.handle("mcd:cmdKind", (_e, command) => {
   return { kind: k.kind, chain: k.chain, write: rpc._timeoutFor(c) > 30000, shown, secretValues: shown !== c.replace(/\s+/g, " ").trim() && /•••/.test(shown) };
 });
 ipcMain.handle("mcd:cmd", async (_e, command) => {
+  { const why = cmdverb.refuse("", command); if (why) throw new Error(why); }   // before any question or gate: one command at a time (0.19.418)
   // every check before a text reaches the node, in one tested function and in one order (main/seedgate.js checkCommand, 0.19.327 port of
   // the released 0.18.201): control characters, read otherwise than it looks, an escaped ";", builder values, the per-piece refusals,
   // keyuses:, keys replaced outside Backup & Recovery, the node running, the secret gate, a backup file, open work, the backup password

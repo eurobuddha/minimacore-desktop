@@ -137,6 +137,7 @@ function buildMds() {
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
     cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}
+      if(/[;\r\n\u0000]/.test(String(command))){const why=require("./cmdverb").refuse("PandaPools",command);if(cb)cb({status:false,pending:false,error:why});return;}   // one command (0.19.418)
       if(/^checkmode\b/.test(String(command))){const r=checkmodeReply();if(!r.response.dblocked)setPaused("");if(cb)cb(r);return;}   // answered here, never sent (above)
       if(held&&require("./noderun").SIGNING.test(String(command))){if(cb)cb({status:false,error:heldText()});return;}
       busy++;   // hold() waits for what is at the node
@@ -771,6 +772,9 @@ function closePool(addr) {
 async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
+  // 0.19.418: as createPool, a migrate re-creates a pool only of MxUSD (the private-chain proof seam's token aside): its tokenid
+  // is pasted into the new covenant and its commands, so anything else is refused here, before the engine
+  if (!isMarketFed(p.tok) && !(createToken !== USDT_TOKENID && String(p.tok).toLowerCase() === createToken.toLowerCase())) throw new Error("PandaPools migrates MINIMA / MxUSD pools only. Nothing was sent.");
   if (!plainAmount(newX) || !plainAmount(newY)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the queue (0.19.271)
   return queuedAction("Migrate", function (resolve, reject) {
     var deadline = execDeadline();

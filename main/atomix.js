@@ -174,6 +174,7 @@ function buildMds() {
       // 0.18.107: an engine disowned by invalidate() (the wallet was replaced) reaches neither the node nor the new
       // engine's store; what it had already queued behind another signer is dropped by the signal.
       if (gen !== generation) return failed(new Error(GONE));
+      if (/[;\r\n\u0000]/.test(c)) return failed(new Error(require("./cmdverb").refuse("AtomiX", c)));   // one command (0.19.418)
       if (held && SIGNING.test(c)) return failed(new Error(heldText()));
       if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c, makerOp ? AbortSignal.any([makerOp.signal, signal]) : signal).then(r => cb(toVm(normReply(r))), failed); return; }
       runner(c, { signal }).then(r => cb(toVm(normReply(r))), failed);

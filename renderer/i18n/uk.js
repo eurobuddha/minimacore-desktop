@@ -5949,3 +5949,10 @@
 }, { review: [
   "Older on-chain trades are not listed: only your newest {n} are kept here."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.": "У цій команді є \";\", перенесення рядка або символ NUL. Вузол виконує те, що йде після \";\", як іншу команду: надсилайте команди по одній. Нічого не надіслано.",
+  "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it.": "Команду, у якій є \";\", перенесення рядка або символ NUL, відхилено, тому на вузол нічого не надіслано. Текст ззовні цього застосунку, можливо, намагається виконати власну команду: якщо це повториться, зупиніть вузол і повідомте про це."
+}, { review: [
+  "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.",
+  "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it."
+] });

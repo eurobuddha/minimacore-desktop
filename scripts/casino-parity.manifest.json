@@ -4,13 +4,13 @@
     "root": "universal-casino/mds",
     "version": "",
     "branch": "lint",
-    "gitSha": "eef4f609b87503875e735bdda4649e63ffea12ae"
+    "gitSha": "38836520e2d355a17e07c07e914a686f892e5f4f"
   },
-  "digest": "25dff0d7590a40f09a389a41ae321404ee323a6280fe0becd7295dded6a2824e",
+  "digest": "780088bde225eea2b1b0ff10beea22c8f182f46f0b7d9a9b34a20a1609a51894",
   "files": {
     "service.js": {
-      "sha256": "39bbbdb317f99ebc8061e53c36f08ec6f4f50c996ddf5e4833420e7ba710e201",
-      "bytes": 21830
+      "sha256": "abad938bfe5aa0add73f9972590a2712bd3f5a05e66a00721c48e483fb256351",
+      "bytes": 23485
     },
     "timeout-claims.js": {
       "sha256": "69e1d739e96de52994a8a9f5505ef8751d5e7b809c75a0752ce43cd7b0116497",

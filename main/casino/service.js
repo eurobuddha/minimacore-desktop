@@ -17,9 +17,20 @@ var WRITE_MODE=false;
 var SCRIPT_OK=false;   // covenant script registered + VERIFIED on this node (else reveals/resolves are rejected)
 
 // ===== Helpers (duplicated from index.html — small, no MDS.load needed) =====
+// SECURITY 2.9.4: the node splits EVERY command on ";" (even inside quotes) and runs each piece, and a casino coin's
+// state is a stranger's text (the TAKER writes ports 8-11 freely). Every MDS.cmd here refuses ";", CR, LF and NUL
+// (nothing sent, a SECURITY log line), and a state value is read only as 0x hex or a plain number (else "").
+(function(){var raw=MDS.cmd;MDS.cmd=function(q,cb){
+  if(typeof q!=='string'||/[;\r\n\u0000]/.test(q)){var e='UNSAFE_COMMAND: refused a node command holding ";", a line break or NUL (the node would run what follows as another command). Nothing was sent.';
+    try{MDS.log('SECURITY Casino '+e+' '+JSON.stringify(String(q)))}catch(x){}if(cb)cb({status:false,pending:false,error:e});return}
+  return raw.call(MDS,q,cb)}})();
+function cleanState(v){return typeof v==='string'&&v.length<=256&&(/^0x[0-9a-fA-F]+$/.test(v)||/^[0-9]+(?:\.[0-9]+)?$/.test(v))}
+// txnbasics then txnpost as two commands (they were one ";" chain): cb gets the failed txnbasics reply or the txnpost reply
+function statesOk(coin,ports){for(var i=0;i<ports.length;i++)if(getState(coin,ports[i])==='')return false;return true}
+function basicsPost(txid,cb){MDS.cmd("txnbasics id:"+txid,function(rb){if(!rb||!rb.status){cb(rb);return}MDS.cmd("txnpost id:"+txid,cb)})}
 function getState(coin,port){
   if(!coin.state)return'';
-  for(var i=0;i<coin.state.length;i++){if(coin.state[i].port===port||coin.state[i].port==port)return coin.state[i].data}
+  for(var i=0;i<coin.state.length;i++){if(coin.state[i].port===port||coin.state[i].port==port)return cleanState(coin.state[i].data)?coin.state[i].data:''}
   return'';
 }
 function isMyKey(pk){return MY_KEYS[pk]===true}
@@ -284,6 +295,7 @@ function doReveal(coin){
   MDS.keypair.get("casino_secret_for_"+betCommit,function(sres){
     if(!sres||!sres.value){delete BUSY[coinid];return}
     var housesecret=sres.value;
+    if(!statesOk(coin,[0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11])||!cleanState(housesecret)){MDS.log("Casino service: reveal skipped, a state value is not 0x hex or a number: "+coinid);delete BUSY[coinid];return}
     var txid="svc_reveal_"+Date.now();
     MDS.cmd("txncreate id:"+txid,function(r0){
       if(!r0.status){delete BUSY[coinid];return}
@@ -301,7 +313,7 @@ function doReveal(coin){
           setStates(txid,states,0,function(){
             MDS.cmd("txnsign id:"+txid+" publickey:"+getState(coin,0),function(rs){
               if(!rs.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
-              MDS.cmd("txnbasics id:"+txid+";txnpost id:"+txid,function(resArr){
+              basicsPost(txid,function(resArr){
                 var rp=Array.isArray(resArr)?resArr[resArr.length-1]:resArr;
                 if(rp&&rp.status){
                   MDS.log("Casino service: revealed secret for "+coinid.substring(0,16)+"...");
@@ -326,6 +338,7 @@ function doResolve(coin){
   MDS.keypair.get("casino_psecret_for_"+playerCommit,function(sres){
     if(!sres||!sres.value){delete BUSY[coinid];return}
     var playersecret=sres.value;
+    if(!statesOk(coin,[1, 3, 4, 5, 8, 9, 10, 11, 12])||!cleanState(playersecret)){MDS.log("Casino service: resolve skipped, a state value is not 0x hex or a number: "+coinid);delete BUSY[coinid];return}
     var housesecret=getState(coin,12);
     var bet=getState(coin,5),payout=parseInt(getState(coin,4)),range=parseInt(getState(coin,3)),playerpick=parseInt(getState(coin,11));
     var betToken=coinTok(coin);
@@ -349,7 +362,7 @@ function doResolve(coin){
             MDS.cmd("txnstate id:"+txid+" port:13 value:"+playersecret,function(){
               MDS.cmd("txnsign id:"+txid+" publickey:"+getState(coin,8),function(rs){
                 if(!rs.status){MDS.cmd("txndelete id:"+txid);delete BUSY[coinid];return}
-                MDS.cmd("txnbasics id:"+txid+";txnpost id:"+txid,function(resArr){
+                basicsPost(txid,function(resArr){
                   var rp=Array.isArray(resArr)?resArr[resArr.length-1]:resArr;
                   if(rp&&rp.status){
                     MDS.log("Casino service: resolved "+coinid.substring(0,16)+"... "+(playerWins?"PLAYER WINS":"HOUSE WINS"));

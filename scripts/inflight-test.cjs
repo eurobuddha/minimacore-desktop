@@ -197,7 +197,7 @@ test("main: quit, an archive / mysql / reset resync or import and a megammr impo
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let h = "";
   const walk = (n) => { if (ts.isCallExpression(n) && n.expression.getText(sf) === "ipcMain.handle" && ts.isStringLiteral(n.arguments[0]) && n.arguments[0].text === "mcd:cmd") h = n.getText(sf); ts.forEachChild(n, walk); };
   walk(sf);
-  for (const allow of [false, true]) for (const c of stopping.filter(x => !/megammrsync/.test(x))) {
+  for (const allow of [false, true]) for (const c of stopping.filter(x => !/megammrsync/.test(x) && !x.includes(";"))) {   // a chain is refused before the guard (0.19.418, below)
     const sent = [], hs = {};
     new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
       { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (x) => { sent.push(x); return {}; }, { rpcCall: async (p, s, x) => { sent.push(x); return { status: true }; } },
@@ -205,6 +205,11 @@ test("main: quit, an archive / mysql / reset resync or import and a megammr impo
     if (allow) { await hs["mcd:cmd"](null, c); assert.deepEqual(sent, [c], c + " runs once allowed"); }
     else { await assert.rejects(hs["mcd:cmd"](null, c), /nothing was stopped/, c); assert.deepEqual(sent, [], c + ": nothing reached the node"); }
   }
+  { const sent = [], hs = {};
+    new Function("ipcMain", "cmdverb", "restore", "requireRunning", "seedgate", "secretGate", "walletWork", "runResync", "rpc", "node", "config", "pinMinimaSend", "mayStop", "held", h)(
+      { handle: (n, f) => { hs[n] = f; } }, V, R, () => {}, G, { take: () => true }, async () => [], async (x) => { sent.push(x); return {}; }, { rpcCall: async (p, s, x) => { sent.push(x); return { status: true }; } },
+      { rpcPort: () => 0 }, { rpcSecret: () => "" }, async (run, x) => x, async () => { throw new Error("the stop guard was asked"); }, (op) => op());
+    await assert.rejects(hs["mcd:cmd"](null, "status;quit"), /send the commands one at a time/); assert.deepEqual(sent, [], "status;quit: nothing reached the node"); }
 });
 
 // ---- 0.19.288: a miniMall payment at the node is said by the Quit and Shutdown warnings ----

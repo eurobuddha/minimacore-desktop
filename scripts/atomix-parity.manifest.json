@@ -2,11 +2,11 @@
   "_comment": "Digests of the atomix files copied verbatim from the donor. Regenerate ONLY with `node scripts/vendored-manifest.cjs atomix --update` beside a deliberate re-copy. Desktop-only code belongs in main/atomix/loader.js or main/atomix.js.",
   "donor": {
     "root": "mds/atomix-mds",
-    "version": "0.1.60",
+    "version": "0.1.61",
     "branch": "security/2026-11-07",
-    "gitSha": "03d56652cd55ff68f4dd2de4e8d4a1d15aff1315"
+    "gitSha": "f33c4afd495f84451d459a46b0445f6b7d7490e9"
   },
-  "digest": "94c6660118047386eb608ac2aa3d416f8b810a8f183e2e9a454db0bd21f403af",
+  "digest": "9d010cf3f862054b051636e0b62776bd90869b77d4f66f0359f7cf5830eb97f0",
   "files": {
     "lib/rhino_shim.js": {
       "sha256": "3c836294a244afb5198002dcdce2c569eb166300553cb1ba60fb5b56209a487b",
@@ -77,8 +77,8 @@
       "bytes": 5464
     },
     "lib/mdsw.js": {
-      "sha256": "9ad7b743131a6b4ffea83b2318b63c6fb8ca5e3e79e9e8d3ed6f0a9e8ba55c11",
-      "bytes": 7826
+      "sha256": "ed00d92456fcfb010701e2022b6c22dcba5540e4a55a11cdb117c9d52292e45d",
+      "bytes": 8157
     },
     "lib/ethrpc.js": {
       "sha256": "83604c8f5a46d63f59d4cada7befa526f83f5dc07e61203c4ed4700d651d7f9f",
@@ -97,8 +97,8 @@
       "bytes": 22946
     },
     "lib/htlc.js": {
-      "sha256": "8cab5f6e6742f13aa044cedf710694929866977ce4af4d28d5ae40ae3b82e01d",
-      "bytes": 42490
+      "sha256": "c807bab165d687afbea3c8bad3b441ba72cca3eaa9d88b8e8bf8d63e6d172683",
+      "bytes": 42550
     },
     "lib/order.js": {
       "sha256": "49db5cf554ea2dd59b0fd40cf21c8fd16a20a91039fa1eb1becede54e37425c8",

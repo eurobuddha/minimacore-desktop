@@ -307,6 +307,7 @@ function makeHost(opts = {}) {
       cmd(command, cb) {
         const c = String(command);
         if (!live()) return cb(toVm({ status: false, error: "this wallet was replaced: the engine is restarting" }));
+        if (/[;\r\n\u0000]/.test(c)) return cb(toVm({ status: false, error: require("./cmdverb").refuse("Dexicon", c) }));   // one command (0.19.418)
         // checkmode: the node RPC is the node's own admin interface, so the engine's WRITE-trust preflight always passes.
         if (/^checkmode\b/.test(c)) return cb(toVm({ status: true, response: { writemode: true, dblocked: false } }));
         // two-arg then(): one reply = exactly one cb call (the engine's signing lock is freed by that call and by nothing else)

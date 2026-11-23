@@ -5936,3 +5936,10 @@
 }, { review: [
   "Older on-chain trades are not listed: only your newest {n} are kept here."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.": "此命令含有 \";\"、换行符或 NUL 字符。节点会把 \";\" 之后的内容当作另一条命令运行：请逐条发送命令。未发送任何内容。",
+  "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it.": "一条含有 \";\"、换行符或 NUL 字符的命令被拒绝，因此没有向节点发送任何内容。来自本应用之外的文本可能正试图运行它自己的命令：如果反复出现，请停止节点并报告。"
+}, { review: [
+  "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.",
+  "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it."
+] });
