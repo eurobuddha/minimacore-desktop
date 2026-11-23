@@ -177,6 +177,9 @@ const SQL_OK = [
  *  (0.19.406: signing stays OFF on this wallet; requiring attestations is not offered yet) and the FAST backing-coin
  *  settings (written by the app's own Dexicon Settings, main fastCoinsSave). */
 const ENGINE_KEYS = ["publicId", "coinlock_held", "attest_sign", "require_attest", "legacy_fresh", "coin_max_age"];
+/** Would the engine's `k LIKE 'fill_%'` read this key? "fill" in any case, then at least one more character (a superset:
+ *  toLowerCase folds a little more than SQLite's ASCII-only LIKE, which only refuses more). */
+const isFillKey = (k) => k.length > 4 && k.slice(0, 4).toLowerCase() === "fill";
 function dexSql(q) {
   if (typeof q !== "string" || !q.trim() || q.length > 1000000) throw new Error("bad query");
   if (!SQL_OK.some(re => re.test(q))) throw new Error("that statement is not available to Dexicon's screens");
@@ -187,8 +190,10 @@ function dexSql(q) {
     // 0.19.406: the orders store is written only by its fenced save (its store lock held), never a plain MERGE or DELETE
     if (k === "myorders") throw new Error("the orders store is written only by the engine's fenced save");
     // 0.19.406 (DexiconPro 0.2.155): the refresh's reconcileFills applies a MAKER fill_ record of any size, a negative one
-    // too (a forged record of -50 would put 50 back on an order and sell it again): the page writes its own taker fills only
-    if (/^fill_/.test(k)) { let f = null; try { f = w[2] === undefined ? null : JSON.parse(w[2].replace(/''/g, "'")); } catch (e) { f = null; }
+    // too (a forged record of -50 would put 50 back on an order and sell it again): the page writes its own taker fills only.
+    // 0.19.407: a fill record is any key the engine's `k LIKE 'fill_%'` reads: `_` is ANY one character and SQLite's LIKE
+    // ignores ASCII case, so `fillZ0x…` and `FILL_0x…` are fill records too (both were written, and a live order rose 60 → 160)
+    if (isFillKey(k)) { let f = null; try { f = w[2] === undefined ? null : JSON.parse(w[2].replace(/''/g, "'")); } catch (e) { f = null; }
       if (!f || typeof f !== "object" || f.role !== "taker") throw new Error("the maker's fill records are the engine's own"); }
   }
   return q;

@@ -1290,6 +1290,27 @@ test("0.19.406 allow-lists: the proof hand-over's three commands in their exact 
   for (const q of no) assert.throws(() => dexSql(q), /not available|engine's own|fenced save|maker's fill records/, q);
 });
 
+test("0.19.407 (gate review MAJOR-1): a fill record is every key the engine's LIKE 'fill_%' reads (any case, any 5th character); through the page bridge none of them can carry a maker fill, and a live order is never raised", async () => {
+  const { dexSql } = require("../main/dexicon.js"), H = "0x" + "AB".repeat(32), MAKER = '{"role":"maker","filled":"-50","txpowid":"' + H + '"}';
+  for (const k of ["fill_" + H, "fillZ" + H, "FILL_" + H, "Fill_" + H, "fIlL." + H, "fill%" + H, "fillx"]) {
+    assert.throws(() => dexSql("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + MAKER + "')"), /maker's fill records/, k);
+    assert.throws(() => dexSql("DELETE FROM ax_kv WHERE k='" + k + "'"), /maker's fill records/, "no DELETE of " + k);
+    const taker = "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '{\"role\":\"taker\",\"filled\":\"5\"}')"; assert.equal(dexSql(taker), taker);
+  }
+  for (const k of ["fill", "fil_x", "xfill_" + H, "pending_takes"]) { const q = "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + MAKER + "')"; assert.equal(dexSql(q), q, k + " is not read as a fill record"); }
+  // the reviewer's harness (fill-forge.cjs), end to end: the page bridge, then the service's own reconcileFills
+  const b = await boot(), ORDER = "0x" + "1".repeat(32), now = Math.floor(Date.now() / 1000);
+  await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([{ orderId: ORDER, side: "sell", price: "0.0123", amount: "100", remaining: "60", coins: ["0x" + "C0".repeat(32)], scripts: [], address: b.node.ADDRESS, seq: now, expiry: now + 3600, status: "live", fillsFrom: now - 100, fills: [] }]) + "')");
+  for (const key of ["fill_0x" + "AA".repeat(32), "fillZ0x" + "BB".repeat(32), "FILL_0x" + "CC".repeat(32)]) {
+    const rec = JSON.stringify({ role: "maker", orderId: ORDER, filled: "-50", txpowid: "0x" + key.slice(-64), ts: now, status: "settling" });
+    await assert.rejects(b.host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + key + "', '" + rec + "')" }), /maker's fill records/, key);
+  }
+  b.ctx.__out = null;
+  vm.runInContext("AX.maker.load(AX.mds, function (e, l) { AX.maker.reconcileFills(AX.mds, l, function (ch) { __out = { changed: ch.length, remaining: AX.maker.find(l, '" + ORDER + "').remaining }; }); });", b.ctx);
+  await M.until(() => b.ctx.__out);
+  assert.deepEqual(JSON.parse(JSON.stringify(b.ctx.__out)), { changed: 0, remaining: "60" });
+});
+
 test("0.19.406: the service answers a coin proof request with coinexport only (no attestation signed: kv attest_sign is '0'), loads lib/proofs.js and mirrors the resting coin locks; it adds no MegaMMR walk of its own", async () => {
   const H = (c) => "0x" + c.repeat(32), BACK = H("C1"), ADDR = H("A1"), proof = "0x00000020" + BACK.slice(2) + "00000020" + ADDR.slice(2);
   const b = await boot({ node: { on: (c) => (c === "coinexport coinid:" + BACK ? { status: true, pending: false, response: { data: proof } } : null) } });

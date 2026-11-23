@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.407] — The page can no longer plant a maker fill record under a key the engine reads as one
+
+- main/dexicon.js dexSql: a fill record is every key the engine's `k LIKE 'fill_%'` reads — "fill" in any case, then any one character or more (`_` is any character, SQLite's LIKE ignores ASCII case). Through the page bridge `fillZ0x…` and `FILL_0x…` were written as maker records of -50 and the service's refresh raised a live order from 60 to 160. Now the page writes only taker records under any such key, and deletes none.
+
 ## [0.19.404] — Dexicon History is one list by time: fast-book fills, on-chain trades, finished AtomiX swaps and pool operations
 
 - History mixes every kind with DexCore.activityMix and draws them as Activity does (day headers, kind marks). The NET card stays on top and says it counts settled fast-book fills only.
