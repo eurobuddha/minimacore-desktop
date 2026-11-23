@@ -62,7 +62,12 @@ function buildMds() {
       // checkmode is an MDS command: the plain minima.jar answers it "Command not found" and the engine's write guard then
       // refused every write. The RPC is the node's own admin interface (always WRITE); the lock comes from `status` (0.18.317).
       if(/^checkmode\b/.test(String(command))&&node.kind&&node.kind()==="minima"){runner("status").then(function(r){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}if(cb)cb(r&&r.status===true?{status:true,pending:false,response:{writemode:true,dblocked:!!(r.response&&r.response.locked)}}:{status:false,pending:false,error:"The node's status could not be read."});},function(){if(cb)cb({status:false});});return;}
-      runner(command).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function () { if (cb) cb({ status: false }); }); },
+      // txnpost with no answer (0.18.324): the request may have reached the node, so it is NOT a refusal. {status:false} made poolmgr free the
+      // posted inputs ("nothing was broadcast") for a transaction that may be in the mempool; pending:true keeps them held. Only a post that
+      // never reached the node (main/rpc.js marks it notSent: refused before sending, ECONNREFUSED, a wrong RPC password) is a plain failure.
+      runner(command).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function (e) { if (!cb) return;
+        if (/^\s*txnpost\b/i.test(String(command)) && !(e && e.notSent === true)) { cb({ status: false, pending: true, error: "the node did not answer txnpost, so the transaction may have been posted: its inputs stay held until the chain shows what happened" }); return; }
+        cb({ status: false }); }); },
     sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
     persistRecovery: function(cb) { cb(epoch===contextEpoch&&storage.flushChecked()); },
     archiveGET: function(url,cb) { fetchJson(url).then(cb,function(){cb(null);}); },

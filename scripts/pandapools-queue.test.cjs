@@ -66,3 +66,24 @@ test("PandaPools glue: the activity labels and a swap's record name the Minima d
     assert.deepEqual(recorded, ["Sold 1 MINIMA for 2 MxUSD"]);
   } finally { try { api.stopLoop(); } catch (e) {} try { api.flush(); } catch (e) {} try { ctx.ActivityChain.stop(); } catch (e) {} }
 });
+
+// 0.18.324: a txnpost the node did not answer is pending (its inputs stay held), not a refusal that frees them; a post that never reached
+// the node, and every other command's failure, stay a plain {status:false}
+test("PandaPools glue: an unanswered txnpost is pending, never a refusal; a never-sent post and other commands are plain failures", async () => {
+  const api = require("../main/pandapools.js"); api._setDataDir(DIR);
+  let fail = null;
+  api._setRunner((c) => c === "block" ? Promise.resolve({ status: true, response: { block: 0 } }) : c === "checkmode" ? Promise.resolve({ status: true, response: { writemode: true, dblocked: false } })
+    : fail ? Promise.reject(fail()) : Promise.resolve({ status: true, response: {} }));
+  await api.init();
+  const mds = api._ctx().MDS, ask = (c) => new Promise((r) => mds.cmd(c, r));
+  try {
+    fail = () => new Error("RPC timeout");
+    const r = await ask("txnpost id:pp1");
+    assert.equal(r.status, false); assert.equal(r.pending, true, "kept held"); assert.match(r.error, /^the node did not answer txnpost/);
+    fail = () => Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }); assert.equal((await ask("txnpost id:pp1 auto:true")).pending, true);
+    fail = () => Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED", notSent: true }); assert.deepEqual(await ask("txnpost id:pp1"), { status: false }, "never reached the node");
+    fail = () => new Error("RPC timeout"); assert.deepEqual(await ask("txnsign id:pp1 publickey:auto"), { status: false }, "not a post");
+    // the engine reads it as pending, so poolmgr keeps the posted inputs claimed (it frees them only on status:false and not pending)
+    assert.ok(/if \(rp && rp\.status === false && !isPending\(rp\)\) PoolInputClaims\.release/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "main", "pandapools", "poolmgr.js"), "utf8")));
+  } finally { fail = null; api.stopLoop(); }
+});
