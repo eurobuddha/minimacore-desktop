@@ -203,6 +203,7 @@ function create(o) {
   for (const k of REQUIRED) if (!o || typeof o[k] !== "function") throw new Error("Future Cash Next cannot be created: the option \"" + k + "\" is missing or not a function.");
   const now = o.now || Date.now, log = (l) => { try { o.log && o.log("[futurecash] " + l); } catch (e) {} };
   let store = null, walletKey = "", opening = null, startedAt = 0, openError = "", lastFile = "";
+  let last = null;   // what the store held open when stop() closed it (workOf): it does not change while it is closed
   let scriptsCache = null;      // { block, rows, keys } — the node's script table and keys, read when needed
   const atRisk = new Set();
   let tooMany = false;
@@ -238,6 +239,7 @@ function create(o) {
     if (store) return Promise.resolve();
     if (opening) return opening;
     opening = (async () => {
+      last = null;   // what an earlier store held says nothing about the one this start opens (or fails to)
       try {
         const pk = await firstKey();
         store = await require("./futurecash-store").open(path.join(storeDir(), storeName(pk)), { now });
@@ -253,7 +255,7 @@ function create(o) {
   async function stop() {
     if (passing) await passing.catch(() => {});
     await turn;   // an action the screens asked for ends first too
-    const s = store; store = null; scriptsCache = null; atRisk.clear(); lastTip = 0; if (s) s.close();
+    const s = store; if (s) { try { last = workOf(s); } catch (e) { last = null; } } store = null; scriptsCache = null; atRisk.clear(); lastTip = 0; if (s) s.close();
   }
 
   // ---- the node's script table, bounded (see the header) ----
@@ -1038,18 +1040,21 @@ function create(o) {
    * store is not open (frozen, starting, or failed: openError); throws when the store cannot be read.
    */
   function activeWork() {
-    if (!store) return { ready: false, hasStore: anyStore(), error: openError || "" };
-    const collects = store.collects(S.COLLECT_POSTED, S.COLLECT_POSTED_SAFE).map(r => r.coinid);
-    const queued = store.collects(S.COLLECTED).map(r => r.coinid);
-    const sweeps = store.sweeps(S.PENDING, S.SWEEP_POSTED).map(r => r.coinid);
-    return { ready: true, hasStore: true, collects, queued, sweeps, posted: collects.length + sweeps.length + queued.length };
+    if (!store) { const w = { ready: false, hasStore: anyStore(), error: openError || "" }; if (last) w.last = last; return w; }   // last: as it was closed (main/restore.js heldRead)
+    return Object.assign({ ready: true, hasStore: true }, workOf(store));
+  }
+  function workOf(s) {
+    const collects = s.collects(S.COLLECT_POSTED, S.COLLECT_POSTED_SAFE).map(r => r.coinid);
+    const queued = s.collects(S.COLLECTED).map(r => r.coinid);
+    const sweeps = s.sweeps(S.PENDING, S.SWEEP_POSTED).map(r => r.coinid);
+    return { collects, queued, sweeps, posted: collects.length + sweeps.length + queued.length };
   }
   /** The wallet was replaced (main.js onWalletReplaced, the node stopped): this wallet's store is moved aside, never deleted. */
   async function invalidate() {
     await stop();
     const kept = lastFile ? require("./restore").moveAside(lastFile) : "";
     if (kept) log("wallet replaced: the old wallet's Future Cash store is kept as " + kept);
-    lastFile = ""; walletKey = "";
+    lastFile = ""; walletKey = ""; last = null;
     return kept;
   }
 

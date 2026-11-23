@@ -316,8 +316,12 @@ const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.ac
   // P2P Chance (0.19.262): whatever the settle loop found, also on an install that only watches (the loop starts by itself
   // when this wallet has bets on the chain). open() is null until a clean scan, so a wallet that never bet is never held up.
   casino: casino.open(), casinoLooping: casino.looping(), casinoWaitedMs: casino.uncheckedMs(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
-  futurecash: await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
-  dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });
+  futurecash: await Promise.resolve().then(fcWork).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
+  dexicon: await dexWork().catch(() => null), skipDexicon });
+// Held or paused by the app's own MegaMMR flow, an engine answers from what it had open when it stopped (main/restore.js heldRead, 0.19.417):
+// read after the flow stopped it, it said "has not started" and the import refused itself every time.
+const dexWork = async () => restore.heldRead(await dexicon.activeWork(), megafile.holdsEngines());
+const fcWork = () => restore.heldRead(futurecash.activeWork(), loopsPaused());
 // The wallet under the app was replaced (node-manager runResync: megammrsync with phrase: or file:). Called by the
 // MAIN process while the node is stopped and before it is started again, so it does not depend on the window being
 // open, and no engine ticks on the new wallet with the old wallet's records. Every identity-bound store is set aside
@@ -390,7 +394,7 @@ const inFlightWork = async () => {
   // the reads run side by side, each under its own bound (0.19.321): in sequence under the guard's one 5 s bound, one slow read
   // lost the others' answers and everything read as "could not be checked"; one that does not answer in 4 s is that one alone
   const one = (f) => new Promise(r => { const t = setTimeout(() => r(null), 4000); if (t.unref) t.unref(); const done = (v) => { clearTimeout(t); r(v); }; Promise.resolve().then(f).then(done, () => done(null)); });   // no timer left once it answers (0.19.334)
-  const [ax, pools, dex, fc] = await Promise.all([one(() => atomix.activeWork()), one(() => pandapools.activeWork()), one(() => dexicon.activeWork()), one(() => futurecash.activeWork())]);
+  const [ax, pools, dex, fc] = await Promise.all([one(() => atomix.activeWork()), one(() => pandapools.activeWork()), one(() => dexWork()), one(() => fcWork())]);
   return { atomix: ax, pools, dexicon: dex, casino: casino.open(), casinoOn: !!config.load().casinoEnabled || casino.looping(),   // the loop running with no clean scan: not read yet (0.19.269)
     futurecash: fc, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.19.288)
 };
@@ -437,7 +441,7 @@ const freeze = require("./freeze").create({
     minimall: { start: whenRunning(() => shop.startLoop()), stop: () => shop.stopLoop() },   // its start awaits the node (identity, first scan): never two at once, never retried on every status after a failure (main/freeze.js)
     vestr: { start: whenRunning(() => vestr.startLoop()), stop: () => vestr.stopLoop() },
     // Future Cash Next: frozen, it makes no pass and holds no store open; never while a collect or a sweep is under way
-    futurecash: { start: whenRunning(() => futurecash.start()), stop: () => futurecash.stop(), blockers: async () => require("./freeze").futurecashBlockers(await Promise.resolve().then(() => futurecash.activeWork()).catch(() => null)) },
+    futurecash: { start: whenRunning(() => futurecash.start()), stop: () => futurecash.stop(), blockers: async () => require("./freeze").futurecashBlockers(await Promise.resolve().then(fcWork).catch(() => null)) },
     chat: { start: whenRunning(() => chat.startLoop()), stop: () => chat.stopLoop() },
     // The hold a wallet replacement uses; by the time start runs it is no longer in the frozen list. gate: before what is
     // in flight is read, nothing new can start (AtomiX and PandaPools held with their engines up; the Exchange takes no new command).

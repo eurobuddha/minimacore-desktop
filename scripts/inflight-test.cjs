@@ -71,7 +71,7 @@ test("Quit: asked when a user quits with work in flight; never asked for a syste
 
 test("wiring: one gather for Shutdown and Quit; the quit is asked before the node is stopped, and never for a system quit", () => {
   const main = read("main/main.js"), pre = read("main/preload.js"), app = read("renderer/app.js");
-  assert.match(main, /const inFlightWork = async \(\) => \{[\s\S]{0,600}await Promise\.all\(\[one\(\(\) => atomix\.activeWork\(\)\), one\(\(\) => pandapools\.activeWork\(\)\), one\(\(\) => dexicon\.activeWork\(\)\), one\(\(\) => futurecash\.activeWork\(\)\)\]\);/);   // side by side (0.19.321)
+  assert.match(main, /const inFlightWork = async \(\) => \{[\s\S]{0,600}await Promise\.all\(\[one\(\(\) => atomix\.activeWork\(\)\), one\(\(\) => pandapools\.activeWork\(\)\), one\(\(\) => dexWork\(\)\), one\(\(\) => fcWork\(\)\)\]\);/);   // side by side (0.19.321); Dexicon and Future Cash Next as main's own flows left them (0.19.417)
   assert.equal((main.match(/inFlightWork/g) || []).length, 5, "defined once, used by mcd:inFlight (Shutdown), by before-quit (Quit), since 0.19.117 by the Freeze check of Dexicon (main/freeze.js) and since 0.19.268 by the guard of every node stop");
   assert.match(pre, /inFlight: \(how, action\) => ipcRenderer\.invoke\("mcd:inFlight", how, action\)/); assert.match(app, /api\.inFlight\("shutdown", action\)/);
   assert.ok(!/mcd:ppWork|mcd:dxWork/.test(main + pre), "the two reads the old Shutdown warning used are gone with it");
@@ -215,9 +215,9 @@ test("a miniMall payment being sent makes Quit and Shutdown ask, from the shop's
     assert.equal(inFlight(With({ shop: 0 }), how, NOW).busy.length, 0);
   }
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
-  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === "inFlightWork")) decl = n.getText(sf); ts.forEachChild(n, walk); };
+  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && /^(inFlightWork|dexWork|fcWork)$/.test(d.name.text))) decl += n.getText(sf) + "\n"; ts.forEachChild(n, walk); };   // 0.19.417: with the reads of an engine the app's own flow stopped
   walk(sf);
-  const gather = new Function("env", "with (env) { " + decl + "; return inFlightWork; }")({ config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+  const gather = new Function("env", "with (env) { " + decl + "; return inFlightWork; }")({ restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
     atomix: { activeWork: async () => IDLE.atomix }, pandapools: { activeWork: async () => [] }, dexicon: { activeWork: async () => IDLE.dexicon }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) },
     shop: { sendingCount: () => 1 } });
   assert.equal(inFlight(await gather(), "quit", NOW).any, true, "main.js asks the shop");
@@ -278,9 +278,9 @@ test("stopGuard: a request between a yes and the node's stop is refused; the nod
 // ---- 0.19.321: the stop guard's reads run side by side, each under its own bound: one slow read loses only its own answer ----
 test("main's in-flight gather: a read that never answers is 'could not be checked' alone; the others' answers are kept", async () => {
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
-  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === "inFlightWork")) decl = n.getText(sf); ts.forEachChild(n, walk); };
+  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && /^(inFlightWork|dexWork|fcWork)$/.test(d.name.text))) decl += n.getText(sf) + "\n"; ts.forEachChild(n, walk); };   // 0.19.417: with the reads of an engine the app's own flow stopped
   walk(sf);
-  const gather = new Function("env", "with (env) { " + decl.replace(/\b4000\b/, "40") + "; return inFlightWork; }")({ config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+  const gather = new Function("env", "with (env) { " + decl.replace(/\b4000\b/, "40") + "; return inFlightWork; }")({ restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
     atomix: { activeWork: () => new Promise(() => {}) }, pandapools: { activeWork: async () => [{ type: "ADD", ts: NOW - 60000 }] }, dexicon: { activeWork: async () => IDLE.dexicon },
     futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, shop: { sendingCount: () => 0 } });
   const w = await Promise.race([gather(), new Promise(r => setTimeout(() => r("timed out"), 1500))]);
@@ -313,11 +313,11 @@ test("stopGuard + main's held(): a failure that comes after another request's ye
 // ---- 0.19.334: no timer is left behind by the in-flight reads or the guard's bound once they answer ----
 test("the gather's per-read timers and the guard's 5 s bound are cleared once the reads answer; a read that rejects is null", async () => {
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
-  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === "inFlightWork")) decl = n.getText(sf); ts.forEachChild(n, walk); };
+  const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && /^(inFlightWork|dexWork|fcWork)$/.test(d.name.text))) decl += n.getText(sf) + "\n"; ts.forEachChild(n, walk); };   // 0.19.417: with the reads of an engine the app's own flow stopped
   walk(sf);
   const live = new Set(); let id = 0;
   const env = { setTimeout: (f, ms) => { const t = { id: ++id, unref() {} }; live.add(t.id); return t; }, clearTimeout: (t) => { if (t) live.delete(t.id); },
-    config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+    restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
     atomix: { activeWork: async () => IDLE.atomix }, pandapools: { activeWork: async () => { throw new Error("pools down"); } }, dexicon: { activeWork: async () => IDLE.dexicon },
     futurecash: { activeWork: () => { throw new Error("fc down"); } }, shop: { sendingCount: () => 0 } };
   const w = await new Function("env", "with (env) { " + decl + "; return inFlightWork; }")(env)();

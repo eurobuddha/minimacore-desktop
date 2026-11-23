@@ -823,6 +823,28 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
   assert.ok(host.status().epoch > e1, "a node restart is another engine");
 });
 
+// 0.19.417: the owner's MegaMMR import refused itself every time: it held Dexicon, then asked it what was open, and a held engine is
+// dropped ({ ready:false }: "has not finished starting"). Held, it now keeps what it had open when it stopped, read whole from its store and
+// its memory; a flow of the app's own that held it reads that (main/restore.js heldRead), anything else sees it as before.
+test("held, Dexicon says what it had open when it stopped (orders, waiting placements, takes, unknown fills); a flow of the app's own reads that", async () => {
+  const { host, ctx } = await boot();
+  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
+  const coin = "0x" + "CD".repeat(32);
+  vm.runInContext(`PDService.book = [{ coinid: "${coin}", orderId: "0x02", ownerPk: PDService.identity.publickey, wantAddr: PDService.identity.address, sell: true, price: PandaDEX.d("0.01"), minima: PandaDEX.d("5"), created: PDService.block, fillable: true }]`, ctx);
+  await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"t1\":{\"sent\":1,\"mine\":[]}}')");
+  const running = await host.activeWork();
+  assert.deepEqual(running, { ready: true, orders: [coin], pending: 0, takes: 1, unknown: 0 });
+  await host.hold();
+  const held = await host.activeWork();
+  assert.deepEqual(held, { ready: false, hasStore: true, waitedMs: 0, last: { orders: [coin], pending: 0, takes: 1, unknown: 0 } }, "dropped, but what it had open is kept");
+  assert.deepEqual(restore.heldRead(held, true), Object.assign({ hasStore: true }, running), "read as the running engine answered");
+  assert.deepEqual(restore.activeWorkList(Object.assign({}, quiet, { dexicon: restore.heldRead(held, true) })), restore.activeWorkList(Object.assign({}, quiet, { dexicon: running })));
+  assert.match(restore.activeWorkList(Object.assign({}, quiet, { dexicon: restore.heldRead(held, false) }))[0], /^Dexicon has not finished starting/, "not the app's own flow: as before");
+  host.release(); await host.start(); await M.until(() => host.status().ready && host.status().restingReady);
+  assert.equal("last" in (await host.activeWork()), false, "running again: read from the engine");
+  await host.stop(); assert.equal("last" in (await host.activeWork()), false, "stopped with the node, not held: as before");
+});
+
 // 0.18.107 (MEDIUM): the epoch guard is at entry only. A signing command already waiting in the process-wide queue
 // when the engine is stopped or invalidated must not be sent afterwards.
 test("a signing command still queued when the engine is stopped or its wallet replaced never reaches the node", async () => {
@@ -1087,13 +1109,13 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8"), app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(M.root, "renderer/app.js"), "utf8"));
   assert.ok(main.includes('node.on("status", (s) => { if (s.state === "running") dexicon.start(); else dexicon.stop(); });'), "only a running node (wallet made, key-mode gate passed) starts it");
   assert.ok(main.includes('ipcMain.handle("mcd:dxCommand", async (e, a) => {') && main.includes("  return dexicon.command(a);\n});"));
-  assert.ok(/const inFlightWork = async \(\) => \{[\s\S]{0,900}one\(\(\) => dexicon\.activeWork\(\)\)/.test(main) && /api\.inFlight\("shutdown", action\)/.test(app), "the Shutdown and Quit warnings ask for takes awaiting an answer; a failed read is null (0.18.142: main/inflight.js)");   // the window widened to 900 on purpose (0.19.334: one() clears its timer, a longer line)
+  assert.ok(/const inFlightWork = async \(\) => \{[\s\S]{0,900}one\(\(\) => dexWork\(\)\)/.test(main) && main.includes("const dexWork = async () => restore.heldRead(await dexicon.activeWork(), megafile.holdsEngines());") && /api\.inFlight\("shutdown", action\)/.test(app), "the Shutdown and Quit warnings ask for takes awaiting an answer; a failed read is null (0.18.142: main/inflight.js)");   // the window widened to 900 on purpose (0.19.334: one() clears its timer, a longer line)
   // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
   assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
   for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })", "casino.invalidate()"]) assert.ok(hook.includes(call), "the main-process reset: " + call);
   assert.ok(!/api\.\w*Invalidate\(/.test(app), "the renderer's chain only clears the screen");
-  assert.ok(main.includes("dexicon: await dexicon.activeWork().catch(() => null), skipDexicon });"), "a failed read is null, which refuses");
+  assert.ok(main.includes("dexicon: await dexWork().catch(() => null), skipDexicon });"), "a failed read is null, which refuses");
   assert.ok(/try \{ dexicon\.flush\(\); \} catch \(err\) \{\}/.test(main));
   for (const f of ["dxStatus", "dxBook", "dxMine", "dxCommand", "inFlight", "onDexicon"]) assert.ok(pre.includes("  " + f + ": "), "preload: " + f);
   const host = fs.readFileSync(path.join(M.root, "main/dexicon.js"), "utf8");

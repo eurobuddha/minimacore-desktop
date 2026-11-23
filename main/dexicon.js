@@ -229,6 +229,7 @@ function makeHost(opts = {}) {
   let busy = 0, posts = 0;  // engine commands at the node, and the txnposts among them (STOP DRAINS)
   let draining = null;     // the promise of a stop() that is waiting for the engine to finish
   let held = false;        // HOLD (0.18.116): a command that may replace the wallet is running in the node; no engine, no bridge, until release()
+  let last = null;         // what the engine had open when a stop dropped it (workNow), said by activeWork while held: a held engine changes nothing
   const HELD_REPLACING = "Dexicon is stopped while the wallet is being replaced. It starts again by itself.";
   // The same hold serves the Apps tab's Freeze (0.19.117): the refusal then says so (main.js sets the reason), not "the wallet is being replaced".
   let heldReason = null;
@@ -405,7 +406,7 @@ function makeHost(opts = {}) {
     epoch++;
     abort.abort(); abort = new AbortController();   // queued signers of the dropped engine are never sent
     flush();
-    ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0;
+    ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0; last = null;
     frameTx = new Map(); budget = null; ownCache = null; intents = [];
     busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
     const R = registry(); if (R) R.releaseOwner("dexicon");   // its unfinished builds died with it; posted coins and live orders' coins stay held
@@ -433,7 +434,7 @@ function makeHost(opts = {}) {
   function start() {
     if (held || timer) return Promise.resolve();
     if (draining) return draining.then(start);   // the node is back before the last engine had finished
-    startedAt = Date.now();
+    startedAt = Date.now(); last = null;   // a new engine: what the last one had open is read from it again
     timer = setInterval(() => { if (!ready) { init().catch(() => {}); return; } fire("MDS_TIMER_10SECONDS"); blockWatch(); }, tickMs);   // a failed init is tried again
     if (timer.unref) timer.unref();
     return init().then(() => { if (timer) blockWatch(); }, () => {});
@@ -458,7 +459,7 @@ function makeHost(opts = {}) {
         if (Date.now() - t0 > bound && !posts) { if (quiet < 3) log("stopping: the engine was still working after " + Math.round(bound / 1000) + " s; no txnpost is unanswered, so it is dropped now"); break; }
       }
       draining = null;
-      if (mine === epoch) { drop(); emitter.emit("update"); }
+      if (mine === epoch) { const was = workNow(); drop(); last = was; emitter.emit("update"); }
     })();
     emitter.emit("update");
     return draining;
@@ -543,17 +544,24 @@ function makeHost(opts = {}) {
    * answered (voiding one spends a coin of the old wallet). FAST orders are not listed: they are signed offers with no
    * coin locked, and they lapse on the relays by themselves. Not booted: { ready:false, hasStore }.
    */
+  // Takes awaiting an answer (signed and sent, not yet co-signed; or being voided): the page's own records, which it
+  // writes BEFORE it sends. Read from the store, so they are counted whether or not any screen is open.
+  const kv = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
+  const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
+  // 0.18.142: fills of this node's orders whose txnpost was never answered (service.desktop.js POST UNANSWERED): the
+  // chain decides which way they went, and the engine can only read that while it runs. For the Quit and Shutdown warnings.
+  const unknown = () => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k LIKE 'fill_%'"); if (!r.status) throw new Error(r.error); return r.rows.filter(x => { try { return JSON.parse(x.V || x.v || "{}").status === "unknown"; } catch (e) { return false; } }).length; };
+  /** The ready answer, read now from the running engine and its store, unswallowed; null when it cannot be said whole. Kept by a
+   *  stop (last): a held engine does nothing, so what it had open when it stopped is what it has open until it runs again. */
+  function workNow() {
+    if (!sqlShim || !ctx || !ctx.DX || !ctx.DX.restingReady()) return null;
+    try { const m = JSON.parse(ctx.DX.mine()); return { orders: m.orders.map(o => String(o.coinid)), pending: m.pending.length, takes: takes(), unknown: unknown() }; } catch (e) { return null; }
+  }
   async function activeWork() {
-    // Takes awaiting an answer (signed and sent, not yet co-signed; or being voided): the page's own records, which it
-    // writes BEFORE it sends. Read from the store, so they are counted whether or not any screen is open.
-    const kv = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error); return r.rows.length ? JSON.parse(r.rows[0].V || "{}") || {} : {}; };
-    const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
-    // 0.18.142: fills of this node's orders whose txnpost was never answered (service.desktop.js POST UNANSWERED): the
-    // chain decides which way they went, and the engine can only read that while it runs. For the Quit and Shutdown warnings.
-    const unknown = () => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k LIKE 'fill_%'"); if (!r.status) throw new Error(r.error); return r.rows.filter(x => { try { return JSON.parse(x.V || x.v || "{}").status === "unknown"; } catch (e) { return false; } }).length; };
     if (!ctx || !ctx.DX || !ctx.DX.restingReady()) {
       const w = { ready: false, hasStore: anyStore(), waitedMs: timer && startedAt ? Date.now() - startedAt : 0 };   // waitedMs: main/restore.js lets the user go on after two minutes of this
       if (sqlShim && ctx && ctx.DX && ctx.DX.ready()) { try { w.takes = takes(); w.unknown = unknown(); } catch (e) {} }   // the FAST half is up: its takes are known even while the chain is still being read
+      if (held && last && !ctx) w.last = last;   // held and dropped: what it had open when it stopped (main/restore.js heldRead, for a flow of the app's own that stopped it)
       return w;
     }
     const m = mine();

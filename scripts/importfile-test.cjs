@@ -200,7 +200,8 @@ async function flowWorld(o) {
     call: async (c) => { if (/^(block|balance|txpow block:\d+)$/.test(c)) return chain(c); did.push(c.replace(mega, "F")); say(o.checkLines); return o.check ? o.check(c, { node, say }) : { status: true, response: {} }; },
     mayStop: async () => { did.push("guard"); if (o.refuse) throw new Error("The node keeps running: nothing was stopped."); }, held: (op) => op(),
     runResync: async (c) => { did.push(c.replace(mega, "F")); imported = true; if (o.swap) o.swap(mega); say(o.importLines); return o.import ? o.import(c, { node, say, cfg }) : { status: true }; },
-    work: async () => o.work || [], holdEngines: async () => { did.push("hold"); }, releaseEngines: async () => { did.push("release"); if (o.onRelease) o.onRelease(mf); } };
+    work: async () => (typeof o.work === "function" ? o.work(mf) : o.work || []), holdEngines: async () => { did.push("hold"); if (o.onHold) await o.onHold(mf); }, releaseEngines: async () => { did.push("release"); if (o.onRelease) o.onRelease(mf); } };
+  if (o.mayStop) d.mayStop = () => o.mayStop(did, mf);
   if (o.emit) { node.emit = () => o.emit(node); d.showMs = 0; }
   if (o.offerMs) d.offerMs = o.offerMs;
   if (o.sleep) d.sleep = (ms) => o.sleep(ms, { node, say, did }); if (o.stallMs) d.stallMs = o.stallMs; if (o.stuckMs) d.stuckMs = o.stuckMs;
@@ -213,15 +214,15 @@ async function flowWorld(o) {
 
 test("Resync from a MegaMMR file: engines held for the whole import; only {megammr:true} saved, always, before any restart; the node's own reader checks the whole file before anything is reset", async () => {
   let w = await flowWorld({});
-  assert.deepEqual(w.did, ["status false", "hold", "guard", 'save {"megammr":true}', "marker switching", "restart with megammr:true", "status true", "guard",
+  assert.deepEqual(w.did, ["status false", "guard", "hold", 'save {"megammr":true}', "marker switching", "restart with megammr:true", "status true", "guard",
     'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker catchup", "marker cleared", "release"]);   // the marker, right before the import (0.19.392)
   assert.deepEqual(w.r, { status: true, broken: false, on: true }); assert.equal(w.params.megammr, true);
   // already a MegaMMR node: no switch, but the setting is still saved before the import (its restart must keep the MegaMMR)
   w = await flowWorld({ megammr: [true], was: false });
-  assert.deepEqual(w.did, ["status true", "hold", "guard", 'save {"megammr":true}', 'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker catchup", "marker cleared", "release"]);
+  assert.deepEqual(w.did, ["status true", "guard", "hold", 'save {"megammr":true}', 'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker catchup", "marker cleared", "release"]);
   // ...whose memory setting was changed since it started: restarted first, so the room counted is the room it has
   w = await flowWorld({ megammr: [true, true], heapMb: 8192, heapMbNow: 3072 });
-  assert.deepEqual(w.did.slice(0, 6), ["status true", "hold", "guard", 'save {"megammr":true}', "restart with megammr:true", "status true"]);
+  assert.deepEqual(w.did.slice(0, 6), ["status true", "guard", "hold", 'save {"megammr":true}', "restart with megammr:true", "status true"]);
 });
 
 test("Resync from a MegaMMR file: every failure ends with the node restarted and the setting as it was; an unknown status is never read as off", async () => {
@@ -251,9 +252,9 @@ test("Resync from a MegaMMR file: every failure ends with the node restarted and
 
 test("Resync from a MegaMMR file: refused, before anything changes, while work is open, while another resync or import runs, or without room; the file is checked again right before the import", async () => {
   let w = await flowWorld({ work: ["1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0xabc"] });
-  assert.equal(w.r, F.say(w.MF.IMPORT_OPEN, { items: "1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0xabc" })); assert.deepEqual(w.did, ["status false", "hold", "release"], "held first, then read, then let go (0.19.395)");
+  assert.equal(w.r, F.say(w.MF.IMPORT_OPEN, { items: "1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0xabc" })); assert.deepEqual(w.did, ["status false"], "read while the engines run, and refused before anything is held or asked (0.19.417)");
   w = await flowWorld({ resyncing: true }); assert.equal(w.r, w.MF.BUSY); assert.deepEqual(w.did, []);
-  w = await flowWorld({ refuse: true }); assert.equal(w.r, "The node keeps running: nothing was stopped."); assert.deepEqual(w.did, ["status false", "hold", "guard", "release"]);
+  w = await flowWorld({ refuse: true }); assert.equal(w.r, "The node keeps running: nothing was stopped."); assert.deepEqual(w.did, ["status false", "guard"], "the guard is asked before the hold: a no holds nothing (0.19.417)");
   // the plain Minima node gets Java's default memory, a quarter of the computer's, whatever the Parlons Node setting says
   const G = 1024 * 1024 * 1024, big = megaFile("flow/big.mmr", 64); fs.truncateSync(big, Math.floor(1.6 * G));
   w = await flowWorld({ kind: "minima", ram: 16 * G, file: big }); assert.match(w.r, /four times that in memory while it checks and imports it: 6556 MB, and the plain Minima node gets 4096 MB here \(a quarter of this computer's memory\)\. In Settings, choose the Parlons Node, set Parlons Node memory to 6556 or more/);
@@ -605,7 +606,7 @@ test("0.19.402 M1: a verify (or keep) that awaited across a newly started import
   await assert.rejects(mf.keep(), { message: MF.BUSY }, "keep refused while it runs");
   release(); await imp;
   // the import's own release (refused for open work, inside its exclusive) passes its own guard
-  const seen = []; const w = await flowWorld({ work: ["1 AtomiX swap still in flight"], onRelease: (m) => seen.push(m.busyWhat() + ":" + m.holdsEngines()) });
+  const seen = []; let reads = 0; const w = await flowWorld({ work: () => (reads++ ? ["1 AtomiX swap still in flight"] : []), onRelease: (m) => seen.push(m.busyWhat() + ":" + m.holdsEngines()) });   // open work found after the hold (0.19.417)
   assert.deepEqual(seen, ["import:false"], w.r);
   cfg.megammrImport = null; await mf.exclusive("restore", async () => assert.equal(mf.holdsEngines(), false, "a restore's own settle releases them (node-manager walletSettle)"));
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
@@ -667,4 +668,85 @@ test("0.19.402 M3-M6: Quit's words at the final restart; the import's row stays 
   assert.ok(/id="bkGo" data-label="\$\{th\("Import"\)\}"\$\{busyAttr\(\)\}/.test(app), "the import's own button waits while it runs");
   const nm = fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8");
   assert.ok(/if \(this\.listenerCount\("line"\)\) this\.emit\("line", scrub\(l, this\.secret\)\);/.test(nm));
+});
+
+// ---- 0.19.417: the owner's import on 0.19.416 ALWAYS refused: "Dexicon has not finished starting, so its orders could not be checked" and
+// "Future Cash Next has not started (or is frozen)", with both fully started. The flow held the engines, THEN asked them what was open, and a
+// held engine does not answer: the stand-ins of 0.19.395-0.19.416 answered all the same. These answer as the real modules do. ----
+/** The engines as main/dexicon.js, main/futurecash.js and main/atomix.js answer: running, whole. Dexicon held (and dropped): { ready:false,
+ *  hasStore:true, waitedMs:0 } and what it had open when it stopped (last); Future Cash Next is stopped by the app as soon as an import runs
+ *  (main.js loopsPaused, at the exclusive's first status), keeping what its store held; AtomiX held keeps its read models (main/atomix.js hold).
+ *  work() and the stop guard read them the way main.js does (walletWork, inFlightWork: main/restore.js heldRead, main/inflight.js stopGuard). */
+function engines(o = {}) {
+  const inflight = require("../main/inflight.js"), heldRead = restore.heldRead || ((w) => w);   // 0.19.416 has none: an engine is read as it answers
+  const e = { held: false, dx: { orders: [], pending: 0, takes: 0, unknown: 0 }, fc: { collects: [], queued: [], sweeps: [], posted: 0 }, ax: [], starting: !!o.starting, waitedMs: o.waitedMs || 0, skip: false, said: [] };
+  const dexicon = async () => (e.starting ? { ready: false, hasStore: true, waitedMs: e.held ? 0 : e.waitedMs }
+    : e.held ? Object.assign({ ready: false, hasStore: true, waitedMs: 0 }, e.dxLast ? { last: e.dxLast } : {}) : Object.assign({ ready: true }, e.dx));
+  const futurecash = (mf) => { if (!mf.busy()) return Object.assign({ ready: true, hasStore: true }, e.fc); if (!e.fcLast) e.fcLast = Object.assign({}, e.fc); return { ready: false, hasStore: true, error: "", last: e.fcLast }; };
+  e.read = async (mf) => ({ atomix: { ready: true, swaps: e.ax.slice(), maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null, ownPools: [],
+    dexicon: heldRead(await dexicon(), mf.holdsEngines()), futurecash: heldRead(futurecash(mf), mf.busy()) });
+  e.work = async (mf) => restore.activeWorkList(Object.assign(await e.read(mf), { skipDexicon: e.skip })).filter(i => !String(i).endsWith(restore.CONFIRM_HINT));
+  // main.js holdEngines: Dexicon drained, then dropped with what it had open; o.during: work that starts while the engines are being stopped
+  e.hold = async () => { if (o.during) o.during(e); e.held = true; e.dxLast = e.starting ? null : Object.assign({}, e.dx); };
+  // main.js mayStop (main/inflight.js stopGuard): anything in flight or not checkable is asked; o.yes: the user's answer
+  e.guard = async (did, mf) => { const w = inflight.inFlight(await e.read(mf), "shutdown", Date.now()); if (!w.any) return did.push("guard");
+    did.push("question"); e.said.push(w.busy.concat(w.unread).join(" | ")); if (!o.yes) throw new Error("The node keeps running: nothing was stopped."); };
+  return e;
+}
+const engineWorld = (e, o = {}) => flowWorld(Object.assign({ work: (mf) => e.work(mf), onHold: () => e.hold(), mayStop: (did, mf) => e.guard(did, mf) }, o));
+const OWNER_SAW = F.say(require("../main/megammrfile.js").IMPORT_OPEN, { items: ["Dexicon has not finished starting, so its orders could not be checked. Wait a moment and try again.",
+  "Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again."].join("\n• ") });
+
+test("0.19.417 the owner's import: what is open is read while the engines run, the guard is asked, then they are held; nothing open imports, with no question", async () => {
+  const e = engines(), w = await engineWorld(e);
+  assert.notEqual(w.r, OWNER_SAW, "0.19.416 refused exactly so");
+  assert.deepEqual(w.r, { status: true, broken: false, on: true }, String(w.r));
+  // the guard after the flow's own restart into MegaMMR mode reads the engines as held: what they had open, never "has not started"
+  assert.deepEqual(w.did.slice(0, 8), ["status false", "guard", "hold", 'save {"megammr":true}', "marker switching", "restart with megammr:true", "status true", "guard"], e.said.join(" || "));
+  assert.ok(!w.did.includes("question"), e.said.join(" || "));
+});
+
+test("0.19.417 open work present: refused with the engines never held and the guard never asked", async () => {
+  const e = engines(); e.ax.push("0x" + "AB".repeat(32)); e.dx.takes = 1;
+  const w = await engineWorld(e);
+  assert.equal(w.r, F.say(w.MF.IMPORT_OPEN, { items: ["1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0x" + "AB".repeat(32), "1 Dexicon trade sent and not yet answered. Wait for it to settle (a few minutes)."].join("\n• ") }));
+  assert.deepEqual(w.did, ["status false"]); assert.equal(e.held, false);
+  // a Future Cash Next collect posted before the import began: read from what its store held when the import stopped it
+  const f = engines(); f.fc = { collects: ["0x" + "CC".repeat(32)], queued: [], sweeps: [], posted: 1 };
+  const v = await engineWorld(f);
+  assert.equal(v.r, F.say(v.MF.IMPORT_OPEN, { items: "1 Future Cash Next collect or sweep is still under way, which only this wallet's keys can finish: 0x" + "CC".repeat(32) }));
+  assert.deepEqual(v.did, ["status false"]);
+});
+
+test("0.19.417 work that starts between the read and the hold: read again as held, refused, and the engines let go", async () => {
+  for (const during of [(e) => { e.dx.takes = 1; }, (e) => { e.ax.push("0x" + "EF".repeat(32)); }]) {
+    const e = engines({ during }), w = await engineWorld(e);
+    const item = e.ax.length ? "1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0x" + "EF".repeat(32) : "1 Dexicon trade sent and not yet answered. Wait for it to settle (a few minutes).";
+    assert.equal(w.r, F.say(w.MF.IMPORT_OPEN, { items: item }), "only what is new, never \"has not started\" for what the flow itself stopped");
+    assert.deepEqual(w.did, ["status false", "guard", "hold", "release"]); assert.ok(!w.did.some(x => /megammr action|save|restart/.test(x)));
+  }
+});
+
+test("0.19.417 an engine that really has not started: wait at first, the skip after two minutes (Import without these checks?), then the import goes on", async () => {
+  const MS = require("../renderer/mainsaid.js"), app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8");
+  let e = engines({ starting: true, waitedMs: 30000 }), w = await engineWorld(e);
+  assert.equal(w.r, F.say(w.MF.IMPORT_OPEN, { items: "Dexicon has not finished starting, so its orders could not be checked. Wait a moment and try again." }));
+  assert.deepEqual(w.did, ["status false"], "refused before anything is held"); assert.equal(MS.has(w.r, "REPLACE_SKIP_HINT"), false, "no way past it yet");
+  e = engines({ starting: true, waitedMs: restore.DEX_STUCK_MS + 1000, yes: true }); w = await engineWorld(e);
+  assert.ok(String(w.r).includes("Dexicon has not finished starting after 2 minutes, so its on-chain orders and its trades waiting for an answer cannot be checked. " + restore.DEX_SKIP_HINT), w.r);
+  assert.equal(MS.has(w.r, "REPLACE_SKIP_HINT"), true, "the window offers the skip (renderer/app.js offerWithoutDexicon)");
+  assert.ok(/if \(importing\) \{ if \(!await showConfirm\(t\("Import without these checks\?"\)/.test(app) && /try \{ await attempt\(\); \} catch \(e\) \{ if \(!await offerWithoutDexicon\(e, !!built\.importing\)\) throw e; await attempt\(\); \}/.test(app));
+  // the user goes on (main.js mcd:dxSkipCheck: only checks that cannot be made are in the way): the same import again, the check left out
+  assert.equal(restore.onlyDexiconUnchecked(await e.work({ busy: () => false, holdsEngines: () => false })), true);
+  e.skip = true; w = await engineWorld(e);
+  assert.deepEqual(w.r, { status: true, broken: false, on: true }, String(w.r));
+  assert.ok(w.did.includes("hold") && w.did.includes('megammr action:import file:"F"'));
+  assert.ok(e.said.every(s => /Exchange trades waiting for an answer \(Dexicon has not started\)/.test(s)), "the guard says only the engine that really has not started: " + e.said.join(" || "));
+});
+
+test("0.19.417 main reads an engine that its own flow stopped from what it had open (walletWork, the stop guard, Freeze)", () => {
+  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
+  assert.ok(main.includes("const dexWork = async () => restore.heldRead(await dexicon.activeWork(), megafile.holdsEngines());") && main.includes("const fcWork = () => restore.heldRead(futurecash.activeWork(), loopsPaused());"));
+  assert.ok(main.includes("dexicon: await dexWork().catch(() => null), skipDexicon });") && main.includes("one(() => dexWork()), one(() => fcWork())]);") && main.includes("futurecashBlockers(await Promise.resolve().then(fcWork).catch(() => null))"));
+  assert.equal(restore.heldRead({ ready: false, hasStore: true, waitedMs: 0 }, true).ready, false, "never ran (or not read whole): as before");
 });

@@ -223,6 +223,13 @@ function activeWorkList(r) {
     : "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.");
   return out;
 }
+/**
+ * An engine that a flow of the app's own stopped (main.js: Dexicon held by a MegaMMR file import, Future Cash Next paused while an import,
+ * a restore or a MegaMMR switch runs) is read from what it had open when it stopped (w.last, kept by main/dexicon.js and
+ * main/futurecash.js: a stopped engine changes nothing), as the running engine answered: never said as "has not started" (0.19.417).
+ * Anything else (never run, not read whole when it stopped, stopped for another reason) is w as it is.
+ */
+const heldRead = (w, byFlow) => (byFlow && w && !w.ready && w.last ? Object.assign({ ready: true, hasStore: true }, w.last) : w);
 /** Are checks that cannot be made (and, since 0.18.137, warnings to confirm) the ONLY things in the way? Then, and only
  *  then, the user may go on. The name is from 0.18.110, when Dexicon's was the only such check. */
 function onlyDexiconUnchecked(list) { return !!list && list.length > 0 && list.every(x => String(x).endsWith(DEX_SKIP_HINT) || String(x).endsWith(CONFIRM_HINT)); }
@@ -313,5 +320,5 @@ function withoutPassword(j, password) {
   return error ? { status: j.status === true, error } : { status: j.status === true };
 }
 
-module.exports = { keyusesProblem, namesKeyuses, KEYUSES_ONE_SIGNATURE, KEYUSES_SET, KEYUSES_ADD, KEYUSES_TIP_MARGIN, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, withoutPassword, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup,
+module.exports = { keyusesProblem, namesKeyuses, KEYUSES_ONE_SIGNATURE, KEYUSES_SET, KEYUSES_ADD, KEYUSES_TIP_MARGIN, stopsNode, replacesKeysElsewhere, isResync, backupCommandProblem, backupModeProblem, restoreFileCommand, withoutPassword, loadsBackupFile, replacesWalletFromPhrase, moveAside, activeWorkList, activeWorkProblem, restoreBackup, heldRead,
   onlyDexiconUnchecked, skipWarning, DEX_SKIP_HINT, CONFIRM_HINT, OWN_POOLS_WARNING, SAME_WALLET_NOTE, DEX_SKIP_WARNING, DEX_STUCK_MS };

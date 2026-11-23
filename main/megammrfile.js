@@ -41,7 +41,8 @@
  *
  * d = { node (state, proc, resyncing, megammrBroken, heapMbNow, kind(), start(), restart(), snapshot(), on/removeListener("line")), config
  *       (load(), save(patch), setMegammrImport(v)), status() → the node's `status` reply, call(cmd) → a node reply, imports
- *       (main/importfile.js create()), mayStop(), held(op), runResync(cmd), work() → restore.activeWorkList, holdEngines(),
+ *       (main/importfile.js create()), mayStop(), held(op), runResync(cmd), work() → restore.activeWorkList (asked before the hold and again
+ *       after it: of an engine the flow stopped, what it had open when it stopped, main/restore.js heldRead), holdEngines(),
  *       releaseEngines(), fs, totalmem(), platform, log(line), sleep(ms), upMs, stallMs }
  */
 const F = require("./importfile");
@@ -185,12 +186,19 @@ function create(d) {
       const c = d.config.load(), kind = node.kind(), ram = d.totalmem(), heapMb = F.importHeapMb(kind, c.heapMb, ram);
       const room = F.roomProblem({ kind, size: d.fs.statSync(file).size, heapMb, ramBytes: ram, freeDiskBytes: freeDisk(node.dataDir()) });
       if (room) throw new Error(room);
-      // The engines are stopped for the whole import: held FIRST, then what is open is read (nothing new can start in between, as Freeze
-      // does), and refused, as a restore is, while a swap, a take or pool work is open
-      try { await d.holdEngines(); } catch (e) { await release(); throw new Error(F.say(ENGINES, { error: brief(e) })); }
-      let items;
-      try { items = await d.work(); if (items && items.length) throw new Error(F.say(IMPORT_OPEN, { items: items.join("\n• ") })); await d.mayStop(); }
-      catch (e) { await release(); throw e; }
+      // The engines are stopped for the whole import. What is open is read FIRST, while they run (0.19.417: held first, Dexicon and Future
+      // Cash Next said "has not started" and every import refused itself), and refused, as a restore is, while a swap, a take or pool work
+      // is open; then the stop guard, still with the engines running; then the hold; then the same read again, of the engines as held (main.js:
+      // what a stopped engine had open when it stopped, main/restore.js heldRead), so what started between the first read and the hold refuses
+      // too, and the hold is let go. A refusal after the guard ends its hold (held), so the retry is not refused as a stop already under way.
+      const open = (items) => { if (items && items.length) throw new Error(F.say(IMPORT_OPEN, { items: items.join("\n• ") })); };
+      open(await d.work());
+      await d.mayStop();
+      await d.held(async () => {
+        try { await d.holdEngines(); } catch (e) { await release(); throw new Error(F.say(ENGINES, { error: brief(e) })); }
+        try { const late = await d.work(); if (late && late.length) d.log("[app] MegaMMR file import refused: work started while the trading engines were being stopped: " + late.join(" | ")); open(late); }
+        catch (e) { await release(); throw e; }
+      });
       const was = (c.params || {}).megammr, prior = marker();   // a switching marker left by an earlier import: MegaMMR on and empty, kept until something is imported
       let wroteSwitching = false;
       // A MegaMMR node started before its memory setting was changed has the old heap: it is restarted first, so the room counted above is real

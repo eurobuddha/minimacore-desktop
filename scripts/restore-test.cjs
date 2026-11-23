@@ -207,14 +207,14 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
 test("P2P Chance: bets found by the settle loop of an install that only watches still refuse a wallet replacement and are said on Quit and Shutdown; a loop with no clean scan yet is 'could not be checked' (0.19.269)", async () => {
   // main.js's own walletWork and inFlightWork, run over stand-in engines (0.19.269: the grep of 0.19.262 replaced)
   const ts = require("typescript"), src = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), decl = {};
-  const walk = (n) => { if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && /^(walletWork|inFlightWork)$/.test(d.name.text)) decl[d.name.text] = n.getText(sf); ts.forEachChild(n, walk); };
+  const walk = (n) => { if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && /^(walletWork|inFlightWork|dexWork|fcWork)$/.test(d.name.text)) decl[d.name.text] = n.getText(sf); ts.forEachChild(n, walk); };
   walk(sf);
   const R = require("../main/restore.js"), I = require("../main/inflight.js");
   const run = (cas, enabled) => {
-    const env = { restore: R, dexSkipUntil: 0, config: { load: () => ({ casinoEnabled: enabled }) }, casino: cas,
+    const env = { restore: R, megafile: { holdsEngines: () => false }, loopsPaused: () => false, dexSkipUntil: 0, config: { load: () => ({ casinoEnabled: enabled }) }, casino: cas,
       atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] },
       shop: { sendingCount: () => 0 }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, dexicon: { activeWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }) } };
-    return new Function("env", "with (env) { " + decl.walletWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
+    return new Function("env", "with (env) { " + decl.walletWork + "; " + decl.dexWork + "; " + decl.fcWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
   };
   // bets found by a loop that only watched (casinoEnabled off): the replacement is refused, Quit and Shutdown say them
   let m = run({ open: () => ({ offers: 0, bets: 1 }), looping: () => true, uncheckedMs: () => 0 }, false);
@@ -238,4 +238,27 @@ test("P2P Chance: bets found by the settle loop of an install that only watches 
   assert.equal(R.onlyDexiconUnchecked(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: null, casinoLooping: true, casinoWaitedMs: 30000 })), false, "not before two minutes");
   const cas = fs.readFileSync(path.join(ROOT, "main", "casino.js"), "utf8");
   assert.ok(/function invalidate\(\) \{[\s\S]{0,500}if \(was\) startLoop\(\); else if \(wasWatching\) watch\(\);/.test(cas), "after a replacement the loop goes on, on the new wallet");
+});
+
+// ---- 0.19.417: main's own reads of an engine that main's own MegaMMR flow stopped (the import refused itself on 0.19.395-0.19.416) ----
+test("main's walletWork and inFlightWork read Dexicon held by an import, and Future Cash Next paused by it, from what they had open when they stopped", async () => {
+  const ts = require("typescript"), src = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), decl = {};
+  const walk = (n) => { if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && /^(walletWork|inFlightWork|dexWork|fcWork)$/.test(d.name.text)) decl[d.name.text] = n.getText(sf); ts.forEachChild(n, walk); };
+  walk(sf);
+  const R = require("../main/restore.js"), I = require("../main/inflight.js");
+  const run = (byFlow, dxLast, fcLast) => new Function("env", "with (env) { " + [decl.walletWork, decl.dexWork, decl.fcWork, decl.inFlightWork].filter(Boolean).join(";\n") + "; return { walletWork, inFlightWork }; }")({
+    restore: R, megafile: { holdsEngines: () => byFlow }, loopsPaused: () => byFlow, dexSkipUntil: 0, config: { load: () => ({}) }, casino: { open: () => null, looping: () => false, uncheckedMs: () => 0 },
+    atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] }, shop: { sendingCount: () => 0 },
+    dexicon: { activeWork: async () => Object.assign({ ready: false, hasStore: true, waitedMs: 0 }, dxLast ? { last: dxLast } : {}) },
+    futurecash: { activeWork: () => Object.assign({ ready: false, hasStore: true, error: "" }, fcLast ? { last: fcLast } : {}) } });
+  const nothing = { orders: [], pending: 0, takes: 0, unknown: 0 }, fcNothing = { collects: [], queued: [], sweeps: [], posted: 0 };
+  let m = run(true, nothing, fcNothing);
+  assert.deepEqual(await m.walletWork(), [], "the import's own hold: nothing open, nothing said");
+  assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).any, false, "and the stop guard asks nothing");
+  m = run(true, Object.assign({}, nothing, { takes: 1 }), Object.assign({}, fcNothing, { sweeps: ["0x" + "5E".repeat(32)], posted: 1 }));
+  assert.deepEqual(await m.walletWork(), ["1 Dexicon trade sent and not yet answered. Wait for it to settle (a few minutes).", "1 Future Cash Next collect or sweep is still under way, which only this wallet's keys can finish: 0x" + "5E".repeat(32)]);
+  m = run(false, nothing, fcNothing);
+  assert.deepEqual(await m.walletWork(), ["Dexicon has not finished starting, so its orders could not be checked. Wait a moment and try again.", "Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again."], "stopped for another reason: as before");
+  m = run(true, null, null);
+  assert.equal((await m.walletWork()).length, 2, "never ran (nothing kept): as before, never read as idle");
 });
