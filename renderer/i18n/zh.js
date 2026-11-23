@@ -5817,3 +5817,24 @@
   "Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.",
   "The node is not receiving new blocks. Resync node gets it moving again."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.": "导入已完成，节点正在重启。现在退出会保留导入的链：节点会在下次启动时追赶，AtomiX、PandaPools 和交易所会等到它追上为止。",
+  "None of this node's earlier blocks can be compared with the imported chain: the node no longer holds them (it was far behind the file). Check your balance, then keep the imported chain.": "此节点之前的区块都无法与导入的链进行比较：节点已不再保存它们（它远远落后于该文件）。请检查您的余额，然后保留导入的链。",
+  "An earlier MegaMMR import did not finish, and the balance before it was not recorded. Check that your balance is right. Your funds are safe.": "之前的一次 MegaMMR 导入没有完成，且导入前的余额没有被记录。请检查您的余额是否正确。您的资金是安全的。",
+  "Waiting for the node to answer, to check the MegaMMR import.": "正在等待节点应答，以检查 MegaMMR 导入。",
+  "Keep MegaMMR on, empty": "保持 MegaMMR 开启（空）",
+  "Keep MegaMMR on, empty?": "保持 MegaMMR 开启（空）？",
+  "The node stays in MegaMMR mode with an empty MegaMMR: it does not know older coins until a MegaMMR file is imported (Backup & Recovery, Resync from a MegaMMR file). Nothing is deleted.": "节点保持 MegaMMR 模式，但 MegaMMR 为空：在导入 MegaMMR 文件之前（备份与恢复，从 MegaMMR 文件重新同步），它不知道较早的币。不会删除任何内容。",
+  "Start the node to check the balance.": "请启动节点以检查余额。",
+  "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start.": "暂时已清除，但无法保存应用的设置（{error}）：导入的检查会在下次启动时再次出现。"
+}, { review: [
+  "The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.",
+  "None of this node's earlier blocks can be compared with the imported chain: the node no longer holds them (it was far behind the file). Check your balance, then keep the imported chain.",
+  "An earlier MegaMMR import did not finish, and the balance before it was not recorded. Check that your balance is right. Your funds are safe.",
+  "Waiting for the node to answer, to check the MegaMMR import.",
+  "Keep MegaMMR on, empty",
+  "Keep MegaMMR on, empty?",
+  "The node stays in MegaMMR mode with an empty MegaMMR: it does not know older coins until a MegaMMR file is imported (Backup & Recovery, Resync from a MegaMMR file). Nothing is deleted.",
+  "Start the node to check the balance.",
+  "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start."
+] });

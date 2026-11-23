@@ -5830,3 +5830,24 @@
   "Catching up after the MegaMMR import: block {block} of at least {target}. AtomiX, PandaPools and the Exchange start again once the node has reached it, holds the same block there as before the import, and is at the network's tip.",
   "The node is not receiving new blocks. Resync node gets it moving again."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.": "Импорт завершён, узел перезапускается. Если выйти сейчас, импортированная цепочка останется: узел догонит сеть при следующем запуске, а AtomiX, PandaPools и Биржа подождут, пока он не догонит.",
+  "None of this node's earlier blocks can be compared with the imported chain: the node no longer holds them (it was far behind the file). Check your balance, then keep the imported chain.": "Ни один из прежних блоков этого узла нельзя сравнить с импортированной цепочкой: узел их больше не хранит (он сильно отставал от файла). Проверьте баланс, затем оставьте импортированную цепочку.",
+  "An earlier MegaMMR import did not finish, and the balance before it was not recorded. Check that your balance is right. Your funds are safe.": "Прежний импорт MegaMMR не завершился, и баланс до него не был записан. Проверьте, верен ли ваш баланс. Ваши средства в безопасности.",
+  "Waiting for the node to answer, to check the MegaMMR import.": "Ожидание ответа узла, чтобы проверить импорт MegaMMR.",
+  "Keep MegaMMR on, empty": "Оставить MegaMMR включённым, пустым",
+  "Keep MegaMMR on, empty?": "Оставить MegaMMR включённым, пустым?",
+  "The node stays in MegaMMR mode with an empty MegaMMR: it does not know older coins until a MegaMMR file is imported (Backup & Recovery, Resync from a MegaMMR file). Nothing is deleted.": "Узел остаётся в режиме MegaMMR с пустым MegaMMR: он не знает старых монет, пока не импортирован файл MegaMMR («Резервное копирование и восстановление», «Синхронизация из файла MegaMMR»). Ничего не удаляется.",
+  "Start the node to check the balance.": "Запустите узел, чтобы проверить баланс.",
+  "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start.": "Пока сброшено, но настройки приложения не удалось сохранить ({error}): проверка импорта вернётся при следующем запуске."
+}, { review: [
+  "The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.",
+  "None of this node's earlier blocks can be compared with the imported chain: the node no longer holds them (it was far behind the file). Check your balance, then keep the imported chain.",
+  "An earlier MegaMMR import did not finish, and the balance before it was not recorded. Check that your balance is right. Your funds are safe.",
+  "Waiting for the node to answer, to check the MegaMMR import.",
+  "Keep MegaMMR on, empty",
+  "Keep MegaMMR on, empty?",
+  "The node stays in MegaMMR mode with an empty MegaMMR: it does not know older coins until a MegaMMR file is imported (Backup & Recovery, Resync from a MegaMMR file). Nothing is deleted.",
+  "Start the node to check the balance.",
+  "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start."
+] });

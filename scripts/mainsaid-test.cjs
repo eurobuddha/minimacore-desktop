@@ -256,6 +256,7 @@ test("A file the node is told to read (main/importfile.js): every refusal, said 
     for (const m of [MF.CHECK_UNANSWERED, MF.CHECK_UNANSWERED_BACK]) check(F.say(m, { why: "the node showed no progress for 30 minutes" }));
     for (const m of [MF.OOM_SAID, MF.OOM_BACK]) check(F.say(m, { why: "java.lang.OutOfMemoryError: Java heap space", heap: "6144" }));
     for (const m of [MF.TIP_REFUSED, MF.TIP_REFUSED_BACK]) check(F.say(m, { why: MF.CHANGED_WHY }));
+    check(F.say(MF.KEEP_UNSAVED, { error: "EACCES: permission denied" }));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   for (const c of MS.codes().filter(c => /^(IMPORT|MEGAFILE)_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js or main/megammrfile.js: " + c);
 });

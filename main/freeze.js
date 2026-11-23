@@ -92,7 +92,7 @@ function create(o) {
   const list = () => [...frozen];
   const replacing = () => { try { return !!(o.replacing && o.replacing()); } catch (e) { return true; } };
   const replacingWhat = () => { try { return o.replacing && o.replacing(); } catch (e) { return true; } };   // "import": a MegaMMR file import holds them (main.js), not a wallet replacement
-  /** The other apps' loops (mail, minimall, vestr) are not started while o.paused() (a MegaMMR file import, or its unfinished marker: main.js). */
+  /** The other apps' loops (mail, minimall, vestr) are not started while o.paused() (an import, a restore or a MegaMMR switch running: main.js loopsPaused). */
   const paused = (id) => { try { return !!(o.paused && PAUSED.includes(id) && o.paused()); } catch (e) { return true; } };
   const starting = {}, failed = new Set();   // id -> a start still running; ids whose last start failed
   /** Run the app's start, once at a time (a freeze waits for it, below). Failed: remembered. */

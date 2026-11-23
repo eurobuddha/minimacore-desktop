@@ -343,9 +343,11 @@ node.onEnginesHold = async () => { await Promise.all([dexicon.hold(), atomix.hol
 // Before the node is told to quit (node-manager stop(), 0.18.117): what the engines have at the node ends first, so a
 // posted action is recorded by the engine that posted it. Each wait is bounded (Dexicon: main/dexicon.js STOP DRAINS).
 node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandapools.quiet(10000)]);
-// ...and none while a MegaMMR file import has not finished (its marker, main/megammrfile.js): the node's balance is incomplete until Resync node
+// ...and none while a MegaMMR file import runs or has not finished (main/megammrfile.js holdsEngines: the import itself, but for its own release,
+// and its marker): the node's balance is incomplete until it is settled. A restore or Turn MegaMMR off running holds nothing here: a backup
+// restore's own settle (node-manager walletSettle) releases the engines while it is still inside megafile's exclusive.
 // (and none while a seed or backup restore holds them: its own settle releases them)
-node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon") || require("./megammrfile").holds(config.load().megammrImport) || (node.walletCheck && node.walletCheck.held)) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
+node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon") || megafile.holdsEngines() || (node.walletCheck && node.walletCheck.held)) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // A file the node is told to read (main/importfile.js): only one the user chose in the system's open dialog, kept here, never copied.
 const importfile = require("./importfile");
 const imports = importfile.create({ platform: process.platform, t: (s) => (currentLang(), lang.t(s)), defaultPath: () => config.load().dataFolder || config.defaultDataFolder(),
@@ -539,7 +541,7 @@ const fcStarter = require("./futurecash").createStarter({ start: () => futurecas
   granted: () => { const g = config.load().fcGrant; return !!(g && typeof g === "object" && Object.keys(g).length); },
   notify: () => { try { const n = new Notification({ title: "Future Cash Next", body: lang.t("Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself."), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) {} } });
 node.on("status", (s) => {
-  if (s.state !== "running" || loopsPaused()) { fcBlock = 0; fcStarter.reset(); futurecash.stop().catch(() => {}); return; }   // not during a MegaMMR file import, nor while it is unfinished
+  if (s.state !== "running" || loopsPaused()) { fcBlock = 0; fcStarter.reset(); futurecash.stop().catch(() => {}); return; }   // not while a MegaMMR file import, a restore or a MegaMMR switch runs (loopsPaused)
   const b = s.health && s.health.block;
   fcStarter.tick().then(() => { if (b && b !== fcBlock && !freeze.isFrozen("futurecash")) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});   // frozen (Apps tab): no store opened, no pass
 });
@@ -1142,6 +1144,7 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 let quitting = false, quitAsking = false;
 const IMPORT_QUIT_EARLY = N_("The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.");
 const BUSY_QUIT_WARNING = N_("Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start.");
+const IMPORT_QUIT_RESTART = N_("The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.");
 const IMPORT_QUIT_WARNING = N_("Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run.");
 const systemQuit = inflight.recently();   // true for about a minute after the system asked: a cancelled shutdown does not silence the question for the session
 app.whenReady().then(() => { try { powerMonitor.on("shutdown", () => { systemQuit.mark(); }); } catch (e) { /* Windows: session-end below */ } });
@@ -1163,10 +1166,10 @@ app.on("before-quit", (e) => {
     const busyNow = megafile.busyWhat() || (node.resyncing ? "resync" : "");
     if (busyNow && !systemQuit.on()) {
       if (win && !win.isDestroyed()) { win.show(); win.focus(); }
-      const m = megafile.marker(), half = busyNow === "import" && m && m.stage === "importing";
+      const m = megafile.marker(), half = busyNow === "import" && m && m.stage === "importing", done = busyNow === "import" && m && m.stage === "catchup";   // catchup: imported, the final restart
       const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("Quit anyway"), lang.t("Stay open")], defaultId: 1, cancelId: 1, noLink: true, title: flavor.windowTitle,
         message: busyNow === "import" ? lang.t("A MegaMMR import is running") : lang.t("A resync, a restore or a MegaMMR switch is running"),
-        detail: lang.t(half ? IMPORT_QUIT_WARNING : busyNow === "import" ? IMPORT_QUIT_EARLY : BUSY_QUIT_WARNING) }).catch(() => ({ response: 1 }));
+        detail: lang.t(half ? IMPORT_QUIT_WARNING : done ? IMPORT_QUIT_RESTART : busyNow === "import" ? IMPORT_QUIT_EARLY : BUSY_QUIT_WARNING) }).catch(() => ({ response: 1 }));
       if (r.response !== 0 && !systemQuit.on()) { quitAsking = false; return; }
     }
     const go = await inflight.decideQuit({ os: systemQuit.on(), stopped: node.state === "stopped", gather: inFlightWork, log: (l) => node.log(l), t: (currentLang(), lang.t),   // the question in the app's language; the log line stays English

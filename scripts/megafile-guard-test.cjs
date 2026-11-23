@@ -65,7 +65,7 @@ test("M1: the import says it is running in the node's status, and the window dis
   const app = read("renderer/app.js");
   assert.ok(/const nodeBusyNow = \(\) => !!\(LAST_STATUS && \(LAST_STATUS\.resyncing \|\| LAST_STATUS\.megafileBusy\)\);/.test(app));
   for (const id of ["nRestart", "nReclaim", "nMegaOff", "nContrib", "pSave", "pSaveRestart"]) assert.ok(new RegExp('id="' + id + '"\\$\\{busyAttr\\(\\)\\}').test(app), id + " disabled while busy");
-  assert.ok(/data-bk="\$\{r\[0\]\}"\$\{nodeBusyNow\(\) && !\/\^\(chat\|mail\|create\)\$\/\.test\(r\[0\]\) \? busyAttr\(\)/.test(app), "Backup & Recovery: Restore, Resync, the import, Rebuild, Turn MegaMMR off");
+  assert.ok(/data-bk="\$\{r\[0\]\}"\$\{nodeBusyNow\(\) && !\/\^\(chat\|mail\|create\)\$\/\.test\(r\[0\]\) && !\(r\[0\] === "megafile" && importing\) \? busyAttr\(\)/.test(app), "Backup & Recovery: Restore, Resync, Rebuild, Turn MegaMMR off (the import's own row leads back to its progress)");
   assert.ok(/if \(wasBusy !== nodeBusyNow\(\) && activeView === "backup" && BK_PAGE === ""\) renderBackup\(\);/.test(app), "the rows follow it");
 });
 
@@ -89,7 +89,7 @@ test("third review: the Terminal's megammr*, archive, backup and restore wait wh
   assert.ok(/seedgate\.setBusyCheck\(busyRefusal\);/.test(src) && /await seedgate\.checkCommand\(command, \{/.test(calls["mcd:cmd"]), "every Terminal command passes checkCommand, which asks it");
   G.setBusyCheck(() => MF.BUSY); await assert.rejects(G.checkCommand("megammr action:info", { running() {} }), { message: MF.BUSY }); G.setBusyCheck(null);
   const q = src.slice(src.indexOf('app.on("before-quit"'));
-  assert.ok(/const busyNow = megafile\.busyWhat\(\) \|\| \(node\.resyncing \? "resync" : ""\);/.test(q) && /half = busyNow === "import" && m && m\.stage === "importing"/.test(q) && /detail: lang\.t\(half \? IMPORT_QUIT_WARNING : busyNow === "import" \? IMPORT_QUIT_EARLY : BUSY_QUIT_WARNING\)/.test(q), "a resync, a restore and Turn off ask too, in words that fit");
+  assert.ok(/const busyNow = megafile\.busyWhat\(\) \|\| \(node\.resyncing \? "resync" : ""\);/.test(q) && /half = busyNow === "import" && m && m\.stage === "importing"/.test(q) && /detail: lang\.t\(half \? IMPORT_QUIT_WARNING : done \? IMPORT_QUIT_RESTART : busyNow === "import" \? IMPORT_QUIT_EARLY : BUSY_QUIT_WARNING\)/.test(q), "a resync, a restore and Turn off ask too, in words that fit");
   assert.ok(/IMPORT_QUIT_EARLY = N_\("The import has not replaced anything yet\. Quitting now stops it; the node keeps its chain\."\)/.test(src));
   assert.ok(/click: \(\) => \{ mayStop\(\)\.then\(\(\) => held\(\(\) => node\.restart\(\)\)\)\.catch\(\(e\) => trayRefused\(e\)\); \}/.test(src) && /function trayRefused\(e\)/.test(src), "the tray's refusal is shown");
   const app = read("renderer/app.js"); assert.ok(/api\.nodeStart\(\)\.catch\(e => toast\(ipcError\(e\), "err"\)\);/.test(app), "Start node's refusal is said");

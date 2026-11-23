@@ -856,7 +856,7 @@ class NodeManager extends EventEmitter {
         ? "a port this node needs is already in use (base port " + config.load().basePort + "). Start again: this app's own earlier node is stopped first; any other program is named and left alone"
         : "another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first";
     }
-    this.emit("line", scrub(l, this.secret));   // the node's own fresh lines only (no continuation, no Parlons chatter), redacted as the Logs are: main/megammrfile.js follows and shows an import's steps
+    if (this.listenerCount("line")) this.emit("line", scrub(l, this.secret));   // only while someone follows (scrub is not free); the node's own fresh lines only (no continuation, no Parlons chatter), redacted as the Logs are: main/megammrfile.js follows and shows an import's steps
     this.log(l);
   }
   /** The Parlons Node narrates its account in its log; that is the honest readiness signal. Only ITS OWN status lines:

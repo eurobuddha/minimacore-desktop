@@ -27,9 +27,12 @@
  *              and holds the same id as before the import, AND the node's tip is fresh (FRESH_MS). Freshness alone never releases (a file
  *              from another chain ends at a fresh block too). Meanwhile "block X of at least Y", with Keep after OFFER_MS, and after
  *              OFFER_MS without the block number growing a plain line that the node is not receiving blocks (Resync node), no verdict.
+ *              At or past every recorded height with none of them in the node's tree (it was far behind the file: `txpow block:N` walks only
+ *              the tree and the archive) it says so plainly and offers Keep at once. A read the node does not answer is said ("waiting").
  *   mismatch   a recorded height holds ANOTHER block id on the new chain (hard evidence only). Said as exactly that ("one of the two is a
  *              fork", never "the file is wrong"); the user chooses: Keep the imported chain, or Turn MegaMMR off and resync.
- * Every stage but switching holds the trading engines (holds(), main.js onEnginesRelease and launch). Every one has an exit that destroys
+ * Every stage but switching holds the trading engines (holdsEngines(), main.js onEnginesRelease and launch), and so does the import while it runs.
+ * A verify that awaited the node across a newly started flow sets and releases nothing (gen); keep() is refused while one runs. Every one has an exit that destroys
  * nothing: keep() (the window's "Keep" / "My balance is correct"), and any Resync node that ends well (resynced()).
  *
  * NO ANSWER IS NOT AN END (M3). The node's answer can take longer than the RPC's one-hour bound (a 1.6 GB file is unmeasured): when the
@@ -79,15 +82,17 @@ const holds = (m) => !!m && !(typeof m === "object" && m.stage === "switching");
 const CHANGED_WHY = "it was changed while the node checked it (choose it again)";
 const TIP_REFUSED = "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.";
 const TIP_REFUSED_BACK = "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).";   // the node's last lines on the import's screen
+// keep() when the settings file cannot be written: released for this run all the same (never stranded), said
+const KEEP_UNSAVED = "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start.";
 const FAILED_BACK = "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.";
 
 function create(d) {
   const node = d.node;
-  let busy = "";
+  let busy = "", gen = 0, releasing = false, unwritten = null;   // gen: counts the flows started (a verify that awaited across one gives up)
   /** One of these at a time, and none during a resync the node is already running (node-manager runResync). */
   async function exclusive(what, fn) {
     if (busy || node.resyncing) throw new Error(BUSY);
-    busy = what; said();
+    busy = what; gen++; said();
     const shown = what === "import" ? show() : null;   // the import's screen shows every step, from the first restart to the last
     try { return await fn(); } finally { if (shown) shown(); busy = ""; said(); }
   }
@@ -111,10 +116,17 @@ function create(d) {
   }
   const stage = (k) => { node.megafileStep = "app:" + k; said(); };
   /** The marker, read so that anything odd (not an object, no or an unknown stage, another version's) is "importing": verify first, clearable. */
-  const marker = () => { let m; try { m = d.config.load().megammrImport; } catch (e) { return null; } if (m == null || m === false || m === "") return null;
+  const raw = () => { try { return d.config.load().megammrImport; } catch (e) { return null; } };
+  const marker = () => { const m = raw(); if (m == null || m === false || m === "") return null;
+    if (unwritten !== null && JSON.stringify(m) === unwritten) return null;   // cleared by the user, but the config could not be written: cleared for this run
     return m && typeof m === "object" && STAGES.includes(m.stage) ? m : Object.assign({}, m && typeof m === "object" ? m : {}, { stage: "importing" }); };
-  /** Never throws: a marker that cannot be written is said in the log, and does not turn a good import into a failed one. */
-  const setMarker = (v) => { try { d.config.setMegammrImport(v); } catch (e) { try { d.log("[app] the MegaMMR import marker could not be written (" + brief(e) + ")"); } catch (x) {} } if (!v) node.megafileBanner = null; said(); };
+  /** Never throws: a marker that cannot be written is said in the log, and does not turn a good import into a failed one. A CLEAR that
+   *  cannot be written is kept in memory (unwritten): the engines are not stranded behind it until the app restarts. → the error, or "". */
+  const setMarker = (v) => { let err = "", was = raw();
+    try { d.config.setMegammrImport(v); unwritten = null; } catch (e) { err = brief(e); if (!v) unwritten = JSON.stringify(was === undefined ? null : was); try { d.log("[app] the MegaMMR import marker could not be written (" + err + ")"); } catch (x) {} }
+    if (!v) node.megafileBanner = null; said(); return err; };
+  /** Does the import hold the trading engines now (main.js onEnginesRelease)? While it runs (but its own release), and while its marker holds. */
+  const holdsEngines = () => (busy === "import" && !releasing) || holds(marker());
   /** What the window's banner says (renderer/app.js paintMegaBar): { kind, ... } or null. */
   const banner = (b) => { node.megafileBanner = b; said(); };
   /** What the node's log says of the command running now (STEP lines only, after the logger's prefix): the last step and when, whether
@@ -175,11 +187,12 @@ function create(d) {
       if (room) throw new Error(room);
       // The engines are stopped for the whole import: held FIRST, then what is open is read (nothing new can start in between, as Freeze
       // does), and refused, as a restore is, while a swap, a take or pool work is open
-      try { await d.holdEngines(); } catch (e) { await d.releaseEngines(); throw new Error(F.say(ENGINES, { error: brief(e) })); }
+      try { await d.holdEngines(); } catch (e) { await release(); throw new Error(F.say(ENGINES, { error: brief(e) })); }
       let items;
       try { items = await d.work(); if (items && items.length) throw new Error(F.say(IMPORT_OPEN, { items: items.join("\n• ") })); await d.mayStop(); }
-      catch (e) { await d.releaseEngines(); throw e; }
-      const was = (c.params || {}).megammr;
+      catch (e) { await release(); throw e; }
+      const was = (c.params || {}).megammr, prior = marker();   // a switching marker left by an earlier import: MegaMMR on and empty, kept until something is imported
+      let wroteSwitching = false;
       // A MegaMMR node started before its memory setting was changed has the old heap: it is restarted first, so the room counted above is real
       const stale = on && kind !== "minima" && node.heapMbNow !== heapMb;
       try {
@@ -187,7 +200,7 @@ function create(d) {
         const turnedOn = !on;
         if (turnedOn || stale) {
           stage("restart-on");
-          if (turnedOn) setMarker({ stage: "switching", at: new Date().toISOString() });   // a quit or crash from here until the import leaves MegaMMR on and empty
+          if (turnedOn) { setMarker({ stage: "switching", at: new Date().toISOString() }); wroteSwitching = true; }   // a quit or crash from here until the import leaves MegaMMR on and empty
           d.log("[app] MegaMMR file import: restarting the node in MegaMMR mode" + (stale ? " with its memory setting (" + heapMb + " MB)" : "") + " first (saved before the restart)");
           await d.held(() => node.restart());
           const now = (await nodeUp(d.upMs)) ? await keeps() : null;
@@ -253,7 +266,7 @@ function create(d) {
           // Before "Streaming IBD..": nothing was reset, nothing is owed. Restarted all the same (an out-of-memory error may have hurt the
           // node's other threads), as a light node again when this flow turned MegaMMR on.
           d.log("[app] MegaMMR file import stopped before the node reset its chain (" + why + "); nothing imported or reset, the node is restarted" + (turnedOn ? " as a light node again" : ""));
-          setMarker(null);
+          setMarker(prior && prior.stage === "switching" ? prior : null);   // MegaMMR still on and empty when an earlier import left it so
           if (turnedOn) setMegammr(was);
           await node.restart();
           if (wi.oom || OOM.test(why)) throw new Error(F.say(turnedOn ? OOM_BACK : OOM_SAID, { why, heap: String(heapMb) }));
@@ -268,7 +281,7 @@ function create(d) {
         throw new Error(F.say(turnedOn ? FAILED_BACK : FAILED, { why }));
       } finally {
         const m = marker();
-        if (m && m.stage === "switching" && (d.config.load().params || {}).megammr === was) setMarker(null);   // back as it was: nothing owed
+        if (m && m.stage === "switching" && wroteSwitching && (d.config.load().params || {}).megammr === was) setMarker(null);   // this flow's switch undone: nothing owed (an earlier import's is kept)
         if (!holds(marker())) await release();
       }   // with the marker set they stay held (main.js onEnginesRelease says the same)
     });
@@ -306,35 +319,44 @@ function create(d) {
   /** Release the trading engines, unless a seed or backup restore holds them (node-manager runResync / walletSettle releases them then). */
   async function release() {
     if (node.replacingWallet || (node.walletCheck && node.walletCheck.held)) { d.log("[app] the MegaMMR import owes nothing more; the trading engines start when the wallet restore has settled"); return; }
-    await d.releaseEngines();
+    releasing = true; try { await d.releaseEngines(); } finally { releasing = false; }   // its own release, inside its exclusive too (holdsEngines)
   }
   /** At every node status (main.js) and after an import: what the marker owes now (see the top of this file). Never writes a verdict
    *  but "mismatch", which is hard evidence and has its own exits. */
   let verifying = false, grow = { key: "", best: 0, at: 0 };
   async function verify() {
-    const m = marker();
+    const m = marker(), g = gen;
     if (!m || busy || verifying || node.state !== "running") return;
+    // an import (or keep) started while this one awaited the node: what it read is not about that import, and nothing is set or released
+    const gone = () => !!busy || gen !== g || JSON.stringify(marker()) !== JSON.stringify(m);
+    const ask = (c) => Promise.resolve().then(() => d.call(c)).catch(() => null);   // null: no answer (said), never "not found"
+    const waiting = () => banner({ kind: "waiting" });   // the engines are held: said, never held silently
     verifying = true;
     try {
       if (m.stage === "switching") { if (!(d.config.load().params || {}).megammr) setMarker(null); else banner({ kind: "switching" }); return; }
       if (m.stage === "mismatch") { banner({ kind: "mismatch", block: m.block, before: m.was, after: m.now }); return; }
       if (m.stage === "importing") {
         const now = await balanceSummary();
+        if (gone()) return;
         if (now && Array.isArray(m.before) && sameWallet(now, m.before)) {
           d.log("[app] after an unfinished MegaMMR import this node shows the same balance and coin count as before it (" + now.map(t => t[0] + " " + t[1] + " in " + t[2] + " coins").join(", ") + "): nothing is owed, the trading engines start again");
-          setMarker(null); await release(); return;
+          setMarker(null); await release(); return;   // gone() was asked after the last await: nothing ran in between
         }
-        if (now) banner({ kind: "incomplete", less: lessThan(now, m.before), before: m.before || null, now });
+        // an old marker (failed/foreign, no balance recorded) claims nothing about the balance
+        if (now) banner(Array.isArray(m.before) ? { kind: "incomplete", less: lessThan(now, m.before), before: m.before, now } : { kind: "incomplete", unknown: true, now }); else waiting();
         return;
       }
-      const b = await d.call("block"), tipNow = b && b.status === true && b.response ? b.response : null;
-      if (!tipNow) return;
+      const b = await ask("block"), tipNow = b && b.status === true && b.response ? b.response : null;
+      if (gone()) return;
+      if (!tipNow) { waiting(); return; }
       const tip = Number(tipNow.block), age = Date.now() - Number(tipNow.timemilli);
-      let matched = 0;
+      let matched = 0, asked = 0, absent = 0;
       for (const a of Array.isArray(m.anchors) ? m.anchors : []) {
         if (tip < a.block) continue;
-        const r = await d.call("txpow block:" + a.block).catch(() => null), id = r && r.status === true && r.response ? String(r.response.txpowid || "") : "";
-        if (!id) continue;
+        asked++;
+        const r = await ask("txpow block:" + a.block), id = r && r.status === true && r.response ? String(r.response.txpowid || "") : "";
+        if (gone()) return;
+        if (!id) { if (r) absent++; continue; }   // an answer without it: not in the node's tree or archive
         if (id.toLowerCase() !== String(a.txpowid).toLowerCase()) {
           d.log("[app] MegaMMR file import: block " + a.block + " on this node before the import was " + a.txpowid + "; after the import it is " + id + ". One of the two is a fork: the trading engines stay stopped until the user chooses");
           setMarker(Object.assign({}, m, { stage: "mismatch", block: a.block, was: a.txpowid, now: id }));
@@ -344,12 +366,16 @@ function create(d) {
       }
       if (matched && age <= FRESH_MS) {
         d.log("[app] MegaMMR file import: block " + matched + " is the same block as before the import and the node's tip is fresh (block " + tip + ", " + Math.round(age / 1000) + " s old): the trading engines start again");
-        setMarker(null); await release(); return;
+        setMarker(null); await release(); return;   // gone() was asked after the last await: nothing ran in between
       }
+      if (!matched && asked && absent < asked) { waiting(); return; }   // a recorded block could not be asked: nothing concluded
       // growth of the block number, per import (keyed by its marker's since): none for OFFER_MS is said, never concluded on
       const key = String(m.since || m.at || ""), offerMs = d.offerMs || OFFER_MS;
       if (grow.key !== key) grow = { key, best: tip, at: Date.now() }; else if (tip > grow.best) { grow.best = tip; grow.at = Date.now(); }
       const target = Math.min(...(Array.isArray(m.anchors) && m.anchors.length ? m.anchors.map(a => Number(a.block)) : [Number(m.tip) || 0]));
+      // at or past every height that could be compared, and the node holds none of them (txpow block:N walks only its tree and archive: a
+      // node that was far behind the file has none of its earlier blocks any more): said plainly, Keep offered at once
+      if (!matched && asked && absent === asked && tip >= target) { banner({ kind: "catchup", block: tip, target, offer: true, stalled: false, unseen: true }); return; }
       banner({ kind: "catchup", block: tip, target, offer: Date.now() - Number(m.since || 0) >= offerMs, stalled: Date.now() - grow.at >= offerMs });
     } catch (e) { /* asked again at the next status */ } finally { verifying = false; }
   }
@@ -358,9 +384,11 @@ function create(d) {
   /** The window's way out that destroys nothing ("Keep the imported chain", "My balance is correct", Keep while it catches up): the marker
    *  goes and the engines are released. The user has seen what the node shows. */
   async function keep() {
+    if (busy) throw new Error(BUSY);   // an import (or a restore) running now: what was on screen is not about it
     const m = marker(); if (!m) return { kept: false };
     d.log("[app] the user kept the node's chain as it is after the MegaMMR import (" + m.stage + "): the marker is cleared and the trading engines start again");
-    setMarker(null); await release(); return { kept: true };
+    const err = setMarker(null); await release();
+    return err ? { kept: true, warning: F.say(KEEP_UNSAVED, { error: err }) } : { kept: true };
   }
   /** Before the question: how far behind this node's tip the file's MegaMMR ends (its header), for a warning, never a refusal. */
   async function fileAge(shown) {
@@ -379,8 +407,8 @@ function create(d) {
   /** size, modification time and inode: a file replaced or rewritten between the check and the import differs in one of them */
   const fingerprint = (p) => { try { const st = d.fs.statSync(p); return [st.size, st.mtimeMs, st.ino].join(":"); } catch (e) { return "unreadable"; } };
   const freeDisk = (dir) => { try { const st = d.fs.statfsSync(dir); return st.bavail * st.bsize; } catch (e) { return null; } };
-  return { importMegammr, megammrOff, resynced, verify, keep, fileAge, marker, exclusive, busy: () => !!busy, busyWhat: () => busy };
+  return { importMegammr, megammrOff, resynced, verify, keep, fileAge, marker, exclusive, holdsEngines, busy: () => !!busy, busyWhat: () => busy };
 }
 
 module.exports = { create, BUSY, STATUS_UNKNOWN, ENGINES, IMPORT_OPEN, CHECK_FAILED, CHECK_FAILED_BACK, FAILED, FAILED_BACK, NOT_STARTED, NOT_STARTED_BACK, STEP, LOGGER, STALL_MS,
-  CHECK_UNANSWERED, CHECK_UNANSWERED_BACK, CHANGED_WHY, OOM_SAID, OOM_BACK, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, BEHIND, FRESH_MS, OFFER_MS, holds };
+  CHECK_UNANSWERED, CHECK_UNANSWERED_BACK, CHANGED_WHY, OOM_SAID, OOM_BACK, KEEP_UNSAVED, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, BEHIND, FRESH_MS, OFFER_MS, holds };
