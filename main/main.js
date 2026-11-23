@@ -338,7 +338,8 @@ node.onEnginesHold = async () => { await Promise.all([dexicon.hold(), atomix.hol
 // posted action is recorded by the engine that posted it. Each wait is bounded (Dexicon: main/dexicon.js STOP DRAINS).
 node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandapools.quiet(10000)]);
 // ...and none while a MegaMMR file import has not finished (its marker, main/megammrfile.js): the node's balance is incomplete until Resync node
-node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon") || config.load().megammrImport) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
+// (and none while a seed or backup restore holds them: its own settle releases them)
+node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon") || require("./megammrfile").holds(config.load().megammrImport) || (node.walletCheck && node.walletCheck.held)) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // A file the node is told to read (main/importfile.js): only one the user chose in the system's open dialog, kept here, never copied.
 const importfile = require("./importfile");
 const imports = importfile.create({ platform: process.platform, t: (s) => (currentLang(), lang.t(s)), defaultPath: () => config.load().dataFolder || config.defaultDataFolder(),
@@ -362,6 +363,8 @@ ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", asy
 ipcMain.handle("mcd:importMegammr", (_e, shown) => megafile.importMegammr(shown));
 node.on("status", (s) => { if (s && s.state === "running") megafile.verify().catch(() => {}); });   // after an import: its own blocks found on the new chain, at the network's tip (M4)
 ipcMain.handle("mcd:megammrOff", () => megafile.megammrOff());
+ipcMain.handle("mcd:megaKeep", () => megafile.keep());   // the banner's exit that destroys nothing (main/megammrfile.js keep)
+ipcMain.handle("mcd:megammrFileAge", (_e, shown) => { requireRunning(); return megafile.fileAge(shown); });   // a warning before the import, never a refusal
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"] });
@@ -398,10 +401,10 @@ async function guardStop(ack, action) { if (!await stopGuard.pass(ack, action)) 
 // Web Wallet's MegaMMR switch all come through mayStop (or saveConfigPatch / nodeStart), refused with the plain reason. A restart in the
 // middle of an import cuts it after the node reset its chain; a start without -megammr deletes the MegaMMR it is writing.
 const nodeBusy = () => megafile.busy() || !!node.resyncing;
-// The other apps' background loops (Mail, miniMall, Vestr, Future Cash Next, P2P Chance) during a MegaMMR file import and while it is
-// unfinished: the node's chain and balance are being replaced. Stopped when the import holds the engines; their start sites refuse meanwhile
+// The other apps' background loops (Mail, miniMall, Vestr, Future Cash Next, P2P Chance) while a MegaMMR file import (or a restore, a
+// MegaMMR switch) runs: the node's chain and balance are being replaced. Not for the life of a marker: only the trading engines wait for that. Stopped when the import holds the engines; their start sites refuse meanwhile
 // and start them again at the first node status after (main/freeze.js paused, the Future Cash Next and P2P Chance sites below).
-const loopsPaused = () => megafile.busy() || !!config.load().megammrImport;
+const loopsPaused = () => megafile.busy();   // only while an import, a restore or a MegaMMR switch actually runs
 function pauseLoops() { mail.stopLoop(); shop.stopLoop(); vestr.stopLoop(); futurecash.stop().catch(() => {}); casino.stopLoop(); casinoStarted = false; }
 function notBusy() { if (nodeBusy()) throw new Error(require("./megammrfile").BUSY); }
 node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happened ends the guard's hold (0.19.316)
@@ -1102,7 +1105,7 @@ app.whenReady().then(() => {
   const c = config.load();
   if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
   freeze.applyAtStartup();   // a frozen Dexicon's engines are held before the node is up; the other frozen apps are simply never started
-  if (c.megammrImport) { node.log("[app] a MegaMMR file import did not finish (" + String(c.megammrImport.stage) + ", " + String(c.megammrImport.at) + "): the trading engines stay stopped until Resync node has run"); node.onEnginesHold().catch(() => {}); }   // main/megammrfile.js
+  if (require("./megammrfile").holds(c.megammrImport)) { node.log("[app] a MegaMMR file import left a marker (" + String((c.megammrImport && c.megammrImport.stage) || "?") + "): the trading engines wait until the node has been checked"); node.onEnginesHold().catch(() => {}); }   // main/megammrfile.js verify
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
   updater.start();   // does nothing for a flavour that does not update itself, and for a TEST copy (main/updater.js OFF)

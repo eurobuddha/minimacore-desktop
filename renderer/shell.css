@@ -115,6 +115,8 @@
   border-bottom: 1px solid var(--border); color: var(--text); font-size: 14px; line-height: 20px; letter-spacing: .018em; }
 .stopbar span { flex: 1 1 0; min-width: 0; }
 .stopbar .btn { flex: 0 0 auto; }
+.megabar__btns { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+#megaBarText { overflow-wrap: anywhere; }   /* block ids are shown whole */
 
 /* ---------------------------------------------------------------- footer (activity_main main_footer) */
 .foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;

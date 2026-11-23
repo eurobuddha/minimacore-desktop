@@ -5696,13 +5696,11 @@
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.": "Импорт остановился до того, как цепочка узла была затронута ({why}). Ничего не импортировано и не сброшено. Узел перезапущен. Ваш кошелёк и средства не затронуты.",
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.": "Импорт остановился до того, как цепочка узла была затронута ({why}). Ничего не импортировано и не сброшено. Узел перезапущен как лёгкий узел, как и был. Ваш кошелёк и средства не затронуты.",
-  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.": "Баланс неполный после незавершённого импорта MegaMMR. Ваши средства в безопасности. «Синхронизация узла» восстановит цепочку с {host}.",
   "Resync node now": "Синхронизировать узел сейчас",
   "Resyncing from {host}…": "Синхронизация с {host}…"
 }, { review: [
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.",
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.",
-  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.",
   "Resync node now",
   "Resyncing from {host}…"
 ] });
@@ -5741,18 +5739,10 @@
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
   "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.": "Этот файл не импортирован: {why}. Ничего не импортировано, цепочка узла не затронута.",
-  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "Этот файл не импортирован: {why}. Ничего не импортировано, цепочка узла не затронута. Узел перезапущен как был (MegaMMR выключен).",
-  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)": "его цепочка доходит до блока {chaintip}, а этот узел на блоке {tip}, значит, файл из другой цепочки или этот узел ещё не догнал сеть (дождитесь этого и повторите)",
-  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)": "его цепочка заканчивается на блоке {chaintip}, более чем на 30 дней блоков позади блока {tip} этого узла (используйте свежий файл MegaMMR)",
-  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.": "Узел догоняет сеть после импорта MegaMMR. Торговые приложения запустятся снова, когда узел догонит сеть и его собственные прежние блоки найдутся в новой цепочке.",
-  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node.": "Этот файл MegaMMR из другой цепочки: собственных прежних блоков узла в нём нет, или узел не догоняет сеть. Ваши средства в безопасности. Торговые приложения остаются остановленными. Выключите MegaMMR, затем выполните синхронизацию узла."
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "Этот файл не импортирован: {why}. Ничего не импортировано, цепочка узла не затронута. Узел перезапущен как был (MegaMMR выключен)."
 }, { review: [
   "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.",
-  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).",
-  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)",
-  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)",
-  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.",
-  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node."
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off)."
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
   "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.": "Импорт прервался на полпути ({why}). Узел перезапущен. Кошелёк и средства не тронуты: ключи в кошельке, монеты в цепочке. Пока узел не синхронизирован заново, баланс может показывать меньше, чем у вас есть: используйте «Синхронизация узла», чтобы перестроить цепочку с узла MegaMMR. «Синхронизация узла» также очищает MegaMMR этого узла (megammrsync его стирает): затем снова импортируйте файл MegaMMR, чтобы он был полным.",
@@ -5778,4 +5768,53 @@
   "it was changed while the node checked it (choose it again)",
   "Import without these checks?",
   "If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.": "Импорт файла MegaMMR был прерван после переключения узла в режим MegaMMR, до того как что-либо было импортировано: его MegaMMR пуст.",
+  "AtomiX, PandaPools and the Exchange stay stopped until this is settled.": "AtomiX, PandaPools и Биржа остаются остановленными, пока это не решено.",
+  "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.": "Блок {block} на этом узле до импорта был {before}; после импорта это {after}. Один из двух является ответвлением.",
+  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.": "Узел догоняет сеть после импорта MegaMMR: блок {block}. AtomiX, PandaPools и Биржа запустятся снова, когда узел догонит сеть.",
+  "Cleared. The trading apps start again.": "Сброшено. Торговые приложения запускаются снова.",
+  "coins: {n}": "монет: {n}",
+  "Finish the import": "Завершить импорт",
+  "Is this your balance?": "Это ваш баланс?",
+  "Keep the chain as it is?": "Оставить цепочку как есть?",
+  "Keep the chain as it is": "Оставить цепочку как есть",
+  "Keep the imported chain": "Оставить импортированную цепочку",
+  "Keep": "Оставить",
+  "My balance is correct: dismiss": "Мой баланс верен: скрыть",
+  "Resync and keep MegaMMR mode (empty until re-imported)": "Синхронизировать и оставить режим MegaMMR (пуст до повторного импорта)",
+  "Resync node rebuilds the chain from {host}. On a MegaMMR node it also EMPTIES the MegaMMR: to have it whole again, import a MegaMMR file afterwards. Your wallet and seed phrase are not touched.": "«Синхронизация узла» перестраивает цепочку с {host}. На узле MegaMMR она также ОЧИЩАЕТ MegaMMR: чтобы он снова был полным, затем импортируйте файл MegaMMR. Кошелёк и сид-фраза не затрагиваются.",
+  "The MegaMMR import's check is cleared and AtomiX, PandaPools and the Exchange start again on the chain this node holds now.": "Проверка импорта MegaMMR сбрасывается, и AtomiX, PandaPools и Биржа снова запускаются на той цепочке, которая сейчас у этого узла.",
+  "The node did not come back: start it from the Node tab, then press Resync node.": "Узел не запустился снова: запустите его на вкладке «Узел», затем нажмите «Синхронизация узла».",
+  "The node shows:\n\n{lines}\n\nIf this is right, the import's check is cleared and AtomiX, PandaPools and the Exchange start again.": "Узел показывает:\n\n{lines}\n\nЕсли это верно, проверка импорта сбрасывается, и AtomiX, PandaPools и Биржа запускаются снова.",
+  "This file's MegaMMR ends at block {fileTip}, more than 30 days of blocks behind this node's block {nodeTip}. The node will take long to catch up from it. Import it only if you have no newer file.": "MegaMMR этого файла заканчивается на блоке {fileTip}, более чем на 30 дней блоков позади блока {nodeTip} этого узла. Узлу понадобится много времени, чтобы догнать сеть с него. Импортируйте его, только если более нового файла нет.",
+  "This is right": "Это верно",
+  "Turn MegaMMR off and resync": "Выключить MegaMMR и синхронизировать",
+  "Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.": "Ваш баланс не такой, как до незавершённого импорта MegaMMR. Ваши средства в безопасности.",
+  "Your balance shows less than before an unfinished MegaMMR import. Your funds are safe.": "Ваш баланс показывает меньше, чем до незавершённого импорта MegaMMR. Ваши средства в безопасности."
+}, { review: [
+  "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.",
+  "AtomiX, PandaPools and the Exchange stay stopped until this is settled.",
+  "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.",
+  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.",
+  "Cleared. The trading apps start again.",
+  "coins: {n}",
+  "Finish the import",
+  "Is this your balance?",
+  "Keep the chain as it is?",
+  "Keep the chain as it is",
+  "Keep the imported chain",
+  "Keep",
+  "My balance is correct: dismiss",
+  "Resync and keep MegaMMR mode (empty until re-imported)",
+  "Resync node rebuilds the chain from {host}. On a MegaMMR node it also EMPTIES the MegaMMR: to have it whole again, import a MegaMMR file afterwards. Your wallet and seed phrase are not touched.",
+  "The MegaMMR import's check is cleared and AtomiX, PandaPools and the Exchange start again on the chain this node holds now.",
+  "The node did not come back: start it from the Node tab, then press Resync node.",
+  "The node shows:\n\n{lines}\n\nIf this is right, the import's check is cleared and AtomiX, PandaPools and the Exchange start again.",
+  "This file's MegaMMR ends at block {fileTip}, more than 30 days of blocks behind this node's block {nodeTip}. The node will take long to catch up from it. Import it only if you have no newer file.",
+  "This is right",
+  "Turn MegaMMR off and resync",
+  "Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.",
+  "Your balance shows less than before an unfinished MegaMMR import. Your funds are safe."
 ] });

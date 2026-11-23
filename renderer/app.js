@@ -707,12 +707,15 @@ function renderBackup() {
       `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Import")}">${th("Import")}</button><div class="bk-status" id="bkStatus" role="status"></div>
       <div id="bkProg" hidden><div class="bk-stage" id="bkStage" role="status" aria-live="polite"></div><div class="eyebrow ps-label">${th("Node log")}</div><div class="bk-mono bk-log" id="bkLog"></div></div>`;
     wirePick("megammr"); paintImportProgress(LAST_STATUS);
-    $("bkGo").onclick = () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
+    $("bkGo").onclick = async () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
+      // a file whose MegaMMR ends more than 30 days behind this node: said in the question, never refused (main/megammrfile.js fileAge)
+      let age = null; try { age = await api.megammrFileAge(f); } catch (e) { /* not known: no warning */ }
+      const old = age && age.old ? "\n\n" + t(MEGA_OLD_FILE, { fileTip: age.fileTip, nodeTip: age.nodeTip }) : "";
       // the main process switches a light node to MegaMMR mode first, imports, and restarts (main.js mcd:importMegammr)
       // the window's config is read again whatever happened: a failed import may have put the MegaMMR setting back
       const exec = async () => { let j; try { j = await api.importMegammr(f); } finally { CFG = await api.getConfig().catch(() => CFG); } return j; };   // a MegaMMR the restarted node finds broken is said from its status (onStatus)
       run("bkGo", t("Import"), { host: CFG.megammrHost, exec, importing: true }, t("Import this MegaMMR file?"),
-      t("Minima will replace this node's chain with the one in {f}.\n\n• Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances.\n• A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file and catches up from its peers by itself, as after any restart. The older the file, the longer that takes.\n• The node restarts at the end.", { f: f }), t("Import")); };
+      t("Minima will replace this node's chain with the one in {f}.\n\n• Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances.\n• A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file and catches up from its peers by itself, as after any restart. The older the file, the longer that takes.\n• The node restarts at the end.", { f: f }) + old, t("Import")); };
     return;
   }
 
@@ -790,27 +793,63 @@ function paintImportProgress(s) {
   const log = host.querySelector("#bkLog"), lines = Array.isArray(s.megafileLog) ? s.megafileLog : [];
   log.textContent = lines.join("\n"); log.scrollTop = log.scrollHeight;
 }
-/** An unfinished MegaMMR file import (main/megammrfile.js marker, carried by the node's status): said on every screen, with Resync node from
- *  the MegaMMR node the app uses (config megammrHost), one press, never by itself. Not while the import itself or a resync runs. */
-const MEGA_UNFINISHED = N_("Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.");
-// After a finished import (main/megammrfile.js verify, M4): waiting for the node's own earlier blocks on the new chain and the network's tip;
-// or they are not there: the file is from another chain.
-const MEGA_CATCHUP = N_("Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.");
-const MEGA_FOREIGN = N_("This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node.");
+/** What a MegaMMR file import still owes (main/megammrfile.js marker; its verify() sets the banner in the node's status): said on every
+ *  screen, never acted on by itself, and always with an exit that destroys nothing. Not while the import itself or a resync runs. */
+const MEGA_OLD_FILE = N_("This file's MegaMMR ends at block {fileTip}, more than 30 days of blocks behind this node's block {nodeTip}. The node will take long to catch up from it. Import it only if you have no newer file.");
+const MEGA_HELD = N_("AtomiX, PandaPools and the Exchange stay stopped until this is settled.");
+const MEGA_LESS = N_("Your balance shows less than before an unfinished MegaMMR import. Your funds are safe.");
+const MEGA_DIFFERS = N_("Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.");
+const MEGA_CATCHUP = N_("Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.");
+const MEGA_MISMATCH = N_("Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.");
+const MEGA_SWITCHING = N_("A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.");
+// megammrsync.java: a MegaMMR node's MegaMMR is cleared before the resync (MinimaDB.getMegaMMR().clear())
+const MEGA_RESYNC_EMPTIES = N_("Resync node rebuilds the chain from {host}. On a MegaMMR node it also EMPTIES the MegaMMR: to have it whole again, import a MegaMMR file afterwards. Your wallet and seed phrase are not touched.");
 function paintMegaBar(s) {
-  const stage = (s && s.megammrImport) || "", show = !!stage && !s.megafileBusy && !s.resyncing && !!CFG.walletDone;
-  el("megaBar").hidden = !show; if (!show) return;
-  el("megaBarText").textContent = stage === "catchup" ? t(MEGA_CATCHUP) : stage === "foreign" ? t(MEGA_FOREIGN) : t(MEGA_UNFINISHED, { host: CFG.megammrHost || "" });
-  const b = el("megaBarResync"); b.hidden = stage === "catchup"; b.textContent = t("Resync node now"); b.disabled = s.state !== "running";
-  const off = el("megaBarOff"); off.hidden = !(stage === "foreign" && (CFG.params || {}).megammr); off.textContent = t("Turn MegaMMR off");
+  const b = s && s.megafileBanner, bar = el("megaBar"), show = !!b && !s.megafileBusy && !s.resyncing && !!CFG.walletDone;
+  bar.hidden = !show; if (!show) { bar.dataset.sig = ""; return; }
+  const sig = JSON.stringify(b) + "|" + s.state + "|" + I18N.lang(); if (bar.dataset.sig === sig) return; bar.dataset.sig = sig;   // the buttons stay put between statuses
+  const k = b.kind;
+  el("megaBarText").textContent = k === "incomplete" ? t(b.less ? MEGA_LESS : MEGA_DIFFERS) + " " + t(MEGA_HELD)
+    : k === "catchup" ? t(MEGA_CATCHUP, { block: String(b.block) })
+    : k === "mismatch" ? t(MEGA_MISMATCH, { block: String(b.block), before: String(b.before), after: String(b.after) }) + " " + t(MEGA_HELD)
+    : t(MEGA_SWITCHING);
+  const btns = k === "incomplete" ? [[t("Resync node now"), megaResyncAsk], [t("My balance is correct: dismiss"), megaDismiss]]
+    : k === "catchup" ? (b.offer ? [[t("Keep the chain as it is"), megaKeepAsk]] : [])
+    : k === "mismatch" ? [[t("Keep the imported chain"), megaKeepAsk], [t("Turn MegaMMR off and resync"), megaOffResync]]
+    : [[t("Finish the import"), () => { BK_PAGE = "megafile"; selectTab("backup"); }], [t("Turn MegaMMR off"), megammrOffNow]];
+  const host = el("megaBarBtns"); host.textContent = "";
+  btns.forEach(([label, fn], i) => { const x = document.createElement("button"); x.className = "btn btn--sm " + (i ? "btn--outline" : "btn--primary"); x.textContent = label; x.disabled = s.state !== "running" && fn !== megammrOffNow;
+    x.onclick = async () => { x.disabled = true; try { await fn(); } finally { x.disabled = false; } }; host.appendChild(x); });
+}
+/** Resync node from the banner: on a MegaMMR node first says that it empties the MegaMMR, and offers to turn it off instead. */
+async function megaResyncAsk() {
+  const host = CFG.megammrHost || "";
+  if ((CFG.params || {}).megammr) { showActionSheet(t("Resync node"), [{ label: t("Turn MegaMMR off and resync"), onclick: megaOffResync }, { label: t("Resync and keep MegaMMR mode (empty until re-imported)"), onclick: megaResyncNow }], t(MEGA_RESYNC_EMPTIES, { host })); return; }
+  if (await showConfirm(t("Resync this node?"), t(MEGA_RESYNC_EMPTIES, { host }), t("Resync"))) await megaResyncNow();
 }
 async function megaResyncNow() {
   const built = resyncCommand({ host: CFG.megammrHost });
   if (built.error) { toast(built.error, "err"); BK_PAGE = "resync"; selectTab("backup"); return; }   // no usable host: the Resync node screen, to type one
-  const b = el("megaBarResync"); b.disabled = true; toast(t("Resyncing from {host}…", { host: CFG.megammrHost }));
+  toast(t("Resyncing from {host}…", { host: CFG.megammrHost }));
   try { await cmd(built.cmd); toast(t("{label} complete ✓ The node is restarting.", { label: t("Resync") }), "ok"); }
   catch (e) { toast(ipcError(e), "err"); }
-  b.disabled = false;
+}
+async function megaOffResync() {
+  try { await api.megammrOff(); CFG = await api.getConfig(); } catch (e) { toast(ipcError(e), "err"); return; }
+  toast(t("MegaMMR is off. The node is restarting as a light node."), "ok");
+  for (const end = Date.now() + 10 * 60 * 1000; Date.now() < end; await new Promise(r => setTimeout(r, 2000))) if ((await api.nodeStatus()).state === "running") return megaResyncNow();
+  toast(t("The node did not come back: start it from the Node tab, then press Resync node."), "err");
+}
+/** "My balance is correct": the balance read again and shown, whole; on yes the marker goes and the engines start (main: megafile.keep). */
+async function megaDismiss() {
+  let rows; try { rows = await cmd("balance"); } catch (e) { toast(ipcError(e), "err"); return; }
+  const lines = (Array.isArray(rows) ? rows : []).map(r => (r.tokenid === "0x00" ? "MINIMA" : String(r.tokenid)) + ": " + r.confirmed + " (" + t("coins: {n}", { n: String(r.coins) }) + ")").join("\n");
+  if (!await showConfirm(t("Is this your balance?"), t("The node shows:\n\n{lines}\n\nIf this is right, the import's check is cleared and AtomiX, PandaPools and the Exchange start again.", { lines: lines || "0" }), t("This is right"))) return;
+  try { await api.megaKeep(); toast(t("Cleared. The trading apps start again."), "ok"); } catch (e) { toast(ipcError(e), "err"); }
+}
+async function megaKeepAsk() {
+  if (!await showConfirm(t("Keep the chain as it is?"), t("The MegaMMR import's check is cleared and AtomiX, PandaPools and the Exchange start again on the chain this node holds now."), t("Keep"))) return;
+  try { await api.megaKeep(); toast(t("Cleared. The trading apps start again."), "ok"); } catch (e) { toast(ipcError(e), "err"); }
 }
 function megammrBrokenNotice() {
   showActionSheet(t("This node's MegaMMR does not fit its chain"), [{ label: t("Turn MegaMMR off"), danger: true, onclick: megammrOffNow }], t(MEGAMMR_BROKEN_NOTE));
@@ -1018,7 +1057,7 @@ function initShell() {
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
   el("stopStart").onclick = () => { toast(t("Starting the node…")); api.nodeStart(); };
-  el("megaBarResync").onclick = megaResyncNow; el("megaBarOff").onclick = megammrOffNow;
+
   el("trayLang").onclick = () => { if (NARROW.matches) setTray(false); chooseLanguage(); };
 
   // tray

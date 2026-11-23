@@ -5683,13 +5683,11 @@
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.": "导入在节点的链被改动之前就停止了（{why}）。没有导入或重置任何内容。节点已重启。你的钱包和资金未受影响。",
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.": "导入在节点的链被改动之前就停止了（{why}）。没有导入或重置任何内容。节点已按之前的状态作为轻节点重启。你的钱包和资金未受影响。",
-  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.": "MegaMMR 导入未完成，余额不完整。你的资金是安全的。“重新同步节点”会从 {host} 重建链。",
   "Resync node now": "立即重新同步节点",
   "Resyncing from {host}…": "正在从 {host} 重新同步…"
 }, { review: [
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.",
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.",
-  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.",
   "Resync node now",
   "Resyncing from {host}…"
 ] });
@@ -5728,18 +5726,10 @@
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
   "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.": "此文件未被导入：{why}。没有导入任何内容，节点的链也未被改动。",
-  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "此文件未被导入：{why}。没有导入任何内容，节点的链也未被改动。节点已按之前的状态重启（MegaMMR 关闭）。",
-  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)": "它的链到达区块 {chaintip}，而此节点位于区块 {tip}，所以它来自另一条链，或者此节点尚未到达网络的最新区块（请等它到达后再试）",
-  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)": "它的链结束于区块 {chaintip}，比此节点的区块 {tip} 落后超过 30 天的区块（请使用较新的 MegaMMR 文件）",
-  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.": "MegaMMR 导入后正在追赶。待节点到达网络的最新区块并在新链上找到它自己之前的区块后，交易应用将重新启动。",
-  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node.": "此 MegaMMR 文件来自另一条链：节点自己之前的区块不在其中，或者它追不上网络。你的资金是安全的。交易应用保持停止。请关闭 MegaMMR，然后重新同步节点。"
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "此文件未被导入：{why}。没有导入任何内容，节点的链也未被改动。节点已按之前的状态重启（MegaMMR 关闭）。"
 }, { review: [
   "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.",
-  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).",
-  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)",
-  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)",
-  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.",
-  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node."
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off)."
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
   "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.": "导入在中途失败（{why}）。节点已重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。“重新同步节点”也会清空此节点的 MegaMMR（megammrsync 会清除它）：之后请再次导入 MegaMMR 文件，使其完整。",
@@ -5765,4 +5755,53 @@
   "it was changed while the node checked it (choose it again)",
   "Import without these checks?",
   "If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.": "MegaMMR 文件导入在节点切换到 MegaMMR 模式之后、导入任何内容之前被中断：它的 MegaMMR 是空的。",
+  "AtomiX, PandaPools and the Exchange stay stopped until this is settled.": "在此事处理好之前，AtomiX、PandaPools 和交易所保持停止。",
+  "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.": "导入前此节点的区块 {block} 是 {before}；导入后它是 {after}。两者之一是分叉。",
+  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.": "MegaMMR 导入后正在追赶：区块 {block}。节点到达网络的最新区块后，AtomiX、PandaPools 和交易所会重新启动。",
+  "Cleared. The trading apps start again.": "已清除。交易应用重新启动。",
+  "coins: {n}": "币数：{n}",
+  "Finish the import": "完成导入",
+  "Is this your balance?": "这是你的余额吗？",
+  "Keep the chain as it is?": "保持链的现状？",
+  "Keep the chain as it is": "保持链的现状",
+  "Keep the imported chain": "保留导入的链",
+  "Keep": "保留",
+  "My balance is correct: dismiss": "我的余额正确：关闭提示",
+  "Resync and keep MegaMMR mode (empty until re-imported)": "重新同步并保持 MegaMMR 模式（在重新导入前为空）",
+  "Resync node rebuilds the chain from {host}. On a MegaMMR node it also EMPTIES the MegaMMR: to have it whole again, import a MegaMMR file afterwards. Your wallet and seed phrase are not touched.": "“重新同步节点”会从 {host} 重建链。在 MegaMMR 节点上，它还会清空 MegaMMR：要让它重新完整，之后请导入 MegaMMR 文件。你的钱包和助记词不受影响。",
+  "The MegaMMR import's check is cleared and AtomiX, PandaPools and the Exchange start again on the chain this node holds now.": "MegaMMR 导入的检查被清除，AtomiX、PandaPools 和交易所会在此节点当前的链上重新启动。",
+  "The node did not come back: start it from the Node tab, then press Resync node.": "节点没有恢复：请在“节点”页启动它，然后点击“重新同步节点”。",
+  "The node shows:\n\n{lines}\n\nIf this is right, the import's check is cleared and AtomiX, PandaPools and the Exchange start again.": "节点显示：\n\n{lines}\n\n如果这是正确的，导入的检查会被清除，AtomiX、PandaPools 和交易所会重新启动。",
+  "This file's MegaMMR ends at block {fileTip}, more than 30 days of blocks behind this node's block {nodeTip}. The node will take long to catch up from it. Import it only if you have no newer file.": "此文件的 MegaMMR 结束于区块 {fileTip}，比此节点的区块 {nodeTip} 落后超过 30 天的区块。节点需要很长时间才能从它追上。只有在没有更新的文件时才导入它。",
+  "This is right": "这是正确的",
+  "Turn MegaMMR off and resync": "关闭 MegaMMR 并重新同步",
+  "Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.": "你的余额与一次未完成的 MegaMMR 导入之前不同。你的资金是安全的。",
+  "Your balance shows less than before an unfinished MegaMMR import. Your funds are safe.": "你的余额显示的比一次未完成的 MegaMMR 导入之前少。你的资金是安全的。"
+}, { review: [
+  "A MegaMMR file import was interrupted after the node was switched to MegaMMR mode, before anything was imported: its MegaMMR is empty.",
+  "AtomiX, PandaPools and the Exchange stay stopped until this is settled.",
+  "Block {block} on this node before the import was {before}; after the import it is {after}. One of the two is a fork.",
+  "Catching up after the MegaMMR import: block {block}. AtomiX, PandaPools and the Exchange start again once the node is at the network's tip.",
+  "Cleared. The trading apps start again.",
+  "coins: {n}",
+  "Finish the import",
+  "Is this your balance?",
+  "Keep the chain as it is?",
+  "Keep the chain as it is",
+  "Keep the imported chain",
+  "Keep",
+  "My balance is correct: dismiss",
+  "Resync and keep MegaMMR mode (empty until re-imported)",
+  "Resync node rebuilds the chain from {host}. On a MegaMMR node it also EMPTIES the MegaMMR: to have it whole again, import a MegaMMR file afterwards. Your wallet and seed phrase are not touched.",
+  "The MegaMMR import's check is cleared and AtomiX, PandaPools and the Exchange start again on the chain this node holds now.",
+  "The node did not come back: start it from the Node tab, then press Resync node.",
+  "The node shows:\n\n{lines}\n\nIf this is right, the import's check is cleared and AtomiX, PandaPools and the Exchange start again.",
+  "This file's MegaMMR ends at block {fileTip}, more than 30 days of blocks behind this node's block {nodeTip}. The node will take long to catch up from it. Import it only if you have no newer file.",
+  "This is right",
+  "Turn MegaMMR off and resync",
+  "Your balance is not the same as before an unfinished MegaMMR import. Your funds are safe.",
+  "Your balance shows less than before an unfinished MegaMMR import. Your funds are safe."
 ] });

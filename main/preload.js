@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("mcd", {
   pickImport: (kind) => ipcRenderer.invoke("mcd:pickImport", kind),
   importMegammr: (file) => ipcRenderer.invoke("mcd:importMegammr", file),
   megammrOff: () => ipcRenderer.invoke("mcd:megammrOff"),
+  megaKeep: () => ipcRenderer.invoke("mcd:megaKeep"),
+  megammrFileAge: (file) => ipcRenderer.invoke("mcd:megammrFileAge", file),
   copyRpcPassword: () => ipcRenderer.invoke("mcd:copyRpcPassword"),
 
   // language: the saved (or the system's) language as a plain string, known before the first screen is drawn; langSet saves a pick

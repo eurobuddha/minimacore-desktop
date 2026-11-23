@@ -781,7 +781,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || "")(config.load().megammrImport), megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || (m ? "importing" : ""))(config.load().megammrImport), megafileBanner: this.megafileBanner || null, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 

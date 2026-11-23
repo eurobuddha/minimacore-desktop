@@ -17,10 +17,18 @@
  *    "Streaming IBD.. blocks:n" right before it resets the chain: a failure before that line changed nothing; after it, the chain is gone
  *    until a resync. A finished import prints "All saved.." and "Main Instance Cleared.." and its process exits by itself.
  *
- * THE MARKER (config megammrImport, main/config.js setMegammrImport). Written right before the node is given the import, so a quit or a
- * crash in the middle leaves a trace; cleared only when the import ended well, or stopped before the reset. While it is there (at
- * launch too) the trading engines stay held (main.js onEnginesRelease) and the window shows a banner with Resync node, one press, never
- * by itself. A successful Resync node clears it and releases the engines (resynced()).
+ * THE MARKER (config megammrImport, main/config.js setMegammrImport): what is owed after an import, at most one, never a verdict.
+ *   switching  written before the node is first restarted into MegaMMR mode; nothing imported yet. Holds nothing. Next launch: the window
+ *              offers "Finish the import" or "Turn MegaMMR off" (cleared by itself if MegaMMR is off).
+ *   importing  written right before the import command, with the wallet's balance (confirmed per token, coin count) and the anchors. A
+ *              crash, a failure after the node reset its chain, or a broken MegaMMR leave it: VERIFY FIRST. Once the node is up, the same
+ *              balance and coin count clear it silently; only a different one shows the banner (Resync node, or "My balance is correct").
+ *   catchup    the import's reply was good, or the node printed "All saved..". Released as soon as the node's tip is fresh (FRESH_MS);
+ *              meanwhile "catching up: block X", with Keep after OFFER_MS.
+ *   mismatch   a recorded height holds ANOTHER block id on the new chain (hard evidence only). Said as exactly that ("one of the two is a
+ *              fork", never "the file is wrong"); the user chooses: Keep the imported chain, or Turn MegaMMR off and resync.
+ * Every stage but switching holds the trading engines (holds(), main.js onEnginesRelease and launch). Every one has an exit that destroys
+ * nothing: keep() (the window's "Keep" / "My balance is correct"), and any Resync node that ends well (resynced()).
  *
  * NO ANSWER IS NOT AN END (M3). The node's answer can take longer than the RPC's one-hour bound (a 1.6 GB file is unmeasured): when the
  * call ends without an answer and the node process is still there, it is not restarted. Its log is followed, the step is shown on
@@ -57,14 +65,14 @@ const STEP = /^(Loading MegaMMR size : |Load MegaMMR\.\. |Check IBD\.\.|Now chec
 // the integrity check, unmeasured); raise it if a real import is given up while the node is still reading
 const STALL_MS = 30 * 60 * 1000;
 const SHOWN_LINES = 8;
-// M4. The anchors: the tip, NEAR blocks back (a tip can be orphaned by a short reorg) and DEEP back (final). The file's chain may end at most
-// AHEAD blocks above this node's tip (this node may trail the network a little; at Minima's 50 s target 100 blocks is about 83 minutes),
-// and its block list must start below it (else none of this node's blocks can be found in it); it may end at most BEHIND blocks below
-// (30 days at 50 s: a MegaMMR export is made to be used within days, and an older one is either a stalled chain or slower to catch up from
-// than a fresh one is to fetch). After the import the node must be at the network's tip: its tip block no older than FRESH_MS.
-const DEEP = 300, NEAR = 3, AHEAD = 100, BEHIND = 30 * 24 * 3600 / 50, FRESH_MS = 30 * 60 * 1000, STUCK_MS = 30 * 60 * 1000;
-const AHEAD_WHY = "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)";
-const BEHIND_WHY = "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)";
+// The anchors (recorded before the import): the tip, NEAR blocks back (a tip can be orphaned by a short reorg) and DEEP back (final). A
+// file whose MegaMMR ends more than BEHIND blocks below this node's tip (30 days at Minima's 50 s target) is WARNED of before the import
+// (fileAge), never refused: a node that is stuck or behind is when an import is needed. After the import the engines wait for the node's
+// tip to be fresh (FRESH_MS: its tip block at most 30 minutes old); after OFFER_MS of catching up the window offers Keep.
+const DEEP = 300, NEAR = 3, BEHIND = 30 * 24 * 3600 / 50, FRESH_MS = 30 * 60 * 1000, OFFER_MS = 10 * 60 * 1000;
+const STAGES = ["switching", "importing", "catchup", "mismatch"];
+/** Does this marker (config megammrImport, as read) hold the trading engines? Anything but "switching" does, a damaged one too. */
+const holds = (m) => !!m && !(typeof m === "object" && m.stage === "switching");
 const CHANGED_WHY = "it was changed while the node checked it (choose it again)";
 const TIP_REFUSED = "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.";
 const TIP_REFUSED_BACK = "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).";   // the node's last lines on the import's screen
@@ -82,7 +90,7 @@ function create(d) {
   }
   /** The window disables what would stop or reset the node meanwhile (main.js refuses it anyway): the node's status carries it, the step
    *  the node is at, and the marker. */
-  function said() { node.megafileBusy = busy; if (!busy) { node.megafileStep = ""; node.megafileLog = []; } if (typeof node.emit === "function" && typeof node.snapshot === "function") node.emit("status", node.snapshot()); }
+  function said() { try { node.megafileBusy = busy; if (!busy) { node.megafileStep = ""; node.megafileLog = []; } if (typeof node.emit === "function" && typeof node.snapshot === "function") node.emit("status", node.snapshot()); } catch (e) { /* a listener's failure is not the import's */ } }
   /** For the import's screen, from its first step to its last (the owner's import, 2026-11-23: no progress was shown for 4.5 minutes): the
    *  node's last lines as the Logs show them (redacted by node-manager), and its last STEP line, or the flow's own stage ("app:<stage>",
    *  said in the window's language by renderer/app.js importStage). Said to the window at most every 400 ms, and at every stage. → stop(). */
@@ -99,11 +107,16 @@ function create(d) {
     return () => { clearTimeout(timer); if (typeof node.removeListener === "function") node.removeListener("line", on); };
   }
   const stage = (k) => { node.megafileStep = "app:" + k; said(); };
-  const marker = () => { const m = d.config.load().megammrImport; return m && typeof m === "object" ? m : null; };
-  const setMarker = (v) => { d.config.setMegammrImport(v); said(); };
+  /** The marker, read so that anything odd (not an object, no or an unknown stage, another version's) is "importing": verify first, clearable. */
+  const marker = () => { let m; try { m = d.config.load().megammrImport; } catch (e) { return null; } if (m == null || m === false || m === "") return null;
+    return m && typeof m === "object" && STAGES.includes(m.stage) ? m : Object.assign({}, m && typeof m === "object" ? m : {}, { stage: "importing" }); };
+  /** Never throws: a marker that cannot be written is said in the log, and does not turn a good import into a failed one. */
+  const setMarker = (v) => { try { d.config.setMegammrImport(v); } catch (e) { try { d.log("[app] the MegaMMR import marker could not be written (" + brief(e) + ")"); } catch (x) {} } if (!v) node.megafileBanner = null; said(); };
+  /** What the window's banner says (renderer/app.js paintMegaBar): { kind, ... } or null. */
+  const banner = (b) => { node.megafileBanner = b; said(); };
   /** What the node's log says of the command running now (STEP lines only, after the logger's prefix): the last step and when, whether
    *  it reset the chain, finished the check, finished the import. stop() ends the watch. */
-  function watch() {
+  function watch(onSaved) {
     const w = { at: Date.now(), step: "", reset: false, checked: false, saved: false, oom: false };
     const on = (raw) => {
       const l = String(raw);
@@ -111,9 +124,9 @@ function create(d) {
       const m = LOGGER.exec(l); if (!m) return;
       const text = l.slice(m[0].length); if (!STEP.test(text)) return;
       w.at = Date.now(); w.step = text;
-      if (/^Streaming IBD/.test(text)) w.reset = true;
+      if (/^(MegaMMR loaded|Streaming IBD)/.test(text)) w.reset = true;   // megammr.java: the reset follows "MegaMMR loaded.." with nothing in between that can be told apart
       if (/^All coins checked/.test(text)) w.checked = true;
-      if (/^(All saved|Main Instance Cleared)/.test(text)) w.saved = true;
+      if (/^(All saved|Main Instance Cleared)/.test(text)) { if (!w.saved && onSaved) onSaved(); w.saved = true; }
     };
     if (typeof node.on === "function") node.on("line", on);
     w.stop = () => { if (typeof node.removeListener === "function") node.removeListener("line", on); };
@@ -144,9 +157,8 @@ function create(d) {
   const setMegammr = (v) => d.config.save({ params: { megammr: v } });
 
   async function importMegammr(shown) {
-    const r = await importInside(shown);
-    verify().catch(() => {});   // once the exclusive has ended (and at every node status from main.js)
-    return r;
+    try { return await importInside(shown); }
+    finally { verify().catch(() => {}); }   // once the exclusive has ended, whatever its end (and at every node status from main.js)
   }
   function importInside(shown) {
     return exclusive("import", async () => {
@@ -172,6 +184,7 @@ function create(d) {
         const turnedOn = !on;
         if (turnedOn || stale) {
           stage("restart-on");
+          if (turnedOn) setMarker({ stage: "switching", at: new Date().toISOString() });   // a quit or crash from here until the import leaves MegaMMR on and empty
           d.log("[app] MegaMMR file import: restarting the node in MegaMMR mode" + (stale ? " with its memory setting (" + heapMb + " MB)" : "") + " first (saved before the restart)");
           await d.held(() => node.restart());
           const now = (await nodeUp(d.upMs)) ? await keeps() : null;
@@ -210,20 +223,14 @@ function create(d) {
           if (turnedOn) { setMegammr(was); await node.restart(); }
           throw new Error(F.say(turnedOn ? TIP_REFUSED_BACK : TIP_REFUSED, { why: CHANGED_WHY }));
         }
-        // M4: the file's chain against this node's tip (the integrity reply: chaintip = its cascade's tip + its blocks). Not answered (followed
-        // to its end): not known, and the anchors after the import decide alone.
-        const implausible = tipProblem(chk.response, before.tip);
-        if (implausible) {
-          d.log("[app] MegaMMR file import: refused, " + implausible + (turnedOn ? "; MegaMMR set back as it was and the node restarted" : ""));
-          if (turnedOn) { setMegammr(was); await node.restart(); }
-          throw new Error(F.say(turnedOn ? TIP_REFUSED_BACK : TIP_REFUSED, { why: implausible }));
-        }
-        if (!chk.response) d.log("[app] MegaMMR file import: the check's reply was not received (followed from the log), so the file's tip is not compared; the blocks found after the import decide");
         d.imports.forget("megammr");
         // THE MARKER, right before the node is given the import: a quit or a crash from here on leaves this trace (see the top of this file)
-        setMarker({ stage: "importing", at: new Date().toISOString(), turnedOn, anchors: before.anchors, tip: before.tip });
+        const wallet = await balanceSummary();
+        if (!wallet) { if (turnedOn) { setMegammr(was); await node.restart(); } throw new Error(STATUS_UNKNOWN); }
+        setMarker({ stage: "importing", at: new Date().toISOString(), turnedOn, anchors: before.anchors, tip: before.tip, before: wallet });
         stage("import");
-        const wi = watch();
+        const toCatchup = () => { const m = marker(); if (m && m.stage === "importing") setMarker(Object.assign({}, m, { stage: "catchup", since: Date.now() })); };
+        const wi = watch(toCatchup);   // "All saved..": the import has finished, whatever happens to its answer
         const j = await followed(() => d.held(() => d.runResync(F.megammrImportCommand(target, d.platform))), wi, (w) => w.saved)
           .catch(e => ({ status: false, error: brief(e) })).finally(() => wi.stop());
         if (j && j.status === true) {
@@ -234,7 +241,8 @@ function create(d) {
           d.log("[app] MegaMMR file import finished; the node " + (up ? "is running" : "has not come back yet") + (node.megammrBroken ? "; it says its MegaMMR is BROKEN, so the trading engines stay stopped until Resync node or Turn MegaMMR off" : ""));
           // a success the node itself calls broken releases nothing; otherwise the engines wait until this node's own blocks are found on the
           // new chain and the node is at the network's tip (verify)
-          setMarker(Object.assign({}, marker(), { stage: node.megammrBroken ? "failed" : "catchup", since: Date.now() }));
+          // a node that says its MegaMMR is BROKEN goes back to "importing": its balance is compared before anything is released
+          if (node.megammrBroken) setMarker(Object.assign({}, marker(), { stage: "importing" })); else toCatchup();
           return { status: true, broken: !!node.megammrBroken, on: true };
         }
         const why = brief(j && j.error);
@@ -251,11 +259,15 @@ function create(d) {
         // Failed after the reset: the node answers, but its chain is gone (network, timers and miner stopped). Restarted at once, as a light
         // node again when this flow turned MegaMMR on, so nothing half-imported is kept as a MegaMMR. The marker stays: Resync node is owed.
         d.log("[app] MegaMMR file import FAILED after the node reset its chain (" + why + "): the node is restarted" + (turnedOn ? " as a light node again" : "") + "; the trading engines stay stopped until Resync node has run");
-        setMarker(Object.assign({}, marker(), { stage: "failed" }));
+        setMarker(Object.assign({}, marker(), { stage: "importing" }));   // verify first: its balance decides whether anything is owed
         if (turnedOn) setMegammr(was);
         await node.restart();
         throw new Error(F.say(turnedOn ? FAILED_BACK : FAILED, { why }));
-      } finally { if (!marker()) await d.releaseEngines(); }   // with the marker set they stay held (main.js onEnginesRelease says the same)
+      } finally {
+        const m = marker();
+        if (m && m.stage === "switching" && (d.config.load().params || {}).megammr === was) setMarker(null);   // back as it was: nothing owed
+        if (!holds(marker())) await release();
+      }   // with the marker set they stay held (main.js onEnginesRelease says the same)
     });
   }
 
@@ -281,64 +293,87 @@ function create(d) {
     anchors.push({ block: tip, txpowid: hash });
     return { tip, anchors };
   }
-  /** M4. Why the integrity reply's chain cannot be this network's ("" = it can). r = { chaintip, cascadetip } (megammr.java integrity). */
-  function tipProblem(r, tip) {
-    if (!r || r.chaintip == null) return "";
-    const top = Number(r.chaintip), casc = Number(r.cascadetip);
-    if (!(top > 0)) return "";
-    if (top > tip + AHEAD || casc >= tip) return F.say(AHEAD_WHY, { chaintip: String(r.chaintip), tip: String(tip) });
-    if (top < tip - BEHIND) return F.say(BEHIND_WHY, { chaintip: String(r.chaintip), tip: String(tip) });
-    return "";
+  /** The wallet as the node shows it: [tokenid, confirmed, coins] per token, sorted; null when it cannot be read. */
+  async function balanceSummary() {
+    const r = await Promise.resolve().then(() => d.call("balance")).catch(() => null);
+    if (!r || r.status !== true || !Array.isArray(r.response)) return null;
+    return r.response.map(t => [String(t.tokenid), String(t.confirmed), String(t.coins)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   }
-  /** M4, after a finished import (marker stage "catchup"), at every node status: are this node's own earlier blocks on the new chain, and is it
-   *  at the network's tip? Both: the marker goes and the engines are released. A block of its own with another id at that height, or a
-   *  node that does not grow towards it for STUCK_MS: "foreign" (the banner says the file is from a different chain; nothing is released). */
-  let verifying = false, best = 0, bestAt = 0;
+  const sameWallet = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  /** Release the trading engines, unless a seed or backup restore holds them (node-manager runResync / walletSettle releases them then). */
+  async function release() {
+    if (node.replacingWallet || (node.walletCheck && node.walletCheck.held)) { d.log("[app] the MegaMMR import owes nothing more; the trading engines start when the wallet restore has settled"); return; }
+    await d.releaseEngines();
+  }
+  /** At every node status (main.js) and after an import: what the marker owes now (see the top of this file). Never writes a verdict
+   *  but "mismatch", which is hard evidence and has its own exits. */
+  let verifying = false;
   async function verify() {
     const m = marker();
-    if (!m || m.stage !== "catchup" || busy || verifying || node.state !== "running") return;
+    if (!m || busy || verifying || node.state !== "running") return;
     verifying = true;
     try {
-      const b = await d.call("block"), now = b && b.status === true && b.response ? b.response : null;
-      if (!now) return;
-      const tip = Number(now.block);
-      if (tip > best) { best = tip; bestAt = Date.now(); } else if (!bestAt) bestAt = Date.now();
-      let same = null;   // true: one of its own blocks found; false: another block at that height; null: none checkable yet
+      if (m.stage === "switching") { if (!(d.config.load().params || {}).megammr) setMarker(null); else banner({ kind: "switching" }); return; }
+      if (m.stage === "mismatch") { banner({ kind: "mismatch", block: m.block, before: m.was, after: m.now }); return; }
+      if (m.stage === "importing") {
+        const now = await balanceSummary();
+        if (now && Array.isArray(m.before) && sameWallet(now, m.before)) {
+          d.log("[app] after an unfinished MegaMMR import this node shows the same balance and coin count as before it (" + now.map(t => t[0] + " " + t[1] + " in " + t[2] + " coins").join(", ") + "): nothing is owed, the trading engines start again");
+          setMarker(null); await release(); return;
+        }
+        if (now) banner({ kind: "incomplete", less: lessThan(now, m.before), before: m.before || null, now });
+        return;
+      }
+      const b = await d.call("block"), tipNow = b && b.status === true && b.response ? b.response : null;
+      if (!tipNow) return;
+      const tip = Number(tipNow.block), age = Date.now() - Number(tipNow.timemilli);
+      let matched = 0;
       for (const a of Array.isArray(m.anchors) ? m.anchors : []) {
         if (tip < a.block) continue;
         const r = await d.call("txpow block:" + a.block).catch(() => null), id = r && r.status === true && r.response ? String(r.response.txpowid || "") : "";
         if (!id) continue;
-        same = id.toLowerCase() === String(a.txpowid).toLowerCase();
-        if (!same) d.log("[app] MegaMMR file import: block " + a.block + " on the new chain is " + id + ", this node had " + a.txpowid + " there before the import");
-        break;
+        if (id.toLowerCase() !== String(a.txpowid).toLowerCase()) {
+          d.log("[app] MegaMMR file import: block " + a.block + " on this node before the import was " + a.txpowid + "; after the import it is " + id + ". One of the two is a fork: the trading engines stay stopped until the user chooses");
+          setMarker(Object.assign({}, m, { stage: "mismatch", block: a.block, was: a.txpowid, now: id }));
+          banner({ kind: "mismatch", block: a.block, before: a.txpowid, after: id }); return;
+        }
+        matched = a.block; break;
       }
-      const fresh = Date.now() - Number(now.timemilli) <= FRESH_MS;
-      if (same === true && fresh) {
-        d.log("[app] MegaMMR file import confirmed: this node's own earlier blocks are on the new chain and it is at the network's tip (block " + tip + "); the trading engines start again");
-        setMarker(null); await d.releaseEngines(); return;
+      if (age <= FRESH_MS) {
+        d.log("[app] MegaMMR file import: the node's tip is fresh (block " + tip + ", " + Math.round(age / 1000) + " s old)" + (matched ? " and block " + matched + " is the same block as before the import" : "; none of its earlier blocks could be compared") + ": the trading engines start again");
+        setMarker(null); await release(); return;
       }
-      // not growing towards its old tip, or past it and at the network's tip with none of its own blocks found: not confirmed, for good
-      const stuck = same !== true && Date.now() - (same === null && fresh && tip >= Number(m.tip) ? Number(m.since) || bestAt : bestAt) > (d.stuckMs || STUCK_MS);
-      if (same === false || stuck) {
-        d.log("[app] MegaMMR file import: " + (same === false ? "the new chain does not hold this node's own earlier blocks" : "the node has not grown towards its earlier tip (block " + (m.tip || "?") + ") for " + Math.round((d.stuckMs || STUCK_MS) / 60000) + " minutes") + ": the file is from a different chain; the trading engines stay stopped");
-        setMarker(Object.assign({}, m, { stage: "foreign" }));
-      }
+      banner({ kind: "catchup", block: tip, offer: Date.now() - Number(m.since || 0) >= OFFER_MS });
     } catch (e) { /* asked again at the next status */ } finally { verifying = false; }
   }
+  const lessThan = (now, before) => { if (!Array.isArray(before)) return true; const g = (w, i) => w.reduce((n, t) => n + (t[0] === "0x00" ? Number(t[i]) : 0), 0), c = (w) => w.reduce((n, t) => n + Number(t[2]), 0);
+    return g(now, 1) < g(before, 1) || c(now) < c(before); };
+  /** The window's way out that destroys nothing ("Keep the imported chain", "My balance is correct", Keep while it catches up): the marker
+   *  goes and the engines are released. The user has seen what the node shows. */
+  async function keep() {
+    const m = marker(); if (!m) return { kept: false };
+    d.log("[app] the user kept the node's chain as it is after the MegaMMR import (" + m.stage + "): the marker is cleared and the trading engines start again");
+    setMarker(null); await release(); return { kept: true };
+  }
+  /** Before the question: how far behind this node's tip the file's MegaMMR ends (its header), for a warning, never a refusal. */
+  async function fileAge(shown) {
+    const head = F.megammrHeader(d.imports.confirm("megammr", shown), d.fs), b = await Promise.resolve().then(() => d.call("block")).catch(() => null);
+    const nodeTip = b && b.status === true && b.response ? Number(b.response.block) : NaN, fileTip = Number(head.tip);
+    return { fileTip: head.tip, nodeTip: Number.isFinite(nodeTip) ? String(nodeTip) : "", old: Number.isFinite(nodeTip) && nodeTip - fileTip > BEHIND };
+  }
 
-  /** A Resync node (megammrsync action:resync) ended well (main.js runResync): the chain is rebuilt, so an unfinished import owes nothing
-   *  any more; the marker goes and the engines are released. */
+  /** A Resync node (megammrsync action:resync) ended well (main.js runResync): the chain is rebuilt, so the marker owes nothing. */
   async function resynced() {
     if (!marker()) return;
-    d.log("[app] Resync node finished: the unfinished MegaMMR import is cleared and the trading engines start again");
-    setMarker(null); await d.releaseEngines();
+    d.log("[app] Resync node finished: the MegaMMR import's marker is cleared and the trading engines start again");
+    setMarker(null); await release();
   }
 
   /** size, modification time and inode: a file replaced or rewritten between the check and the import differs in one of them */
   const fingerprint = (p) => { try { const st = d.fs.statSync(p); return [st.size, st.mtimeMs, st.ino].join(":"); } catch (e) { return "unreadable"; } };
   const freeDisk = (dir) => { try { const st = d.fs.statfsSync(dir); return st.bavail * st.bsize; } catch (e) { return null; } };
-  return { importMegammr, megammrOff, resynced, verify, marker, exclusive, busy: () => !!busy, busyWhat: () => busy };
+  return { importMegammr, megammrOff, resynced, verify, keep, fileAge, marker, exclusive, busy: () => !!busy, busyWhat: () => busy };
 }
 
 module.exports = { create, BUSY, STATUS_UNKNOWN, ENGINES, IMPORT_OPEN, CHECK_FAILED, CHECK_FAILED_BACK, FAILED, FAILED_BACK, NOT_STARTED, NOT_STARTED_BACK, STEP, LOGGER, STALL_MS,
-  CHECK_UNANSWERED, CHECK_UNANSWERED_BACK, CHANGED_WHY, OOM_SAID, OOM_BACK, AHEAD_WHY, BEHIND_WHY, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, AHEAD, BEHIND, FRESH_MS, STUCK_MS };
+  CHECK_UNANSWERED, CHECK_UNANSWERED_BACK, CHANGED_WHY, OOM_SAID, OOM_BACK, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, BEHIND, FRESH_MS, OFFER_MS, holds };
