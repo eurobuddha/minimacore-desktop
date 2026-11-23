@@ -7,6 +7,23 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.404] — Dexicon History is one list by time: fast-book fills, on-chain trades, finished AtomiX swaps and pool operations
+
+- History mixes every kind with DexCore.activityMix and draws them as Activity does (day headers, kind marks). The NET card stays on top and says it counts settled fast-book fills only.
+- On-chain trades are in History now (the engine's my_trades from the service's STATE), with txpow, order and spent coin whole.
+- One depth rule: 60 rows of the mixed list, then "Show more" pages the whole list by date; PandaPools' own 60 cap in History is gone (no older pool row dropped).
+
+## [0.19.403] — A light / dark button in the bar of every screen
+
+- The bar (home, wallet, every tab and tray app) has a ☀ / ☾ button left of the menu: one click saves the opposite theme as config `theme`, the same setting as Settings › Appearance; Dexicon's sun now saves that setting too, so all three always agree. Follow the system is chosen again in Settings › Appearance. The Pandamonium Android home screen has no such toggle to copy; the look is Dexicon's.
+
+## [0.19.402] — The MegaMMR import's gate-review minors
+
+- A verify or Keep that awaited the node across a newly started import releases nothing; Keep is refused while one runs; the trading engines are held for the whole import (holdsEngines) but for its own release.
+- Plain words when none of the node's earlier blocks can be compared with the imported chain (Keep offered at once), and "Waiting for the node to answer" when a read is not answered.
+- Quit during the final restart has its own truthful words; the import's row stays open while it runs; Keep, "My balance is correct" and "Turn MegaMMR off and resync" work with the node stopped; the interrupted switch gets "Keep MegaMMR on, empty".
+- NITs: an old marker claims no "less"; a refused check keeps an earlier switching marker; an unwritable clear still releases, with a warning; token names beside whole ids in the dismiss.
+
 ## [0.19.405] — Pandamonium Desktop has the Pandamonium app's icon (the panda), not Minima Core's
 
 - The owner: "Pandamonium desktop needs the Pandamonium logo/icon as the apk". The icon is drawn from the Pandamonium APK's own launcher vectors (apks/base app/src/main/res/drawable/ic_launcher_background.xml + ic_launcher_foreground.xml, the Pandamonium flavour's orange pupils `launcher_pupil` #F7931A), as Android shows it: the black background, the panda over it, the launcher's visible 72 dp of the 108 dp canvas. On the Mac that square fills the standard icon body (824 px rounded square, corner 22.5 %, 100 px margin in 1024), the same shape and margin as Minima Core's icon.

@@ -149,6 +149,9 @@ jobs:
       # The shell: six tabs, tray, overflow menu, and the block time read from the node's Java date (no donor repo needed).
       - name: Verify shell
         run: npm run test:shell
+      # The Pandamonium flavour's own icons (build-pandamonium/icon.*, every size) and that the released build keeps build/icon.*.
+      - name: Verify flavour build and icons
+        run: npm run test:flavor
       - name: Wallet money paths and History (send, split, consolidate, receive commands pinned)
         run: npm run test:wallet
       - name: Tray apps (money calls of ETH Wallet, Vestr, miniMall and Web Wallet pinned; Terminal, Logs, Freeze; KeyUses, Explorer, Entropy)
