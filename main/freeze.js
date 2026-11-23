@@ -17,8 +17,7 @@
  * REFUSED WHILE MONEY IS IN FLIGHT. Dexicon is not frozen while a swap, a live market or OTC offer, an unanswered or
  * unsettled Exchange trade, an order with coins behind it, an unconfirmed pool transaction or an open pool of this
  * wallet exists, or while any of that cannot be read: each needs the engine running to be claimed, refunded, voided
- * or kept up. What could not be asked is refused too, and said. (P2P Chance, removed in 0.18.68, has no row: its
- * settle-only loop runs only while a bet is open and is not something to freeze.)
+ * or kept up. What could not be asked is refused too, and said. (P2P Chance has no row: it was removed, 0.19.419.)
  *
  * FREEZING DEXICON, IN ORDER (0.19.119): the engines are held first (`gate`: nothing new can start), THEN what is in
  * flight is read, within five seconds; anything in flight, unreadable or late releases the hold and refuses. A swap

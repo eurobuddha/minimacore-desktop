@@ -92,7 +92,7 @@ test("no panel wrapper declares a property that app.css's .overlay owns, unless 
   let checked = 0;
   for (const p of PANELS) {
     // only panels that put "overlay <wrap>" on ONE element are exposed to this; Mail uses the shell's dialogs
-    // and P2P Chance carries its own .cz-ov, so neither shares a box with .overlay
+    // (P2P Chance, which carried its own .cz-ov, is gone), so it does not share a box with .overlay
     const js = fs.readFileSync(path.join(R, p.js), "utf8");
     if (!new RegExp('(class="|className = ")overlay ' + p.wrap + '"').test(js)) continue;
     checked++;
@@ -105,20 +105,26 @@ test("no panel wrapper declares a property that app.css's .overlay owns, unless 
   assert.equal(checked, 0, "no panel shares a box with .overlay any more: the two that did (PandaPools, AtomiX) were removed in 0.18.141; a new one is checked by the loop above");
 });
 
-// ------------------------------------------------------------------ P2P Chance is gone (0.18.68)
-test("P2P Chance left the app: no tab, no screen, no way to start a game — only the settle status is wired", () => {
-  const app = require("./i18n-plain.cjs").plain(fs.readFileSync(path.join(R, "app.js"), "utf8"));
-  const html = fs.readFileSync(path.join(R, "index.html"), "utf8");
-  const preload = fs.readFileSync(path.join(R, "..", "main", "preload.js"), "utf8");
-  const main = fs.readFileSync(path.join(R, "..", "main", "main.js"), "utf8");
-  for (const f of ["casino.js", "casinoart.js", "casino.css"]) assert.ok(!fs.existsSync(path.join(R, f)), f + " is deleted");
+// ------------------------------------------------------------------ P2P Chance is gone (0.18.68: the game; 0.19.419: all of it)
+test("P2P Chance is not in the app at all (0.19.419): no module, no loop, no IPC, no card, no words, not packaged, no CI step", () => {
+  const ROOT = path.join(R, ".."), read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
+  const app = read("renderer/app.js"), html = read("renderer/index.html"), preload = read("main/preload.js"), main = read("main/main.js");
+  for (const f of ["renderer/casino.js", "renderer/casinoart.js", "renderer/casino.css", "main/casino.js", "main/casino", "scripts/casino-glue-test.js", "scripts/casino-parity.manifest.json"])
+    assert.ok(!fs.existsSync(path.join(ROOT, f)), f + " is deleted");
   assert.ok(!/casino/i.test(html), "index.html has no tab, view, stylesheet or script for it");
-  assert.ok(!/CasinoPanel|casinoEnabled|casinoAgeGate|setCasino/.test(app), "app.js has no panel, enable card or 18+ gate");
-  const calls = [...new Set((preload + main).match(/mcd:casino\w*/g))].sort();
-  assert.deepEqual(calls, ["mcd:casino", "mcd:casinoInvalidate", "mcd:casinoOpen"], "the IPC surface is status + wallet-reset only");
-  assert.ok(/delete patch\.casinoEnabled/.test(main), "the renderer cannot switch the settle-only gate");
-  // 0.18.86: the wallet-reset chains share walletReplaced() (scripts/core-screens-test.cjs pins who calls it)
-  assert.ok(/node\.onWalletReplaced = async \(\) => \{[\s\S]*?casino\.invalidate\(\)/.test(main), "every wallet reset still drops the cached identity (0.18.106: in the main process, inside the resync)");
+  assert.ok(!/casino|chanceLeft|P2P Chance/i.test(app), "app.js has no panel, card or listener");
+  assert.deepEqual([...new Set((preload + main).match(/mcd:casino\w*/g) || [])], [], "no mcd:casino* IPC channel in main or preload");
+  assert.ok(!/require\("\.\/casino"\)|\bcasino\.\w+\(/.test(main), "main.js loads and calls no casino module (no settle loop, no watch, no reset, no flush)");
+  for (const f of ["main/restore.js", "main/inflight.js", "main/reserve.js", "renderer/mainsaid.js"]) assert.ok(!/casino|P2P Chance/i.test(read(f).replace(/^\s*(\/\/|\*).*$/gm, "")), f + ": no casino branch");
+  for (const c of ["en", "zh", "ru", "uk"]) assert.ok(!/P2P Chance|"\{n\} bets"/.test(read("renderer/i18n/" + c + ".js")), c + ": no P2P Chance words");
+  const pkg = JSON.parse(read("package.json"));
+  assert.ok(pkg.build.files.includes("!main/casino.js") && pkg.build.files.includes("!main/casino/**"), "the packaged file list excludes main/casino*");
+  assert.ok(!Object.keys(pkg.scripts).some(k => /casino/.test(k)), "no casino npm script");
+  const ci = read(".github/workflows/desktop-build.yml").split("\n").filter(l => /^\s+(run|- name):/.test(l)).join("\n");
+  assert.ok(!/casino|P2P Chance/i.test(ci), "no CI step runs or names a casino suite");
+  assert.ok(!/casino/.test(read("scripts/vendored-manifest.cjs").replace(/^\s*(\/\/|\*).*$/gm, "")), "the vendoring manifest has no casino entry");
+  // an install's data is left on disk as it was: the config flag stays declared (never written from a screen), and nothing deletes a keychain account
+  assert.ok(/casinoEnabled: false,/.test(read("main/config.js")) && /delete patch\.casinoEnabled/.test(main), "the stored flag is kept and the renderer cannot write it");
 });
 
 

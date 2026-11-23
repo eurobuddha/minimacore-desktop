@@ -74,9 +74,9 @@ const DEFAULTS = {
   labels: {},                // address → friendly name (shown in Receive / History / CSV)
   theme: "system",           // the app's look (Settings, Appearance; 0.19.378): "system" | "light" | "dark". Anything else (the released app's
                              // old "current" / "original-*") is read as "system", as this app has always shown it (themeSource below)
-  casinoEnabled: false,      // P2P Chance was removed in 0.18.68 and nothing sets this any more. An install that
-                             // had it on keeps it: it is the gate for the settle-only loop (main/casino.js) that
-                             // gets that wallet's existing bets and offers paid out. Do not delete this key.
+  casinoEnabled: false,      // P2P Chance was removed in 0.18.68 and its settle-only loop in 0.19.419: nothing reads or
+                             // sets this any more. Kept declared so an install's stored value stays on disk as it was,
+                             // for a later rebuild of the module (CHANGELOG 0.19.419). Do not delete this key.
   coinGuard: true,           // the shared coin reservation (main/reserve.js). false = the whole guard is a passthrough
   coinGuardSends: "observe", // what it does to `send` and `consolidate`: "off" | "observe" (log only, the default) | "enforce"
   frozenApps: [],            // the Apps tab's Freeze: ids of the apps whose background work is stopped (main/freeze.js)

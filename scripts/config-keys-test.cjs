@@ -103,8 +103,8 @@ test('every config key the renderer persists is declared in DEFAULTS', () => {
 test('the keys this regression was about are present', () => {
   const defaults = defaultsKeys();
   // Named explicitly so a future tidy-up of DEFAULTS cannot quietly drop the one that broke.
-  // casinoEnabled outlived P2P Chance (removed 0.18.68): it gates the settle-only loop that pays out a wallet's
-  // existing bets. Dropping it from DEFAULTS would strand them.
+  // casinoEnabled outlived P2P Chance (removed 0.18.68, its settle loop 0.19.419): nothing reads it, but an install's stored
+  // value stays on disk as it was for a later rebuild of the module.
   for (const k of ['casinoEnabled', 'theme', 'labels']) {
     assert.ok(defaults.has(k), 'DEFAULTS must declare ' + k);
   }

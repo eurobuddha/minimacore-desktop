@@ -1,12 +1,11 @@
 /*
- * vendored-manifest.cjs: the donor-ABSENT half of the AtomiX and P2P Chance parity gates (0.19.264; the model is
- * dexicon-parity-manifest.cjs). main/atomix/ and main/casino/ hold files copied verbatim from their donors
- * (atomix-mds; the universal-casino MiniDapp). CI checks neither donor out, and scripts/atomix-parity-check.sh /
- * casino-parity-check.sh need them, so CI verifies this COMMITTED manifest instead: every copied file's sha256, the
+ * vendored-manifest.cjs: the donor-ABSENT half of the AtomiX parity gate (0.19.264; the model is
+ * dexicon-parity-manifest.cjs). main/atomix/ holds files copied verbatim from its donor (atomix-mds). CI does not
+ * check the donor out, and scripts/atomix-parity-check.sh needs it, so CI verifies this COMMITTED manifest instead: every copied file's sha256, the
  * donor version and commit, and that no other file sits beside them (a stray file the loader could run).
  *
- *   node scripts/vendored-manifest.cjs atomix|casino --verify    (default; CI)
- *   node scripts/vendored-manifest.cjs atomix|casino --update    (after a deliberate re-copy from the donor)
+ *   node scripts/vendored-manifest.cjs atomix --verify    (default; CI)
+ *   node scripts/vendored-manifest.cjs atomix --update    (after a deliberate re-copy from the donor)
  */
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto'), os = require('node:os');
 const { execFileSync } = require('node:child_process');
@@ -24,19 +23,11 @@ const ENGINES = {
     // the stray check passes. Deleting it is the owner's call.
     unloaded: ['lib/ui.js'],
     version: (donor) => { try { return /"version"\s*:\s*"([^"]+)"/.exec(fs.readFileSync(path.join(donor, 'dapp.conf'), 'utf8'))[1]; } catch (e) { return ''; } }
-  },
-  casino: {
-    dir: path.join(root, 'main/casino'),
-    donor: firstDir(process.env.CASINO_DONOR, path.join(os.homedir(), 'Projects/archive/Ideas/universal-casino/mds'), path.join(os.homedir(), 'Projects/Ideas/universal-casino/mds')),
-    files: () => ['service.js', 'timeout-claims.js', 'offer-keepalive.js'],
-    // engine.js lifts the donor's command strings but is not a whole-file copy: reviewed, not byte-checked (casino-parity-check.sh)
-    desktop: ['loader.js', 'engine.js'],
-    version: () => ''
   }
 };
 const name = process.argv[2], E = ENGINES[name];
 const fail = (...l) => { for (const x of l) console.error(x); process.exit(1); };
-if (!E) fail('usage: node scripts/vendored-manifest.cjs atomix|casino [--verify|--update]');
+if (!E) fail('usage: node scripts/vendored-manifest.cjs atomix [--verify|--update]');
 const manifestPath = path.join(__dirname, name + '-parity.manifest.json');
 const sha256 = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const FILES = E.files(E.dir);

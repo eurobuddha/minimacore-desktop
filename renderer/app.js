@@ -166,7 +166,6 @@ async function boot() {
   api.onAtomix(onAtomixUpdate);
   api.onEthWallet(onEthWalletUpdate);
   api.onShop(onShopUpdate);
-  api.onCasino(chanceLeftCard);            // P2P Chance is removed; this only refreshes its "still open" Settings card
   api.onVestr(onVestrUpdate);
   api.onFutureCash(() => { if (activeView === "futurecash") futureCashLoad(false); });   // a pass on a new block changed something
   api.onWebWallet(onWebWalletUpdate);
@@ -3260,8 +3259,7 @@ async function renderSettings() {
         <option value="enforce"${CFG.coinGuardSends === "enforce" ? " selected" : ""}>${th("Enforce: kept off held coins, or refused with the reason")}</option>
       </select>
       <div class="home-actions set-actions"><button class="btn btn--outline" id="setGuardRelease">${th("Release all holds")}</button></div>
-      <div class="status" id="setGuardStatus"></div>`) +
-    `<div id="chanceLeft"></div>`;
+      <div class="status" id="setGuardStatus"></div>`);
   const drawUpdate = (u) => {
     const b = el("updBody"), g = el("updGet"); if (!b) return;
     if (u.error && !u.available) b.textContent = t("Could not read the feed ({error}). Running v{running}.", { error: MainSaid.say(u.error), running: u.running });
@@ -3320,7 +3318,6 @@ async function renderSettings() {
     renderSettings();
   };
   host.querySelectorAll('input[name="setTheme"]').forEach(r => r.onchange = () => setAppTheme(r.value));   // main applies it to the whole app (nativeTheme)
-  chanceLeftCard();
   if (el("kuOpen")) el("kuOpen").onclick = () => selectTab("keyuses");
 }
 // The node's keys by family (AppsAct.keyuses.families): { classic, block }, each null or { used, cap, count }. null when
@@ -4266,18 +4263,6 @@ function shopResizeImage(file) {
     }; img.onerror = () => resolve(""); img.src = fr.result; };
     fr.onerror = () => resolve(""); fr.readAsDataURL(file);
   });
-}
-
-// ---- P2P Chance was removed in 0.18.68 -----------------------------------------------------------------
-// One Settings card, shown only while this wallet still has something open on the chain. The app withdraws
-// open offers and settles bets by itself (main/casino.js), so the card has nothing to press.
-async function chanceLeftCard() {
-  const host = el("chanceLeft"); if (!host) return;
-  let o = null; try { o = await api.casinoOpen(); } catch (e) {}
-  const n = (k, one, many) => k + " " + (k === 1 ? one : many);
-  const parts = []; if (o && o.offers) parts.push(n(o.offers, "open offer", "open offers")); if (o && o.bets) parts.push(n(o.bets, "bet in play", "bets in play"));
-  host.innerHTML = !parts.length ? "" : `<div class="card"><div class="card__title">${th("P2P Chance has been removed")}</div>
-      <div class="view__desc">${th("P2P Chance is no longer part of this app, and no new games can be started. You still have")} <b>${esc(parts.join(" and "))}</b>${th(". There is nothing you need to do: open offers are withdrawn and their stake returned to your wallet, and bets in play are settled automatically. Keep the app open with your node running until this card disappears.")}</div></div>`;
 }
 
 // ============================ Minima Vestr ============================

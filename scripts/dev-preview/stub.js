@@ -392,7 +392,6 @@
     vestrTokens: async () => [{ tokenid: "0x00", name: "MINIMA", sendable: "1250.75" }, { tokenid: MXUSD, name: "MxUSD", sendable: "300.50000001" }],
     vestrMyAddress: async () => "MxG0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE0FAKE1", vestrCreate: async () => ({ ok: true, uid: FAKE_PK("AB") }), vestrCollect: async () => ({ ok: true, collected: "12.5", tokenid: "0x00" }),
     vestrCalculate: async (a, s, e, h) => ({ durBlocks: 155520, perBlock: Number(a) / 155520, perPeriod: Number(a) / 155520 * (h ? h * 72 : 1), perPeriodBlocks: h * 72, weeks: 12.8 }),
-    casinoOpen: async () => ({ offers: 0, bets: 0 }),
     // Dexicon (main/dexicon.js read model). ?dxs=notready|norelay|relaydown|empty|taking|failed
     dxWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0 }),
     inFlight: async () => ({ any: false, title: "Shut down the node?", message: "The node stops and this wallet goes offline. Swaps, pools, mail and chat stop being served until you start it again." }),

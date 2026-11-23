@@ -127,7 +127,7 @@ test("every megammrsync screen confirms first, and a replaced wallet drops the o
   // 0.18.106: the stores are reset by the main process inside the resync (node.onWalletReplaced), not by this window
   assert.ok(!/api\.\w*Invalidate\(/.test(w), "the window resets no store");
   const mainJs = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), hook = mainJs.slice(mainJs.indexOf("node.onWalletReplaced = async () => {"), mainJs.indexOf("// Restore from a backup FILE"));
-  for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })", "casino.invalidate()"]) assert.ok(hook.includes(call), call);
+  for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })"]) assert.ok(hook.includes(call), call);
 });
 
 test("the seed phrase is read only on request, shown only on its screen, and never stored or logged", () => {
@@ -322,7 +322,7 @@ test("Settings holds the desktop's own items in the shell's style, and no second
   assert.ok(!/vault|megammrsync|backup password/.test(body), "seed, resync and backup live in Backup & Recovery");
   assert.ok(/class="switch switch--m2" role="switch" id="setAutostart"/.test(body) && body.includes("home-eyebrow") && body.includes("home-card"), "the phone's switch, eyebrow and card");
   assert.ok(!/if \(!running\) \{ host\.innerHTML = waitHtml\(\); return; \}/.test(body), "updates and open at login do not wait for the node");
-  for (const id of ["updCard", "updCheck", "updGet", "setKindApply", "setHeap", "kuOpen", "setClearHist", "chanceLeft"]) assert.ok(body.includes(id), id + " kept");
+  for (const id of ["updCard", "updCheck", "updGet", "setKindApply", "setHeap", "kuOpen", "setClearHist"]) assert.ok(body.includes(id), id + " kept");
   assert.ok(!/—/.test(body.slice(0, body.indexOf("const drawUpdate"))), "no em dash in the Settings text");
 });
 

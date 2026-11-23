@@ -791,7 +791,7 @@ test("a populated copy of the store survives a restart unchanged", async () => {
 
 test("wallet replacement is refused while Dexicon work needs the old keys (main/restore.js)", async () => {
   const { host, ctx } = await boot();
-  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
+  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [] };
   const list = (dx) => restore.activeWorkList(Object.assign({}, quiet, dx === undefined ? {} : { dexicon: dx }));
   assert.deepEqual(await host.activeWork(), { ready: true, orders: [], pending: 0, takes: 0, unknown: 0 });
   assert.deepEqual(list(await host.activeWork()), []);
@@ -828,7 +828,7 @@ test("wallet replacement is refused while Dexicon work needs the old keys (main/
 // its memory; a flow of the app's own that held it reads that (main/restore.js heldRead), anything else sees it as before.
 test("held, Dexicon says what it had open when it stopped (orders, waiting placements, takes, unknown fills); a flow of the app's own reads that", async () => {
   const { host, ctx } = await boot();
-  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
+  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [] };
   const coin = "0x" + "CD".repeat(32);
   vm.runInContext(`PDService.book = [{ coinid: "${coin}", orderId: "0x02", ownerPk: PDService.identity.publickey, wantAddr: PDService.identity.address, sell: true, price: PandaDEX.d("0.01"), minima: PandaDEX.d("5"), created: PDService.block, fillable: true }]`, ctx);
   await sql(host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('pending_takes', '{\"t1\":{\"sent\":1,\"mine\":[]}}')");
@@ -1038,7 +1038,7 @@ test("a Dexicon that cannot be checked does not block a wallet restore for ever:
   const w = await host.activeWork();
   assert.equal(w.ready, false); assert.equal(w.hasStore, true); assert.ok(w.waitedMs >= 100 && w.waitedMs < 5000, "how long it has been trying: " + w.waitedMs);
   assert.equal(node.seen.length, 0, "an engine without a store asks the node for nothing");
-  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
+  const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [] };
   const list = (dexicon, more) => restore.activeWorkList(Object.assign({}, quiet, { dexicon }, more));
   // the first two minutes: wait
   assert.match(list(w)[0], /has not finished starting, so its orders could not be checked\. Wait a moment and try again\.$/);
@@ -1113,7 +1113,7 @@ test("the app wiring: started and stopped with the node, reset by the MAIN proce
   // 0.18.106: the reset is the main process's, inside the resync itself; no window can ask for it, none is needed for it
   assert.ok(!/dxInvalidate/.test(main.replace(/\/\/.*$/gm, "")) && !/dxInvalidate/.test(pre) && !/dxInvalidate/.test(app), "no renderer IPC moves the store");
   const hook = main.slice(main.indexOf("node.onWalletReplaced = async () => {"), main.indexOf("// Restore from a backup FILE"));
-  for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })", "casino.invalidate()"]) assert.ok(hook.includes(call), "the main-process reset: " + call);
+  for (const call of ["mail.invalidateIdentity()", "pandapools.invalidate()", "atomix.invalidate()", "dexicon.invalidate({ hold: true })"]) assert.ok(hook.includes(call), "the main-process reset: " + call);
   assert.ok(!/api\.\w*Invalidate\(/.test(app), "the renderer's chain only clears the screen");
   assert.ok(main.includes("dexicon: await dexWork().catch(() => null), skipDexicon });"), "a failed read is null, which refuses");
   assert.ok(/try \{ dexicon\.flush\(\); \} catch \(err\) \{\}/.test(main));

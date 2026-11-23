@@ -71,10 +71,8 @@ test("Restoring a backup and replacing the wallet: every refusal, every line of 
     { atomix: { ready: false, swaps: [TX] }, pools: null, poolsState: { waitedMs: M }, dexicon: { ready: false, hasStore: true, waitedMs: 1000 } },
     { atomix: { ready: false, hasStore: true, error: "file is not a database" }, pools: [], dexicon: { ready: true, orders: [TX], pending: 1, takes: 1 }, ownPools: [{ address: P, reserveM: null }] },
     { atomix: { ready: false, hasStore: true, waitedMs: M }, pools: [{ txpowid: TX, confirmed: false }], dexicon: { ready: true, orders: [TX, TX], pending: 2, takes: 3 }, ownPools: [{ address: P, reserveM: "100.5", reserveT: "7", token: "MxUSD" }, { address: P, reserveM: "1", reserveT: "2", token: "Some Token" }] },
-    { atomix: { ready: false, hasStore: true }, pools: [{ txpowid: TX, confirmed: false }, { txpowid: TX, confirmed: false }], casino: { offers: 1, bets: 2 } },
-    { atomix: { ready: true, swaps: [TX], maker: true, otcOffer: true, otcDeals: 1 }, pools: [], casino: { offers: 0, bets: 1 } },
-    { atomix: { ready: true }, pools: [], casino: null, casinoLooping: true },   // the settle loop with no clean scan yet (0.19.269)
-    { atomix: { ready: true }, pools: [], casino: null, casinoLooping: true, casinoWaitedMs: 180000 },   // and for minutes (0.19.285)
+    { atomix: { ready: false, hasStore: true }, pools: [{ txpowid: TX, confirmed: false }, { txpowid: TX, confirmed: false }] },
+    { atomix: { ready: true, swaps: [TX], maker: true, otcOffer: true, otcDeals: 1 }, pools: [] },
     { atomix: { ready: true, swaps: [TX, TX], otcDeals: 2 }, pools: [], dexicon: undefined, ownPools: [{ address: P, reserveM: null }] },
     // Future Cash Next (0.19.183)
     { atomix: { ready: true }, pools: [], futurecash: null }, { atomix: { ready: true }, pools: [], futurecash: { ready: false, hasStore: true } },
@@ -187,14 +185,14 @@ test("the coin guard: every refusal, run through main/reserve.js in front of the
   for (const m of said) check(m);
   for (const c of MS.codes().filter(c => /^CG_/.test(c))) assert.ok(seen.has(c), "never said by main/reserve.js here: " + c);
   // what holds a coin, as the Wallet shows it (main/reserve.js describe / whys): one, or several joined
-  for (const why of ["an AtomiX swap", "a PandaPools transaction", "a Dexicon trade", "a P2P Chance transaction", "a transaction of the wallet", "Dexicon", "another part of the app", "a live Dexicon order", "an AtomiX swap and a live Dexicon order", "an AtomiX swap, a PandaPools transaction and a live Dexicon order"]) {
+  for (const why of ["an AtomiX swap", "a PandaPools transaction", "a Dexicon trade", "a transaction of the wallet", "Dexicon", "another part of the app", "a live Dexicon order", "an AtomiX swap and a live Dexicon order", "an AtomiX swap, a PandaPools transaction and a live Dexicon order"]) {
     I18N.set("en"); assert.equal(MS.say(why, "HOLD_WHY"), why);
     for (const code of LANGS) { I18N.set(code); const s = MS.say(why, "HOLD_WHY"); if (why !== "Dexicon") assert.notEqual(s, why, code + ": " + why); assert.ok(!/ and |AtomiX swap|PandaPools transaction/.test(s), code + ": " + s); }
   }
   I18N.set("en");
   assert.equal(MS.say("Dexicon"), "Dexicon", "a word of the group is never read as a whole message");
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "main", "reserve.js"), "utf8");
-  for (const w of ['atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", casino: "a P2P Chance transaction", wallet: "a transaction of the wallet"', 'HOLD_WHY = { dexicon: "Dexicon" }', '|| "another part of the app"', 'said.slice(0, -1).join(", ") + " and " + said[said.length - 1]']) assert.ok(src.includes(w), "main/reserve.js still says: " + w);
+  for (const w of ['atomix: "an AtomiX swap", pandapools: "a PandaPools transaction", dexicon: "a Dexicon trade", wallet: "a transaction of the wallet"', 'HOLD_WHY = { dexicon: "Dexicon" }', '|| "another part of the app"', 'said.slice(0, -1).join(", ") + " and " + said[said.length - 1]']) assert.ok(src.includes(w), "main/reserve.js still says: " + w);
   const app = require("fs").readFileSync(require("path").join(__dirname, "..", "renderer", "app.js"), "utf8");
   assert.ok(app.includes('t.textContent = MainSaid.say(msg) + (copyText ? "  ⧉" : "");') && app.split(', "HOLD_WHY")').length - 1 >= 3, "toasts and the held lines go through MainSaid");
 });

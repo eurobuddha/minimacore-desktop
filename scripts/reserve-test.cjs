@@ -232,10 +232,9 @@ test("M1: when the node cannot say what a coin is, every engine is let through (
   const { node, reg } = rig(wallet3());
   await build((c) => reg.guard("dexicon", c, node.run), "d", [coinId(1)], { noPost: true });
   const deaf = async (c) => (/^coins /.test(c) ? { status: false, error: "busy" } : node.run(c));
-  for (const [o, id] of [["atomix", "a"], ["pandapools", "p"], ["casino", "c"], ["wallet", "w"]]) await reg.guard(o, "txncreate id:" + id, deaf);
+  for (const [o, id] of [["atomix", "a"], ["pandapools", "p"], ["wallet", "w"]]) await reg.guard(o, "txncreate id:" + id, deaf);
   assert.equal((await reg.guard("atomix", "txninput id:a coinid:" + coinId(1), deaf)).status, true);
   assert.equal((await reg.guard("pandapools", "txninput id:p coinid:" + coinId(1), deaf)).status, true, "a pool operation is not failed by an unanswered read");
-  assert.equal((await reg.guard("casino", "txninput id:c coinid:" + coinId(1), deaf)).status, true);
   assert.equal((await reg.guard("wallet", "txninput id:w coinid:" + coinId(1), deaf)).reserved, true, "the wallet's own command fails closed");
   const thrown = async (c) => { if (/^coins /.test(c)) throw new Error("RPC timeout"); return node.run(c); };
   await reg.guard("dexicon", "txncreate id:d2", thrown);
@@ -470,14 +469,14 @@ test("settlement wins: a settlement transaction takes a coin that is only collat
   // a lock: plain coins only. Refused.
   assert.equal((await build(as("atomix"), "axswap_lock", [coinId(2), coinId(1)])).ok, false);
   // a settlement that carries its contract coin and then needs a plain coin that is collateral: it goes through
-  await as("casino")("txncreate id:svc_reveal_1");
-  assert.equal((await as("casino")("txninput id:svc_reveal_1 coinid:" + HTLC.coinid)).status, true);
-  assert.equal((await as("casino")("txninput id:svc_reveal_1 coinid:" + coinId(1))).status, true);
-  assert.match(lines.join("\n"), /settlement first: coin 0x0{63}1 was held for a live Dexicon order and goes into a P2P Chance transaction svc_reveal_1/);
-  assert.equal(reg.foreign("dexicon", coinId(1)).owner, "casino", "the maker now finds its coin taken: its own pre-sign check and refresh deal with it");
+  await as("atomix")("txncreate id:axswap_claim_1");
+  assert.equal((await as("atomix")("txninput id:axswap_claim_1 coinid:" + HTLC.coinid)).status, true);
+  assert.equal((await as("atomix")("txninput id:axswap_claim_1 coinid:" + coinId(1))).status, true);
+  assert.match(lines.join("\n"), /settlement first: coin 0x0{63}1 was held for a live Dexicon order and goes into an AtomiX swap axswap_claim_1/);
+  assert.equal(reg.foreign("dexicon", coinId(1)).owner, "atomix", "the maker now finds its coin taken: its own pre-sign check and refresh deal with it");
   // but never a coin that is in another owner's TRANSACTION (that would be a double spend)
   await build(as("pandapools"), "pp", [coinId(3)], { noPost: true });
-  assert.equal((await as("casino")("txninput id:svc_reveal_1 coinid:" + coinId(3))).reserved, true);
+  assert.equal((await as("atomix")("txninput id:axswap_claim_1 coinid:" + coinId(3))).reserved, true);
   // and PandaPools, which has no deadline of that kind, does not get this
   hold(reg, coinId(2));
   await as("pandapools")("txncreate id:pp2"); await as("pandapools")("txninput id:pp2 coinid:" + HTLC.coinid);
@@ -826,5 +825,5 @@ test("the guard forwards a single command as written (no trim of its own)", asyn
   await as("wallet")("  txncreate id:fw  ");
   assert.equal(node.seen[node.seen.length - 1], "  txncreate id:fw  ");
   const main = SRC("main/main.js");
-  assert.ok(main.includes("P2P Chance, Future Cash Next and the coin reservations were reset in the main process"), "the log line names all seven");
+  assert.ok(main.includes("Dexicon, Future Cash Next and the coin reservations were reset in the main process"), "the log line names all six");
 });

@@ -204,7 +204,7 @@ function builtProblem(part) {
  * the chain started a second command of the sender's choosing. Every builder outside the Terminal and the vendored engines
  * (Mail, miniMall, Chat, Vestr, the Web Wallet, Future Cash Next) sends through this; it throws, and nothing is sent.
  * It lives here, not in main/rpc.js as in the released desktop, so that a module whose tests stand in for rpc.js keeps it. The
- * Terminal's own chains go through mcd:cmd; the AtomiX, PandaPools, Dexicon and casino engines chain txnbasics;txnpost
+ * Terminal's own chains go through mcd:cmd; the AtomiX, PandaPools and Dexicon engines chain txnbasics;txnpost
  * of their own making.
  */
 function oneCommand(command) {

@@ -7,6 +7,23 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.419] — P2P Chance (Zero Edge Casino) removed from the app
+
+- 23 Nov 2026: the casino is removed pending an audit and a rebuild, after the coin-state-to-command injection fixed in
+  0.19.418 (a taker's covenant state reached node commands through auto-reveal). The game itself left in 0.18.68; what was
+  left (main/casino.js and the vendored main/casino/: the settle-only loop that revealed, resolved, withdrew this wallet's
+  open offers and claimed timeouts on each new block) is now deleted, with its IPC (`mcd:casino*`), its Settings card,
+  its lines in the restore / Quit / Shutdown guards and the coin guard, its words in en/zh/ru/uk, its npm scripts, its CI
+  steps and its vendoring manifest entry. `main/casino*` is also excluded from the packaged files.
+- Nothing is deleted from an install: the casino's keychain accounts (`casino-<sha256>`: commit preimages, history, cached
+  identity) and the `casinoEnabled` config flag stay exactly as they are. Nothing reads or writes them any more.
+- On the chain: the app no longer settles a bet or withdraws an offer at the casino covenant
+  `0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F`. An open offer stays takeable by any other casino
+  client; once taken, a house that does not reveal within the offer's timeout (1500 blocks) loses the whole pot to the
+  player, and a player that does not resolve within it after the reveal loses the whole pot to the house.
+- To add it back: revert this commit. Its parent, `3bbb586f45d930b6a74581a509e2308ac45b4b2e` (0.19.418), holds the module,
+  its tests and its manifest as they were; the donor is `~/Projects/archive/Ideas/universal-casino`.
+
 ## [0.19.418] — SECURITY: a stranger's coin state can no longer become a node command
 
 - The node splits every command text on ";" (even inside quotes) and runs each piece. A PandaPools beacon at the public sentinel whose state port 2 held `0x00;send …;` turned ONE discovery `runscript` into FOUR admin `send`s (the token appears 4 times in the covenant), and a P2P Chance taker's state 9 `0;SEND …` ran through auto-reveal (the shim refused only a lower-case `send`).

@@ -235,7 +235,7 @@ test('rpcCall: a coin one owner named for a transaction is refused to another ow
 
 test('every engine names itself on its node commands, and the registry follows the node', () => {
   const fs = require('node:fs'), read = (f) => fs.readFileSync(require('node:path').join(__dirname, '..', 'main', f), 'utf8');
-  for (const [f, owner] of [['atomix.js', 'atomix'], ['pandapools.js', 'pandapools'], ['dexicon.js', 'dexicon'], ['casino.js', 'casino']])
+  for (const [f, owner] of [['atomix.js', 'atomix'], ['pandapools.js', 'pandapools'], ['dexicon.js', 'dexicon']])
     assert.match(read(f), new RegExp('rpcCall\\(node\\.rpcPort\\(\\), config\\.rpcSecret\\(\\), cmd, (?:Object\\.assign\\()?\\{ owner: "' + owner + '" \\}'), f);
   const main = read('main.js');
   assert.match(main, /reserve\.open\(app\.getPath\("userData"\), reserveRead\)/);

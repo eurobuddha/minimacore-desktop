@@ -130,8 +130,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["REPLACE_CONFIRM_HINT", I18N.N_("{x} You can go on after confirming this."), { top: false, group: "REPLACE_ITEMS", nest: { x: { sub: "REPLACE_ITEMS" } } }],
     ["RP_AX_UNASKED", I18N.N_("AtomiX could not be asked whether a swap is in flight. Wait a moment and try again."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_UNASKED", I18N.N_("Future Cash Next could not be asked whether a collect or a sweep is still under way. Wait a moment and try again."), { top: false, group: "REPLACE_ITEMS" }],
-    ["RP_CASINO_STUCK", I18N.N_("P2P Chance has not finished reading this wallet's bets after {m} minutes, so whether any is still open cannot be checked."), { top: false, group: "REPLACE_ITEMS" }],
-    ["RP_CASINO_UNREAD", I18N.N_("P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_STORE", I18N.N_("Future Cash Next could not open its store ({error}), so whether a collect or a sweep is still under way cannot be checked."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_NOT_STARTED", I18N.N_("Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_FC_WORK", I18N.N_("{n} Future Cash Next collects or sweeps are still under way, which only this wallet's keys can finish: {ids}"), { top: false, group: "REPLACE_ITEMS" }],
@@ -156,9 +154,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["RP_DX_ORDERS", I18N.N_("{n} Dexicon orders still on the chain, which only this wallet's keys can cancel or collect. Cancel them first: {ids}"), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_DX_PENDING", I18N.N_("{n} Dexicon orders still waiting for a block."), { top: false, group: "REPLACE_ITEMS" }],
     ["RP_DX_TAKES", I18N.N_("{n} Dexicon trades sent and not yet answered. Wait for them to settle (a few minutes)."), { top: false, group: "REPLACE_ITEMS" }],
-    ["RP_CASINO", I18N.N_("P2P Chance: {offers} and {bets} still open, which only this wallet's keys can settle."), { top: false, group: "REPLACE_ITEMS", nest: { offers: { sub: ["COUNT_OFFERS"] }, bets: { sub: ["COUNT_BETS"] } } }],
-    ["COUNT_OFFERS", I18N.N_("{n} offers"), { top: false }],
-    ["COUNT_BETS", I18N.N_("{n} bets"), { top: false }],
     ["TERMINAL_RESTORE", I18N.N_("Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first.")],
 
     // ---- Key mode: what may start, and what was refused (main/keymode.js, main/node-manager.js, main/config.js, main/main.js) ----
@@ -236,7 +231,6 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["WHY_ATOMIX", I18N.N_("an AtomiX swap"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_PANDAPOOLS", I18N.N_("a PandaPools transaction"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_DEXICON_TRADE", I18N.N_("a Dexicon trade"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
-    ["WHY_CASINO", I18N.N_("a P2P Chance transaction"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_WALLET", I18N.N_("a transaction of the wallet"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_DEXICON", I18N.N_("Dexicon"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],
     ["WHY_OTHER", I18N.N_("another part of the app"), { top: false, group: ["HOLD_WHY", "HOLD_WHY_ONE"] }],

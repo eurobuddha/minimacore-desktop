@@ -69,7 +69,7 @@ jobs:
         run: npm run test:updater
 
       # Every key the renderer persists must be declared in config DEFAULTS. save() drops the ones it does not
-      # know, silently — which is exactly how the Casino currency toggle died between 0.16.97 and 0.16.99.
+      # know, silently (the 0.16.97 regression).
       - name: Verify config keys
         run: npm run test:config-keys
 
@@ -119,7 +119,7 @@ jobs:
       - name: Verify Dexicon engine parity + host (mock node, no network)
         run: npm run test:dexicon
 
-      # The donor-free halves of the other suites. The parity checks in test:atomix / test:casino diff against
+      # The donor-free halves of the other suites. The parity check in test:atomix diffs against
       # donor repos that CI does not check out, but the units and gates below need nothing external — and they
       # cover fund-safety surfaces (the ETH RPC SSRF allowlist is 136 of these checks). Leaving them out meant
       # a regression that reopened that allowlist could ship three installers with nothing going red.
@@ -133,15 +133,10 @@ jobs:
       - name: Verify AtomiX glue
         run: node scripts/atomix-unit.js
 
-      # The committed digest manifests of the files copied verbatim into main/atomix/ and main/casino/ (their donors are
-      # not checked out here; atomix-parity-check.sh / casino-parity-check.sh compare against them locally). A stray file
-      # beside them fails too.
-      - name: Verify AtomiX and P2P Chance copies against their manifests
-        run: npm run test:atomix-manifest && npm run test:casino-manifest
-
-      # P2P Chance was removed in 0.18.68; this proves what is left can only settle, never start a bet.
-      - name: Verify P2P Chance settle-only glue
-        run: node scripts/casino-glue-test.js
+      # The committed digest manifest of the files copied verbatim into main/atomix/ (its donor is not checked out
+      # here; atomix-parity-check.sh compares against it locally). A stray file beside them fails too.
+      - name: Verify AtomiX copies against their manifest
+        run: npm run test:atomix-manifest
 
       - name: Verify terminal autocomplete
         run: npm run test:termcomplete

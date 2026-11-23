@@ -104,7 +104,7 @@ const lost = (e) => !(e && (e.code === "ECONNREFUSED" || /RPC authentication fai
 
 /** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects).
  *  opts.signal (AbortSignal): a SIGNING command still queued when it aborts is rejected and never reaches the node.
- *  opts.owner: who asks ("atomix", "pandapools", "dexicon", "casino"; none = the wallet), for the shared coin
+ *  opts.owner: who asks ("atomix", "pandapools", "dexicon"; none = the wallet), for the shared coin
  *  reservation (main/reserve.js, docs/COIN_RESERVATION.md). Its guard runs here because this is the one function every
  *  node command of every caller passes, and INSIDE the signing queue: a command is checked against the reservations
  *  when it is really sent, not when it was queued. A coin another owner holds is refused there, before the node. */

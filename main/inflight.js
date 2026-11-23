@@ -7,7 +7,6 @@
  *   work = { atomix: main/atomix.js activeWork() | null,
  *            pools:  main/pandapools.js activeWork() (the activity rows) | null,
  *            dexicon: main/dexicon.js activeWork() | null,
- *            casino: { offers, bets } | null, casinoOn: is the settle-only loop switched on for this install,
  *            futurecash: main/futurecash.js activeWork() | null (absent: not asked) }
  */
 const HOUR = 3600000;
@@ -77,11 +76,6 @@ function inFlight(work, how, nowMs, t) {
 
   // ---- miniMall: a payment at the node in this process (0.19.288): stopped now, whether it went through is not known ----
   if (work.shop > 0) busy.push(t("A miniMall payment is being sent to the node. Stopped now, it may or may not go through: wait for its answer, then look at the order."));
-
-  // ---- P2P Chance (removed in 0.18.68; bets already on the chain are still settled by this app) ----
-  const c = work.casino;
-  if (c && (c.offers || c.bets)) busy.push(t("P2P Chance: {bets} and {offers} still open. They are revealed and paid out only while the app and its node run; a bet that is not settled before its deadline can be claimed by the other side.", { bets: t("{n} bets", { n: c.bets || 0 }), offers: t("{n} offers", { n: c.offers || 0 }) }));
-  else if (!c && work.casinoOn) unread.push(t("P2P Chance bets (not read yet)"));
 
   const lines = busy.slice();
   if (unread.length) lines.push(t("Could not be checked: {what}. {advice}", { what: unread.join("; "), advice: quit ? t("If you are not sure nothing is in flight, stay open and look at the Dexicon tab first.") : t("Look at the Dexicon tab before you shut down.") }));

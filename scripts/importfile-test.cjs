@@ -566,7 +566,7 @@ test("MINOR: the file is fingerprinted before the check and compared before the 
   assert.ok(!/empties/.test(MF.FAILED_BACK), "a node turned back light has no MegaMMR to empty");
 });
 
-test("MINOR: during the import and while it is unfinished, Mail, miniMall, Vestr, Future Cash Next and P2P Chance do not run; Freeze says it is the import", async () => {
+test("MINOR: during the import and while it is unfinished, Mail, miniMall, Vestr, and Future Cash Next do not run; Freeze says it is the import", async () => {
   const freeze = require("../main/freeze.js"); let paused = true; const started = [];
   const f = freeze.create({ load: () => [], save() {}, paused: () => paused, engines: { mail: { start: () => started.push("mail") }, minimall: { start: () => started.push("minimall") }, vestr: { start: () => started.push("vestr") }, chat: { start: () => started.push("chat") } } });
   for (const id of ["mail", "minimall", "vestr", "chat"]) f.start(id);
@@ -574,9 +574,9 @@ test("MINOR: during the import and while it is unfinished, Mail, miniMall, Vestr
   const g = freeze.create({ load: () => [], save() {}, replacing: () => "import", engines: { dexicon: { gate() {}, stop() {}, start() {} } } });
   await assert.rejects(g.set("dexicon", true), { message: "A MegaMMR file import is running, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished." });
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
-  assert.ok(/const loopsPaused = \(\) => megafile\.busy\(\);/.test(main) && /function pauseLoops\(\) \{ mail\.stopLoop\(\); shop\.stopLoop\(\); vestr\.stopLoop\(\); futurecash\.stop\(\)\.catch\(\(\) => \{\}\); casino\.stopLoop\(\); casinoStarted = false; \}/.test(main));
+  assert.ok(/const loopsPaused = \(\) => megafile\.busy\(\);/.test(main) && /function pauseLoops\(\) \{ mail\.stopLoop\(\); shop\.stopLoop\(\); vestr\.stopLoop\(\); futurecash\.stop\(\)\.catch\(\(\) => \{\}\); \}/.test(main));
   assert.ok(/holdEngines: \(\) => \{ pauseLoops\(\); return node\.onEnginesHold\(\); \}/.test(main) && /paused: \(\) => loopsPaused\(\),/.test(main));
-  assert.ok(/if \(s\.state !== "running" \|\| loopsPaused\(\)\) \{ fcBlock = 0; fcStarter\.reset\(\); futurecash\.stop\(\)/.test(main) && /if \(casinoStarted \|\| loopsPaused\(\)\) return;/.test(main), "Future Cash Next and P2P Chance");
+  assert.ok(/if \(s\.state !== "running" \|\| loopsPaused\(\)\) \{ fcBlock = 0; fcStarter\.reset\(\); futurecash\.stop\(\)/.test(main), "Future Cash Next");
 });
 
 test("MINOR/NIT: the Web Wallet points to the import; the import's skip question is its own; a broken MegaMMR is said once per node start, from the logger's own line", () => {
@@ -683,7 +683,7 @@ function engines(o = {}) {
   const dexicon = async () => (e.starting ? { ready: false, hasStore: true, waitedMs: e.held ? 0 : e.waitedMs }
     : e.held ? Object.assign({ ready: false, hasStore: true, waitedMs: 0 }, e.dxLast ? { last: e.dxLast } : {}) : Object.assign({ ready: true }, e.dx));
   const futurecash = (mf) => { if (!mf.busy()) return Object.assign({ ready: true, hasStore: true }, e.fc); if (!e.fcLast) e.fcLast = Object.assign({}, e.fc); return { ready: false, hasStore: true, error: "", last: e.fcLast }; };
-  e.read = async (mf) => ({ atomix: { ready: true, swaps: e.ax.slice(), maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null, ownPools: [],
+  e.read = async (mf) => ({ atomix: { ready: true, swaps: e.ax.slice(), maker: false, otcOffer: false, otcDeals: 0 }, pools: [], ownPools: [],
     dexicon: heldRead(await dexicon(), mf.holdsEngines()), futurecash: heldRead(futurecash(mf), mf.busy()) });
   e.work = async (mf) => restore.activeWorkList(Object.assign(await e.read(mf), { skipDexicon: e.skip })).filter(i => !String(i).endsWith(restore.CONFIRM_HINT));
   // main.js holdEngines: Dexicon drained, then dropped with what it had open; o.during: work that starts while the engines are being stopped

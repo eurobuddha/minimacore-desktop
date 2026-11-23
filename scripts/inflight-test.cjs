@@ -7,7 +7,7 @@ const test = require("node:test"), assert = require("node:assert"), fs = require
 const { inFlight, decideQuit, clock } = require("../main/inflight.js");
 const ROOT = path.resolve(__dirname, ".."), read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
 const NOW = new Date(2026, 10, 19, 13, 0, 0).getTime(), H = (n) => "0x" + String(n).repeat(64).slice(0, 64);
-const IDLE = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], dexicon: { ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }, casino: null, casinoOn: false };
+const IDLE = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], dexicon: { ready: true, orders: [], pending: 0, takes: 0, unknown: 0 } };
 const With = (o) => Object.assign({}, IDLE, o);
 
 test("nothing in flight: no question at Quit, the plain question at Shutdown", () => {
@@ -36,21 +36,20 @@ test("a live maker order, OTC availability and open OTC deals are each named", (
     "Your AtomiX OTC availability is live. A proposal sent to you is not answered while the app is closed.", "2 AtomiX OTC deals are open and cannot go on while the app is closed."]);
 });
 
-test("pool operations pending, Exchange takes and fills with an unknown outcome, P2P Chance bets", () => {
+test("pool operations pending, Exchange takes and fills with an unknown outcome", () => {
   const rows = [{ type: "SWAP", ts: NOW - 60000, confirmed: false }, { type: "STATUS", ts: NOW }, { type: "SWAP", ts: NOW - 2 * 3600000, confirmed: false }, { type: "ADD", ts: NOW - 5000, failed: true }, { type: "ADD", ts: NOW - 5000, confirmed: true }];
-  const w = inFlight(With({ pools: rows, dexicon: { ready: true, orders: [H(7)], pending: 1, takes: 2, unknown: 1 }, casino: { offers: 1, bets: 2 }, casinoOn: true }), "quit", NOW);
+  const w = inFlight(With({ pools: rows, dexicon: { ready: true, orders: [H(7)], pending: 1, takes: 2, unknown: 1 } }), "quit", NOW);
   assert.equal(w.busy[0], "1 pool transaction sent in the last hour is not confirmed yet. The app cannot check or finish it while the app is closed.");
   assert.match(w.busy[1], /^2 Exchange trades are sent and not yet answered\. While the app is closed they cannot be voided, so the other side could still complete them later at the price you signed\./);
   assert.match(w.busy[2], /^1 fill of your Exchange orders has an outcome that is not known yet/);
   assert.equal(w.busy[3], "1 Exchange order is still waiting for a block.");
-  assert.match(w.busy[4], /^P2P Chance: 2 bets and 1 offer still open\. They are revealed and paid out only while the app and its node run/);
-  assert.equal(w.busy.length, 5, "an order resting on the chain is not 'in flight': it stays where it is");
+  assert.equal(w.busy.length, 4, "an order resting on the chain is not 'in flight': it stays where it is");
 });
 
 test("an engine that has not started is SAID, never read as idle", () => {
-  const w = inFlight({ atomix: { ready: false, hasStore: true, error: "the swap store could not be opened" }, pools: null, dexicon: null, casino: null, casinoOn: true }, "quit", NOW);
+  const w = inFlight({ atomix: { ready: false, hasStore: true, error: "the swap store could not be opened" }, pools: null, dexicon: null }, "quit", NOW);
   assert.deepEqual(w.busy, []); assert.equal(w.any, true); assert.equal(w.title, "Quit without the check?");
-  assert.match(w.message, /^Could not be checked: AtomiX swaps, market and OTC \(AtomiX has not started: the swap store could not be opened\); pool operations \(PandaPools has not started\); Exchange trades waiting for an answer \(Dexicon could not be asked\); P2P Chance bets \(not read yet\)\. If you are not sure nothing is in flight, stay open/);
+  assert.match(w.message, /^Could not be checked: AtomiX swaps, market and OTC \(AtomiX has not started: the swap store could not be opened\); pool operations \(PandaPools has not started\); Exchange trades waiting for an answer \(Dexicon could not be asked\)\. If you are not sure nothing is in flight, stay open/);
   assert.match(inFlight({}, "shutdown", NOW).message, /^Could not be checked: AtomiX swaps, market and OTC \(AtomiX could not be asked\); pool operations/);
   // Dexicon's quick half is up while the chain is still read: its takes are known, and that is used
   const half = inFlight(With({ dexicon: { ready: false, hasStore: true, takes: 1 } }), "quit", NOW);
@@ -222,7 +221,7 @@ test("a miniMall payment being sent makes Quit and Shutdown ask, from the shop's
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
   const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && /^(inFlightWork|dexWork|fcWork)$/.test(d.name.text))) decl += n.getText(sf) + "\n"; ts.forEachChild(n, walk); };   // 0.19.417: with the reads of an engine the app's own flow stopped
   walk(sf);
-  const gather = new Function("env", "with (env) { " + decl + "; return inFlightWork; }")({ restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+  const gather = new Function("env", "with (env) { " + decl + "; return inFlightWork; }")({ restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) },
     atomix: { activeWork: async () => IDLE.atomix }, pandapools: { activeWork: async () => [] }, dexicon: { activeWork: async () => IDLE.dexicon }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) },
     shop: { sendingCount: () => 1 } });
   assert.equal(inFlight(await gather(), "quit", NOW).any, true, "main.js asks the shop");
@@ -285,7 +284,7 @@ test("main's in-flight gather: a read that never answers is 'could not be checke
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS); let decl = "";
   const walk = (n) => { if (ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && /^(inFlightWork|dexWork|fcWork)$/.test(d.name.text))) decl += n.getText(sf) + "\n"; ts.forEachChild(n, walk); };   // 0.19.417: with the reads of an engine the app's own flow stopped
   walk(sf);
-  const gather = new Function("env", "with (env) { " + decl.replace(/\b4000\b/, "40") + "; return inFlightWork; }")({ restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+  const gather = new Function("env", "with (env) { " + decl.replace(/\b4000\b/, "40") + "; return inFlightWork; }")({ restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) },
     atomix: { activeWork: () => new Promise(() => {}) }, pandapools: { activeWork: async () => [{ type: "ADD", ts: NOW - 60000 }] }, dexicon: { activeWork: async () => IDLE.dexicon },
     futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, shop: { sendingCount: () => 0 } });
   const w = await Promise.race([gather(), new Promise(r => setTimeout(() => r("timed out"), 1500))]);
@@ -322,7 +321,7 @@ test("the gather's per-read timers and the guard's 5 s bound are cleared once th
   walk(sf);
   const live = new Set(); let id = 0;
   const env = { setTimeout: (f, ms) => { const t = { id: ++id, unref() {} }; live.add(t.id); return t; }, clearTimeout: (t) => { if (t) live.delete(t.id); },
-    restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) }, casino: { open: () => ({ offers: 0, bets: 0 }), looping: () => false },
+    restore: require("../main/restore.js"), megafile: { holdsEngines: () => false }, loopsPaused: () => false, config: { load: () => ({}) },
     atomix: { activeWork: async () => IDLE.atomix }, pandapools: { activeWork: async () => { throw new Error("pools down"); } }, dexicon: { activeWork: async () => IDLE.dexicon },
     futurecash: { activeWork: () => { throw new Error("fc down"); } }, shop: { sendingCount: () => 0 } };
   const w = await new Function("env", "with (env) { " + decl + "; return inFlightWork; }")(env)();

@@ -144,7 +144,7 @@ function moveAside(file, now) {
 /**
  * What replacing the wallet would strand, each in plain words ([] = nothing). r holds what the existing read
  * models said: atomix = main/atomix.js activeWork() (null = it could not be asked), pools = PandaPools activity
- * rows (null = could not be read), casino = { offers, bets } or null, dexicon = main/dexicon.js activeWork()
+ * rows (null = could not be read), dexicon = main/dexicon.js activeWork()
  * (undefined = not asked). Identifiers are given in full.
  */
 const DEX_STUCK_MS = 120000;
@@ -215,12 +215,6 @@ function activeWorkList(r) {
     else if (fc.hasStore) out.push("Future Cash Next has not started (or is frozen), so its collects and sweeps could not be checked. Start the node, unfreeze it on the Apps tab, and try again.");
   }
   else if (fc && fc.posted) out.push(fc.posted + (fc.posted === 1 ? " Future Cash Next collect or sweep is" : " Future Cash Next collects or sweeps are") + " still under way, which only this wallet's keys can finish: " + fc.collects.concat(fc.queued, fc.sweeps).join(", "));
-  const c = r && r.casino;
-  if (c && (c.offers || c.bets)) out.push("P2P Chance: " + plural(c.offers || 0, "offer") + " and " + plural(c.bets || 0, "bet") + " still open, which only this wallet's keys can settle.");
-  // the settle loop runs (this wallet has bets on the chain) but has no clean scan yet, or its scans fail (0.19.269): not read as none
-  // after DEX_STUCK_MS of it the user may go on, as with the other engines that cannot be checked (0.19.285): scans that keep failing refused every replacement for good
-  else if (!c && r && r.casinoLooping && !skip) out.push(Number(r.casinoWaitedMs) >= DEX_STUCK_MS ? "P2P Chance has not finished reading this wallet's bets after " + mins(r.casinoWaitedMs) + " minutes, so whether any is still open cannot be checked. " + DEX_SKIP_HINT
-    : "P2P Chance could not be checked: this wallet has bets on the chain, and whether any is still open is not read yet. Wait a moment and try again.");
   return out;
 }
 /**

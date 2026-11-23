@@ -50,12 +50,12 @@ test("H3: the general command channel can tell a backup-file restore from everyt
 
 // ---- 0.18.96: M1, work in flight and the stores of the old wallet ----
 const HASH = "0x" + "AB12".repeat(16), TXP = "0x" + "00CD".repeat(16);
-const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casino: null };
+const quiet = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [] };
 
 test("M1: replacing the wallet is refused while work that needs its keys is open, and each piece is named in full", async () => {
   assert.deepEqual(restore.activeWorkList(quiet), []);
   assert.equal(restore.activeWorkProblem([]), "");
-  assert.deepEqual(restore.activeWorkList({ atomix: { ready: false, hasStore: false }, pools: [], casino: null }), [], "a new install: AtomiX has no store yet, nothing to lose");
+  assert.deepEqual(restore.activeWorkList({ atomix: { ready: false, hasStore: false }, pools: [] }), [], "a new install: AtomiX has no store yet, nothing to lose");
   const one = (r) => { const l = restore.activeWorkList(Object.assign({}, quiet, r)); assert.equal(l.length, 1, JSON.stringify(l)); return l[0]; };
   const swap = one({ atomix: Object.assign({}, quiet.atomix, { swaps: [HASH] }) });
   assert.ok(/^1 AtomiX swap still in flight/.test(swap) && swap.includes(HASH), "the whole hash, never shortened: " + swap);
@@ -67,8 +67,6 @@ test("M1: replacing the wallet is refused while work that needs its keys is open
   assert.ok(/PandaPools could not be asked/.test(one({ pools: null })));
   const pool = one({ pools: [{ type: "STATUS", summary: "x" }, { txpowid: TXP, confirmed: false }, { txpowid: "0x01", confirmed: true }, { txpowid: "0x02", confirmed: false, failed: true }] });
   assert.ok(/^1 PandaPools transaction still waiting to confirm/.test(pool) && pool.includes(TXP));
-  assert.ok(/1 offer and 2 bets still open/.test(one({ casino: { offers: 1, bets: 2 } })));
-  assert.deepEqual(restore.activeWorkList(Object.assign({}, quiet, { casino: { offers: 0, bets: 0 } })), []);
   const why = restore.activeWorkProblem([swap, pool]);
   assert.ok(/Nothing was changed/.test(why) && why.includes(HASH) && why.includes(TXP) && /neither claimed nor refunded/.test(why));
   // a backup-file restore: refused with the list, in the check and in the run, and the node is sent nothing
@@ -113,7 +111,7 @@ test("M1: the reset chain deletes no store: AtomiX's database and the mail store
   // CHANGED on purpose (0.19.243): the move is moveStoreAside() (a failed one is owed: init throws until it is done)
   const mv = ax.slice(ax.indexOf("function moveStoreAside()"), ax.indexOf("\n}\n", ax.indexOf("function moveStoreAside()")));
   assert.ok(inv.includes("moveStoreAside();") && mv.includes('const file = path.join(dir(), "atomix.sqlite")') && mv.includes('require("./restore").moveAside(file)') && !/unlink|rmSync/.test(inv + mv), "atomix.invalidate moves the swap database aside");
-  for (const f of ["atomix.js", "pandapools.js", "mail.js", "mail-store.js", "casino.js"]) assert.ok(!/(unlink|rm)(Sync)?\([^)]*(sqlite|mail\.json)/.test(read(f)), f + " deletes no store");
+  for (const f of ["atomix.js", "pandapools.js", "mail.js", "mail-store.js"]) assert.ok(!/(unlink|rm)(Sync)?\([^)]*(sqlite|mail\.json)/.test(read(f)), f + " deletes no store");
   const pp = read("pandapools.js"), ppInv = pp.slice(pp.indexOf("async function invalidate()"), pp.indexOf("// ---- helpers ----"));
   assert.ok(!/unlink|rename|rmSync/.test(ppInv), "pandapools.invalidate leaves pandapools.sqlite where it is");
   assert.ok(/function invalidateIdentity\(\) \{[\s\S]*?store\.setAside\(\)/.test(read("mail.js")));
@@ -203,41 +201,25 @@ test("archive / mysql with phrase:, reset seedsync / restore, vault action:reset
   assert.ok(h.indexOf("R.replacesKeysElsewhere(command)") > 0 && h.indexOf("R.replacesKeysElsewhere(command)") < h.indexOf("refusal(command, io.take)"), "refused before the gate asks anything");
 });
 
-// ---- 0.19.262: the P2P Chance bets the settle loop found hold a wallet replacement on every install ----
-test("P2P Chance: bets found by the settle loop of an install that only watches still refuse a wallet replacement and are said on Quit and Shutdown; a loop with no clean scan yet is 'could not be checked' (0.19.269)", async () => {
-  // main.js's own walletWork and inFlightWork, run over stand-in engines (0.19.269: the grep of 0.19.262 replaced)
+// ---- 0.19.419: P2P Chance is gone: nothing of it holds a restore, a Quit or a Shutdown ----
+test("P2P Chance removed (0.19.419): main's walletWork and inFlightWork run with no casino module at all, and an old casino field is ignored", async () => {
+  // main.js's own walletWork and inFlightWork, run over stand-in engines with NO `casino` in scope: on 0.19.418 they read
+  // casino.open() / casino.looping(), and this throws "casino is not defined"
   const ts = require("typescript"), src = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), decl = {};
   const walk = (n) => { if (ts.isVariableStatement(n)) for (const d of n.declarationList.declarations) if (ts.isIdentifier(d.name) && /^(walletWork|inFlightWork|dexWork|fcWork)$/.test(d.name.text)) decl[d.name.text] = n.getText(sf); ts.forEachChild(n, walk); };
   walk(sf);
   const R = require("../main/restore.js"), I = require("../main/inflight.js");
-  const run = (cas, enabled) => {
-    const env = { restore: R, megafile: { holdsEngines: () => false }, loopsPaused: () => false, dexSkipUntil: 0, config: { load: () => ({ casinoEnabled: enabled }) }, casino: cas,
-      atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] },
-      shop: { sendingCount: () => 0 }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, dexicon: { activeWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }) } };
-    return new Function("env", "with (env) { " + decl.walletWork + "; " + decl.dexWork + "; " + decl.fcWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
-  };
-  // bets found by a loop that only watched (casinoEnabled off): the replacement is refused, Quit and Shutdown say them
-  let m = run({ open: () => ({ offers: 0, bets: 1 }), looping: () => true, uncheckedMs: () => 0 }, false);
-  assert.ok((await m.walletWork()).some(l => /P2P Chance: 0 offers and 1 bet still open/.test(l)));
-  assert.match(I.inFlight(await m.inFlightWork(), "quit", Date.now()).message, /P2P Chance: 1 bet and 0 offers still open/);
-  // the loop runs (this wallet has bets) but has no clean scan yet, or its scans fail: never read as nothing open
-  m = run({ open: () => null, looping: () => true, uncheckedMs: () => 0 }, false);
-  const list = await m.walletWork();
-  assert.ok(list.some(l => /^P2P Chance could not be checked: this wallet has bets on the chain/.test(l)), list.join(" | "));
-  assert.match(R.activeWorkProblem(list), /P2P Chance could not be checked/, "the replacement is refused");
-  assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).any, true, "and Quit / Shutdown say it could not be checked");
-  // a wallet that never bet (no loop, nothing found): nothing in the way
-  m = run({ open: () => null, looping: () => false, uncheckedMs: () => 0 }, false);
-  assert.deepEqual(await m.walletWork(), []); assert.equal(I.inFlight(await m.inFlightWork(), "shutdown", Date.now()).unread.length, 0);
-  // 0.19.285: scans that keep failing do not refuse every replacement for good: after two minutes the user may go on
-  m = run({ open: () => null, looping: () => true, uncheckedMs: () => 3 * 60000 + 5000 }, false);
-  const stuck = await m.walletWork();
-  assert.ok(stuck.some(l => l === "P2P Chance has not finished reading this wallet's bets after 3 minutes, so whether any is still open cannot be checked. If it stays like this, you can go on without this check."), stuck.join(" | "));
-  assert.equal(R.onlyDexiconUnchecked(stuck), true, "the only thing in the way can be gone past");
-  assert.deepEqual(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: null, casinoLooping: true, casinoWaitedMs: 200000, skipDexicon: true, dexicon: { ready: true, takes: 0 }, futurecash: { ready: true, posted: 0 } }), [], "and once the user chose to go on, it no longer stands in the way");
-  assert.equal(R.onlyDexiconUnchecked(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: null, casinoLooping: true, casinoWaitedMs: 30000 })), false, "not before two minutes");
-  const cas = fs.readFileSync(path.join(ROOT, "main", "casino.js"), "utf8");
-  assert.ok(/function invalidate\(\) \{[\s\S]{0,500}if \(was\) startLoop\(\); else if \(wasWatching\) watch\(\);/.test(cas), "after a replacement the loop goes on, on the new wallet");
+  const env = { restore: R, megafile: { holdsEngines: () => false }, loopsPaused: () => false, dexSkipUntil: 0, config: { load: () => ({ casinoEnabled: true }) },
+    atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] },
+    shop: { sendingCount: () => 0 }, futurecash: { activeWork: () => ({ ready: true, posted: 0 }) }, dexicon: { activeWork: async () => ({ ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }) } };
+  const m = new Function("env", "with (env) { " + decl.walletWork + "; " + decl.dexWork + "; " + decl.fcWork + "; " + decl.inFlightWork + "; return { walletWork, inFlightWork }; }")(env);
+  assert.deepEqual(await m.walletWork(), [], "a wallet whose old config still says casinoEnabled is not held up");
+  const w = I.inFlight(await m.inFlightWork(), "quit", Date.now());
+  assert.equal(w.any, false, w.message);
+  // a caller that still passes the old fields gets nothing from them
+  assert.deepEqual(R.activeWorkList({ atomix: { ready: true, swaps: [] }, pools: [], casino: { offers: 1, bets: 2 }, casinoLooping: true, casinoWaitedMs: 200000 }), []);
+  assert.equal(I.inFlight({ atomix: { ready: true, swaps: [] }, pools: [], dexicon: { ready: true, orders: [], pending: 0, takes: 0, unknown: 0 }, casino: { offers: 1, bets: 2 }, casinoOn: true }, "quit", Date.now()).any, false);
+  assert.ok(!/casino/.test(decl.walletWork + decl.inFlightWork), "neither reads a casino");
 });
 
 // ---- 0.19.417: main's own reads of an engine that main's own MegaMMR flow stopped (the import refused itself on 0.19.395-0.19.416) ----
@@ -247,7 +229,7 @@ test("main's walletWork and inFlightWork read Dexicon held by an import, and Fut
   walk(sf);
   const R = require("../main/restore.js"), I = require("../main/inflight.js");
   const run = (byFlow, dxLast, fcLast) => new Function("env", "with (env) { " + [decl.walletWork, decl.dexWork, decl.fcWork, decl.inFlightWork].filter(Boolean).join(";\n") + "; return { walletWork, inFlightWork }; }")({
-    restore: R, megafile: { holdsEngines: () => byFlow }, loopsPaused: () => byFlow, dexSkipUntil: 0, config: { load: () => ({}) }, casino: { open: () => null, looping: () => false, uncheckedMs: () => 0 },
+    restore: R, megafile: { holdsEngines: () => byFlow }, loopsPaused: () => byFlow, dexSkipUntil: 0, config: { load: () => ({}) },
     atomix: { activeWork: async () => ({ ready: true, swaps: [] }) }, pandapools: { activeWork: async () => [], status: () => ({}), ownPools: async () => [] }, shop: { sendingCount: () => 0 },
     dexicon: { activeWork: async () => Object.assign({ ready: false, hasStore: true, waitedMs: 0 }, dxLast ? { last: dxLast } : {}) },
     futurecash: { activeWork: () => Object.assign({ ready: false, hasStore: true, error: "" }, fcLast ? { last: fcLast } : {}) } });

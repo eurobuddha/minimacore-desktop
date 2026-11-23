@@ -292,11 +292,6 @@ contextBridge.exposeInMainWorld("mcd", {
   engineSetAside: (which) => ipcRenderer.invoke("mcd:engineSetAside", which),
   onDexicon: (fn) => { const h = (_e, message) => fn(message); ipcRenderer.on("mcd:dexicon", h); return () => ipcRenderer.removeListener("mcd:dexicon", h); },
 
-  // P2P Chance was removed in 0.18.68; only the settle-only status of bets already on the chain is left.
-  casinoOpen: () => ipcRenderer.invoke("mcd:casinoOpen"),
-  casinoInvalidate: () => ipcRenderer.invoke("mcd:casinoInvalidate"),
-  onCasino: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casino", h); return () => ipcRenderer.removeListener("mcd:casino", h); },
-
   // Vestr (token vesting)
   vestrStatus: () => ipcRenderer.invoke("mcd:vestrStatus"),
   vestrList: () => ipcRenderer.invoke("mcd:vestrList"),

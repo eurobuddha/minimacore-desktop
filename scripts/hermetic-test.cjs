@@ -147,11 +147,11 @@ test("dev-run.sh: refuses the real folder, a busy port and missing jars; copies 
 });
 
 // ---- 0.19.280: the vendored-file manifests run in the local suites too, and Finder's .DS_Store is not a stray ----
-test("the copied-engine manifests: in the local test:atomix and test:casino, and a .DS_Store beside the files is no stray while any other file is", () => {
+test("the copied-engine manifests: in the local test:atomix, and a .DS_Store beside the files is no stray while any other file is", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts;
-  assert.match(pkg["test:atomix"], /npm run test:atomix-manifest/); assert.match(pkg["test:casino"], /npm run test:casino-manifest/);
+  assert.match(pkg["test:atomix"], /npm run test:atomix-manifest/);
   const run = (script, ...args) => spawnSync(process.execPath, [path.join(ROOT, "scripts", script), ...args], { cwd: ROOT, encoding: "utf8" });
-  for (const [dir, script, args] of [["main/casino", "vendored-manifest.cjs", ["casino", "--verify"]], ["main/atomix", "vendored-manifest.cjs", ["atomix", "--verify"]], ["main/pandapools", "pandapools-parity-manifest.cjs", ["--verify"]], ["main/dexicon", "dexicon-parity-manifest.cjs", ["--verify"]]]) {
+  for (const [dir, script, args] of [["main/atomix", "vendored-manifest.cjs", ["atomix", "--verify"]], ["main/pandapools", "pandapools-parity-manifest.cjs", ["--verify"]], ["main/dexicon", "dexicon-parity-manifest.cjs", ["--verify"]]]) {
     const ds = path.join(ROOT, dir, ".DS_Store"), stray = path.join(ROOT, dir, "stray-0-19-280.js"), had = fs.existsSync(ds);
     try {
       if (!had) fs.writeFileSync(ds, "Finder");

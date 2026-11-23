@@ -41,7 +41,6 @@ const ethwallet = require("./ethwallet");
 const shop = require("./shop");
 require("./shop-store").setLog((m) => node.log("[app] " + m));
 require("./mail-store").setLog((m) => node.log(m));   // the same for Mail's store (0.19.169)   // a miniMall store that cannot be saved, or a coin that cannot be read, is said in the Logs view
-const casino = require("./casino");
 const vestr = require("./vestr");
 const webwallet = require("./webwallet");
 const parlons = require("./parlons");
@@ -304,7 +303,7 @@ const NODE_START_KEYS = ["params", "extraArgs", "dataFolder", "basePort", "rpcPo
 /** The window's config patch, saved (also by a restart that carries one: mcd:nodeRestart, 0.19.287). */
 function saveConfigPatch(patch) {
   if (patch && Object.keys(patch).some(k => NODE_START_KEYS.includes(k))) notBusy();   // how the node starts: never while an import or a resync runs
-  if (patch) delete patch.casinoEnabled;   // P2P Chance is removed: nothing may switch its settle-only gate on (or off)
+  if (patch) delete patch.casinoEnabled;   // P2P Chance is removed (0.19.419): its old flag stays on disk as it is, never written from a screen
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
   const c = config.save(patch || {});
   if (patch && "theme" in patch) nativeTheme.themeSource = config.themeSource(c.theme);   // the whole app, at once, no restart
@@ -322,9 +321,7 @@ ipcMain.handle("mcd:recordKeyMode", (_e, mode) => {
 });
 // What replacing the wallet would strand, asked of the existing read models (main/restore.js activeWorkList).
 const walletWork = async (skipDexicon = Date.now() < dexSkipUntil) => restore.activeWorkList({ atomix: await atomix.activeWork().catch(() => null), pools: await pandapools.activeWork().catch(() => null),
-  // P2P Chance (0.19.262): whatever the settle loop found, also on an install that only watches (the loop starts by itself
-  // when this wallet has bets on the chain). open() is null until a clean scan, so a wallet that never bet is never held up.
-  casino: casino.open(), casinoLooping: casino.looping(), casinoWaitedMs: casino.uncheckedMs(), poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
+  poolsState: pandapools.status(), ownPools: await pandapools.ownPools().catch(() => null),   // 0.18.137: why PandaPools cannot be checked; this wallet's own open pools
   futurecash: await Promise.resolve().then(fcWork).catch(() => null),   // its collects and sweeps under way (null: could not be asked, which refuses)
   dexicon: await dexWork().catch(() => null), skipDexicon });
 // Held or paused by the app's own MegaMMR flow, an engine answers from what it had open when it stopped (main/restore.js heldRead, 0.19.417):
@@ -343,10 +340,9 @@ node.onWalletReplaced = async () => {
   await each("PandaPools", () => pandapools.invalidate());
   await each("AtomiX", () => atomix.invalidate());
   await each("Dexicon", () => dexicon.invalidate({ hold: true }));   // it starts with the node, on the new wallet
-  await each("P2P Chance", () => casino.invalidate());
   await each("Future Cash Next", () => futurecash.invalidate());   // its store is the old wallet's: moved aside, never deleted
   await each("coin reservations", () => reserve.invalidate());   // every reservation belongs to the old wallet's coins
-  node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon, P2P Chance, Future Cash Next and the coin reservations were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
+  node.log("[app] wallet replaced: minimaMail, PandaPools, AtomiX, Dexicon, Future Cash Next and the coin reservations were reset in the main process" + (failed.length ? "; NOT reset: " + failed.join("; ") : ""));
   if (failed.length) throw new Error(failed.join("; "));
 };
 // Around a wallet-replacing megammrsync (node-manager runResync, 0.18.116): the three trading engines are stopped
@@ -404,7 +400,7 @@ const inFlightWork = async () => {
   // lost the others' answers and everything read as "could not be checked"; one that does not answer in 4 s is that one alone
   const one = (f) => new Promise(r => { const t = setTimeout(() => r(null), 4000); if (t.unref) t.unref(); const done = (v) => { clearTimeout(t); r(v); }; Promise.resolve().then(f).then(done, () => done(null)); });   // no timer left once it answers (0.19.334)
   const [ax, pools, dex, fc] = await Promise.all([one(() => atomix.activeWork()), one(() => pandapools.activeWork()), one(() => dexWork()), one(() => fcWork())]);
-  return { atomix: ax, pools, dexicon: dex, casino: casino.open(), casinoOn: !!config.load().casinoEnabled || casino.looping(),   // the loop running with no clean scan: not read yet (0.19.269)
+  return { atomix: ax, pools, dexicon: dex,
     futurecash: fc, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.19.288)
 };
 // Every node stop or restart goes through mayStop (main/inflight.js stopGuard, 0.19.268): with work in flight, only after the
@@ -422,11 +418,11 @@ async function guardStop(ack, action) { if (!await stopGuard.pass(ack, action)) 
 // Web Wallet's MegaMMR switch all come through mayStop (or saveConfigPatch / nodeStart), refused with the plain reason. A restart in the
 // middle of an import cuts it after the node reset its chain; a start without -megammr deletes the MegaMMR it is writing.
 const nodeBusy = () => megafile.busy() || !!node.resyncing;
-// The other apps' background loops (Mail, miniMall, Vestr, Future Cash Next, P2P Chance) while a MegaMMR file import (or a restore, a
+// The other apps' background loops (Mail, miniMall, Vestr, Future Cash Next) while a MegaMMR file import (or a restore, a
 // MegaMMR switch) runs: the node's chain and balance are being replaced. Not for the life of a marker: only the trading engines wait for that. Stopped when the import holds the engines; their start sites refuse meanwhile
-// and start them again at the first node status after (main/freeze.js paused, the Future Cash Next and P2P Chance sites below).
+// and start them again at the first node status after (main/freeze.js paused, the Future Cash Next site below).
 const loopsPaused = () => megafile.busy();   // only while an import, a restore or a MegaMMR switch actually runs
-function pauseLoops() { mail.stopLoop(); shop.stopLoop(); vestr.stopLoop(); futurecash.stop().catch(() => {}); casino.stopLoop(); casinoStarted = false; }
+function pauseLoops() { mail.stopLoop(); shop.stopLoop(); vestr.stopLoop(); futurecash.stop().catch(() => {}); }
 // While one runs, the Terminal does not touch the chain, the MegaMMR, the archive or a backup either (main/seedgate.js checkCommand io.busy).
 const busyRefusal = (c) => (nodeBusy() && cmdverb.parts(c).some(part => ["megammr", "archive", "backup", "restore"].some(v => cmdverb.beginsAs(part, v))) ? require("./megammrfile").BUSY : "");
 seedgate.setBusyCheck(busyRefusal);
@@ -1035,22 +1031,7 @@ ipcMain.handle("mcd:ewSwaps", () => ethwallet.swapsInFlight());
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
-// P2P Chance was removed in 0.18.68. What is left only SETTLES bets a wallet already has on the chain (reveal,
-// resolve, withdraw its own open offers, claim timeouts — main/casino.js). It runs at once for an install whose
-// config says casinoEnabled (nothing in the app can turn that on any more). Every other install only LOOKS, read-only,
-// for this wallet's own bets on the covenant — the old "Disable" button only hid the tab, so such a wallet can still
-// have an open offer or a taken bet — and the loop starts only if one is found. No bets: no casino writes at all.
-ipcMain.handle("mcd:casinoOpen", () => casino.open());
-ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
-casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
-let casinoStarted = false;
-function startCasinoIfEnabled() {
-  if (casinoStarted || loopsPaused()) return;
-  if (node.state !== "running") return;
-  casinoStarted = true;
-  if (require("./config").load().casinoEnabled) casino.startLoop(); else casino.watch();
-}
-node.on("status", (s) => { if (s.state === "running") startCasinoIfEnabled(); });
+// P2P Chance (the casino) was removed from this app in 0.19.419: no settle loop, no IPC. Its keychain records are kept as they are (CHANGELOG).
 
 // Vestr (token vesting)
 ipcMain.handle("mcd:vestrStatus", () => vestr.status());
@@ -1168,7 +1149,6 @@ app.on("before-quit", (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
   try { dexicon.flush(); } catch (err) {}      // and the Dexicon store (orders, takes and fills are already sync-flushed)
-  try { casino.flush(); } catch (err) {}       // casino keychain writes are sync; no-op, kept for symmetry
   try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;
   e.preventDefault();
