@@ -463,6 +463,8 @@ async function scanPayments(depth) {
     if (!got) continue;
     for (const c of got) if (c && c.coinid && !have.has(c.coinid)) { have.add(c.coinid); listed.push(c); }
   }
+  // a payment coin seen before its order was read is judged from what was kept at sight, also once the wallet has spent it (0.18.320)
+  for (const h of store.unmatched()) if (h && h.coinid && !have.has(h.coinid)) { have.add(h.coinid); listed.push(h); }
   capSeen();
   // Oldest first (0.18.185; the node lists newest first): a top-up is judged after the payment it completes. Within one block by coin id
   // (0.18.304): the larger coin went first by Number() of its amount, which compared amounts of different tokens and rounded long decimals;
@@ -493,6 +495,7 @@ async function scanPayments(depth) {
     // the order this coin pays, by its proof in port 2 (0.18.297), and the orders with a secret it does not prove
     const pay = store.payee(ref, statePort(c, 2)), o = pay.order && !pay.order.paid ? pay.order : null;
     if (pay.order) setRef(pay.order.ref);   // a coin given up on from here flags the order it would pay, another buyer's copy too (0.18.308)
+    else store.holdUnmatched(c);   // no order read for it yet: kept at sight, so a spend before the order is read does not lose it (0.18.320)
     if (!o && !pay.unproven.length) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
     // an order with a secret is paid only by coins proving it (0.18.297): a coin that pays no order at all is one NOTE on each such unpaid order
@@ -513,6 +516,7 @@ async function scanPayments(depth) {
       store.flagDuplicate(o.ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
     const outcome = store.recordPayment(o.ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id), known ? pb : 0);   // its block: how long the order settles (0.18.300)   // the store counts each coin once, across restarts
     if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
+    else store.dropUnmatched(String(id));   // judged against its order: no longer kept (0.18.320)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref: o.ref, paid: outcome }); }
     return outcome || "";
   };

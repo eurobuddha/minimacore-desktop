@@ -364,6 +364,28 @@ function setMeta(k, v) { ensureLoaded(); mem.meta[k] = v; persistSoon(); }
 function setMetaSync(k, v) { ensureLoaded(); mem.meta[k] = v; flush(); }   // fund-relevant flags (unpaid/ambiguous) must survive a crash
 function getMeta(k) { ensureLoaded(); return mem.meta[k]; }
 
+// ---- payment coins whose order is not read yet (0.18.320) ----
+// `coins` lists only UNSPENT coins, and the vendor's wallet may spend a payment (age 3) before the order message is read: the coin then
+// vanished uncounted. Each such coin is kept here at sight (its full id, block, amount, token and state ports 1-2), to be judged like a
+// listed coin until its order is in. Kept in shop.json (flushed), oldest dropped past UNMATCHED_MAX.
+// ponytail: a FIFO of 500 coins; a stranger paying 500 coins with made-up references to this address pushes older ones out
+const UNMATCHED_MAX = 500;
+function holdUnmatched(c) {
+  ensureLoaded(); const id = c && typeof c.coinid === "string" ? c.coinid : ""; if (!id) return;
+  const list = Array.isArray(mem.meta.unmatchedPay) ? mem.meta.unmatchedPay : [];
+  if (list.some(x => x && x.coinid === id)) return;
+  const st = (p) => { const s = (Array.isArray(c.state) ? c.state.find(x => x && String(x.port) === String(p)) : c.state && c.state[p]); return s && typeof s === "object" ? s.data : s; };
+  const state = {}; for (const p of [1, 2]) { const v = st(p); if (typeof v === "string") state[p] = v; }
+  list.push({ coinid: id, created: c.created, amount: c.amount, tokenamount: c.tokenamount, tokenid: c.tokenid, state, held: true });
+  while (list.length > UNMATCHED_MAX) list.shift();
+  mem.meta.unmatchedPay = list; flush();
+}
+function unmatched() { ensureLoaded(); return Array.isArray(mem.meta.unmatchedPay) ? mem.meta.unmatchedPay.slice() : []; }
+function dropUnmatched(id) {
+  ensureLoaded(); const list = Array.isArray(mem.meta.unmatchedPay) ? mem.meta.unmatchedPay : [];
+  const next = list.filter(x => !x || x.coinid !== id); if (next.length !== list.length) { mem.meta.unmatchedPay = next; persistSoon(); }
+}
+
 // ---- order chat (dedup on randomid) ----
 function addChat(m) { ensureLoaded(); if (typeof m.randomid !== "string" || m.randomid === "__proto__" || has(mem.chat, m.randomid)) return false; mem.chat[m.randomid] = m; persistSoon(); return true; }
 function chat(ref) { ensureLoaded(); return Object.values(mem.chat).filter(m => m.ref === ref).sort((a, b) => (a.date || 0) - (b.date || 0)); }
@@ -374,7 +396,7 @@ function exportAll() { ensureLoaded(); return { shops: mem.shops, orders: mem.or
 module.exports = {
   saveShop, shops, shop, deleteShop,
   upsertOrder, order, orders, refOrders, payee, setStatus, recordPayment, markOrderRead, handCheck, flagDuplicate, noteNoProof, mayAdvance, settleBlock, setOrdersRead, latchSettled, ensureChecked,
-  addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush,
+  addChat, chat, setMeta, setMetaSync, getMeta, clear, exportAll, flush, holdUnmatched, unmatched, dropUnmatched, UNMATCHED_MAX,
   _money: { decCmp, decGte, decAdd, decSub, payableTotal }, PENDING_MAX,
   _pendingDust: (ref) => { const p = PENDING_DUST.get(ref); return p ? { size: p.coins.size, sum: p.sum, min: p.min && p.min[1] } : null; }
 };

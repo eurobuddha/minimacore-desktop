@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.320] — miniMall: a payment coin seen before its order is read is kept at sight, so a spend first no longer loses it
+
+- `coins` lists only unspent coins, and the vendor's wallet may spend a payment once it is 3 blocks old. A payment coin whose order message had not been read yet was left to be judged on a later pass, and if the wallet spent it first it was never counted (main/shop.js judgeOne, the two "not marked seen" returns).
+- Such a coin is now recorded at first sight in shop.json (main/shop-store.js `holdUnmatched`: its full coin id, block, amount, token and state ports 1-2; flushed; at most 500, the oldest dropped) and judged with the listed coins on every pass, also after the wallet spent it, until it is judged against its order (then dropped). The store still counts each coin once.
+- Test: scripts/shop-test.cjs (in test:shop) — the orders read fails while the payment is listed, the wallet spends the payment, the app restarts, the order is read: it is paid, once, and the coin is no longer kept; the list is bounded. Fails on 0.18.319.
+
 ## [0.18.319] — one refusal regex: every control character and DEL, not only CR, LF and NUL
 
 - main/cmdverb.js `UNSAFE_RE = /[;\x00-\x1f\x7f]/` is the one test `refuse()` applies (main/rpc.js under every caller, the Terminal, and the PandaPools and AtomiX shims, which no longer keep their own `/[;\r\n\u0000]/` copy). A tab, ESC, vertical tab or DEL in a command is now refused like ";" and said in the same notification. The Terminal keeps its sentence: send the commands one at a time.

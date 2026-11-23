@@ -1673,3 +1673,20 @@ test("H5d: 2000 coins of two worthless tokens taking turns write shop.json at mo
     assert.equal(t.m.store.order("ORD-V").status, "UNDERPAID", "a wrong coin after it changes nothing");
     t.st.pay.push(payS("ORD-V", 1019, undefined, "0xFE02", "0.4")); await walk(t, 1019, 1024); assert.equal(t.m.store.order("ORD-V").status, "PAID"); }
 });
+
+// 0.18.320: a payment coin seen while its order is not read yet is kept at sight (full coin id, on disk), so the vendor's wallet spending it
+// first no longer loses it; it pays the order once the order is read, once, across a restart, and is then no longer kept
+test("a payment seen before its order is read and spent before the order is read still pays the order, once, across a restart", async () => {
+  const t = await javaSetup("heldpay"); t.st.msg = [await t.seal("ORD-H", 1009)]; const p = t.pay("ORD-H", 1010); t.st.pay = [p];
+  t.st.mode = "refuse";   // the orders read fails: the payment is listed, its order is not read
+  await walk(t, 1010, 1013);
+  assert.equal(t.m.store.order("ORD-H"), null, "the order is not read yet");
+  assert.ok(JSON.parse(fs.readFileSync(path.join(DIR, "shop.json"), "utf8")).meta.unmatchedPay?.some(x => x.coinid === p.coinid), "the payment coin is kept at sight in shop.json, its id whole");
+  p.spent = true; await walk(t, 1014, 1015);   // the wallet spends it: the node no longer lists it
+  const m = await t.reopen(); t.st.mode = "ok"; await walk(t, 1016, 1022);
+  const o = m.store.order("ORD-H"); assert.ok(o, "the order is read"); assert.equal(o.paid, true, "paid by the kept coin"); assert.equal(o.paidAmount, "1", "counted once");
+  assert.deepEqual(m.store.unmatched(), [], "no longer kept once judged against its order");
+  // bounded: the oldest is dropped past UNMATCHED_MAX
+  for (let i = 0; i < m.store.UNMATCHED_MAX + 3; i++) m.store.holdUnmatched({ coinid: "0xCC" + i.toString(16).padStart(4, "0"), created: 1, amount: "1", tokenid: "0x00", state: { 1: "0x41" } });
+  const kept = m.store.unmatched(); assert.equal(kept.length, m.store.UNMATCHED_MAX); assert.equal(kept[0].coinid, "0xCC0003");
+});
