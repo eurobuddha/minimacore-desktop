@@ -5935,3 +5935,12 @@
 }, { review: [
   "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "the FAST book could not be checked: {reason}": "FAST-книгу не вдалося перевірити: {reason}",
+  "the FAST book is not checked: no relay has answered yet": "FAST-книгу не перевірено: жоден релей ще не відповів",
+  "the FAST book is still not checked after a minute; only your own FAST orders are shown": "FAST-книгу досі не перевірено через хвилину; показано лише ваші FAST-ордери"
+}, { review: [
+  "the FAST book could not be checked: {reason}",
+  "the FAST book is not checked: no relay has answered yet",
+  "the FAST book is still not checked after a minute; only your own FAST orders are shown"
+] });

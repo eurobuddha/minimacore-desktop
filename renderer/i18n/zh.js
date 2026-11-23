@@ -5922,3 +5922,12 @@
 }, { review: [
   "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "the FAST book could not be checked: {reason}": "无法检查 FAST 订单簿：{reason}",
+  "the FAST book is not checked: no relay has answered yet": "FAST 订单簿尚未检查：还没有中继回应",
+  "the FAST book is still not checked after a minute; only your own FAST orders are shown": "一分钟后 FAST 订单簿仍未检查完；只显示您自己的 FAST 订单"
+}, { review: [
+  "the FAST book could not be checked: {reason}",
+  "the FAST book is not checked: no relay has answered yet",
+  "the FAST book is still not checked after a minute; only your own FAST orders are shown"
+] });

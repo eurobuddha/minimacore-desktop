@@ -874,7 +874,7 @@ async function tradeUi(o) {
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false, showModal() { o.dialogs.push(e); setImmediate(() => e.onclick({ target: { closest: () => ({ dataset: { x: o.answer === false ? "0" : "1" } }) } })); }, close() {} }; return e; };
   o.dialogs = o.dialogs || [];
   const els = {}, listeners = {}, status = Object.assign({ version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} }, o.status || {});
-  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} }, Date: o.Date || Date,
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
   win.window = win;
   win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async (a) => { cmds.push(a); return { status: true, rows: a.op === "sql" && /fill_%/.test(a.query || "") ? (o.fills ? o.fills() : []).map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) : [] }; },
@@ -1181,6 +1181,31 @@ test("0.19.412 (gate review MINOR-5): a FAST click is refused, said and nothing 
   u.els.dxCta.onclick(); await u.settle();
   assert.equal(u.drives().length, 1); assert.equal(u.drives()[0].drive.args.expect, "take");
   u.answer(u.drives()[0].drive.id, { error: "stop here" }); await u.settle();
+});
+
+test("0.19.413 (gate review MINOR-7): the FAST ladder never says 'checking…' for ever: after 60 s the reason (the page's error, or no relay answered); my own FAST orders stay on the ladder even with no view", async () => {
+  let now = Date.UTC(2026, 10, 23, 12); const RealDate = Date;
+  class Clock extends RealDate { constructor(...a) { super(...(a.length ? a : [now])); } static now() { return now; } }
+  const book = { fast: [{ side: "sell", price: "0.0040", minima: "100", ours: false }, { side: "sell", price: "0.0041", minima: "50", ours: true }], book: [], poolAsks: [], poolBids: [], pools: [] };
+  const u = await tradeUi({ book, Date: Clock });
+  const kind = () => u.els.dxKind.textContent, asks = () => [...u.els.dxAsks.innerHTML.matchAll(/data-price="([0-9.]+)"/g)].map(m => m[1]);
+  const cur = {}, pg = async (p) => { u.page(Object.assign(cur, p)); await u.settle(); };   // the stand-in fills in a ready view unless one is given
+  await pg({ view: pageView([book.fast[1]], false), relays: [{ url: "https://relay.example/dex-relay", state: "" }] });
+  assert.match(kind(), /checking which FAST orders this node can take…/);
+  now += 59000; await pg({ log: ["a"] }); assert.match(kind(), /checking which FAST orders this node can take…/, "still within the minute");
+  now += 2000; await pg({ log: ["b"] });
+  assert.match(kind(), /the FAST book is not checked: no relay has answered yet/); assert.ok(!/checking…/.test(kind()));
+  await pg({ relays: [{ url: "https://relay.example/dex-relay", state: "ok" }] });
+  assert.match(kind(), /the FAST book is still not checked after a minute; only your own FAST orders are shown/);
+  await pg({ kind: "error", notice: "Relay book unreadable: https://relay.example/dex-relay answered 502" });
+  assert.match(kind(), /the FAST book could not be checked: Relay book unreadable: https:\/\/relay\.example\/dex-relay answered 502/);
+  assert.deepEqual(asks(), ["0.0041"], "my own order is on the ladder while the view is not ready");
+  await pg({ view: null, kind: "", notice: "" });
+  assert.deepEqual(asks(), ["0.0041"], "and with no view at all: my own order, never the stranger's unchecked one");
+  await pg({ view: pageView(book.fast) });
+  assert.ok(!/not checked|checking/.test(kind()), "ready: no line"); assert.deepEqual(asks().sort(), ["0.004", "0.0041"]);
+  now += 120000; await pg({ view: pageView(book.fast, false) });
+  assert.match(kind(), /checking which FAST orders this node can take…/, "a new wait starts its own minute");
 });
 
 test("0.19.406: SWEEP is refused, with the reason and nothing sent, while the on-chain engine or the page's takeable check is not ready", async () => {

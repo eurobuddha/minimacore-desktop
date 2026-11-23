@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.413] — The FAST ladder never says "checking…" for ever
+
+- renderer/dexicon-ui.js: when the page's check of the FAST book is still not ready after 60 seconds, the ticker line says why instead of "checking…": the page's own error ("the FAST book could not be checked: …"), else "no relay has answered yet", else that it is still not checked and only your own FAST orders are shown. With no page view at all, your own FAST orders (from the service's book) stay on the ladder; a stranger's unchecked order never shows. In zh / ru / uk.
+
 ## [0.19.412] — A FAST click waits for the page's check of the book, as SWEEP does
 
 - renderer/dexicon-ui.js submit(): while the page has not yet checked which FAST orders this node can take (its takeable view is not ready), a FAST click is refused with "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent." Before, a crossing order missing from the unchecked view let the click rest as a FAST order instead of taking. In zh / ru / uk.

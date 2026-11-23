@@ -208,7 +208,7 @@ const DexUI = (() => {
    *  renderer/dexicon/mds.js as `view`), never the relay's raw list (X.book.fast, the service's read model). Before the
    *  page has checked the book only my own orders are in it; no view yet: no FAST row at all. The Trade ticket plans on
    *  the page's crossing list (`fast`), which is the same rule's. */
-  const takeable = () => { const v = Page.state.view; if (!v) return [];
+  const takeable = () => { const v = Page.state.view; if (!v) return ((X.book && X.book.fast) || []).filter(r => r && r.ours);   // 0.19.413: no view yet: my own orders still show
     const rows = (list, side) => (Array.isArray(list) ? list : []).map(r => ({ side, price: String(r.exact || r.price), minima: String(r.size), ours: !!r.own }));
     return rows(v.asks, "sell").concat(rows(v.bids, "buy")); };
   const book = () => C.tradeBook(X.book, Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
@@ -324,6 +324,15 @@ const DexUI = (() => {
     $("dxCtaSweep").onclick = () => money(() => sweep());
     $("dxMyOrders").onclick = (e) => { const b = e.target.closest("[data-oact]"); if (b) money(() => orderAction(b.dataset.oact, b.dataset.kind, b.dataset.id, b.dataset.price)); };
   }
+  /** 0.19.413: the FAST book still not checked after a minute: why, in plain words (the page's own error, else that no
+   *  relay has answered), never "checking…" for ever. */
+  const CHECK_SAY_MS = 60000;
+  function notChecked() {
+    const err = Page.failed ? C.PAGE_FAILED : Page.state.idError ? String(Page.state.idError) : /error/.test(String(Page.state.kind || "")) && Page.state.notice ? String(Page.state.notice) : "";
+    if (err) return I18N.t("the FAST book could not be checked: {reason}", { reason: err });
+    return !(Page.state.relays || []).some(r => !r.found && r.state === "ok") ? I18N.t("the FAST book is not checked: no relay has answered yet")
+      : I18N.t("the FAST book is still not checked after a minute; only your own FAST orders are shown");
+  }
   function paintTrade() {
     if (!$("dxPrice")) return;
     const why = blocker(), L = lad(), relays = (Page.state.relays || []).filter(r => !r.found), anyOk = relays.some(r => r.state === "ok") || (Page.stub && !relayDown());
@@ -333,8 +342,9 @@ const DexUI = (() => {
     $("dxMid").textContent = L.mid ? C.fmtPrice(L.mid) : "…";
     $("dxSpread").textContent = L.spread ? I18N.t("spread {spread}", { spread: C.fmt(L.spread) }) : "";
     const view = Page.state.view;   // 0.19.406: what the takeable rule left out, in the page's words; or that it has not checked yet
+    if (view && view.ready) X.viewSince = 0; else if (!X.viewSince) X.viewSince = Date.now();
     $("dxKind").textContent = I18N.t("{bestBid} · FAST + BOOK + POOL", { bestBid: (!L.mid ? I18N.t("no live orders") : L.bestBid && L.bestAsk ? I18N.t("mid of best bid / best ask") : L.bestBid ? I18N.t("best bid only") : I18N.t("best ask only")) })
-      + (!view || !view.ready ? " · " + I18N.t("checking which FAST orders this node can take…") : view.hidden ? " · " + view.hidden : "");
+      + (!view || !view.ready ? " · " + (Date.now() - X.viewSince >= CHECK_SAY_MS ? notChecked() : I18N.t("checking which FAST orders this node can take…")) : view.hidden ? " · " + view.hidden : "");
     $("dxBidsN").textContent = I18N.t("{fast} fast · {book} book order{book2}", { fast: L.count.fast, book: L.count.book, book2: I18N.s(L.count.book) });
     $("dxAsksN").textContent = I18N.t("{pools} pool{pools2}", { pools: L.count.pools, pools2: I18N.s(L.count.pools) });
     // the only outside price shown is MEXC's, with the label the engine's read model gives it
