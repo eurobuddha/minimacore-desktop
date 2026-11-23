@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.396] — A manual real-node proof of the MegaMMR file import (scripts/megammr-import-private-chain.cjs), not in the gate
+
+- `node scripts/megammr-import-private-chain.cjs --jar <minima jar> --out <empty dir> [--base 29900]` starts THROWAWAY private -test -nop2p nodes of its own (a genesis MegaMMR node G, a second genesis node G2 = another chain, and the app's real NodeManager as a light wallet node on G), drives the app's own main/megammrfile.js over them, and kills everything it started at the end, on error and on SIGINT / SIGTERM / SIGHUP. It refuses to run unless --out is empty, base >= 29900, every port it would use is free (it talks only to nodes it started), each node says -TEST, L's block 1 is G's genesis and G2's genesis differs. 127.0.0.1 only. The config is a JSON file under --out, so the import's marker really is on disk.
+- Cases: **timeout** (the import's RPC cut at 300 ms while the node imports: followed from its log, not restarted, finishes, the chain check releases the engines); **kill** (the app dies when the node prints "IBD blocks processed..": the marker is on disk, a new launch holds the engines and refuses to release them, Resync node clears it); **foreign** (a file exported by G2: imported, then found out by the chain check, the engines never released; Turn MegaMMR off + Resync node is the way out; its no-growth bound is shortened from 30 to 2 minutes for the proof, and the transcript says so).
+- Run on 2026-11-23 with minima-1.1.2.31-euro14-block.jar: all three as described (transcript in the commit message of this version).
+
 ## [0.19.395] — The MegaMMR file import, second review's minors: engines held before open work is read, the file fingerprinted, truthful messages, the other apps' loops held, the Web Wallet points to the import; a broken MegaMMR said once per node start
 
 - **Order**: the trading engines are held first, then open work is read (nothing new can start in between), then the stop guard; a refusal lets them go.
