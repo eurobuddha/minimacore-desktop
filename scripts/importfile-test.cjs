@@ -306,13 +306,24 @@ test("the screens: a file is chosen, never typed; each import asks first, saying
   assert.ok(restorePage.includes("The keys and coins this node holds now are GONE unless they are also in that backup."));
   const megaPage = body.slice(body.indexOf('if (BK_PAGE === "megafile")'), body.indexOf("// Private keys"));
   assert.ok(/const exec = async \(\) => \{ let j; try \{ j = await api\.importMegammr\(f\); \} finally \{ CFG = await api\.getConfig\(\)\.catch\(\(\) => CFG\); \} return j; \};[^\n]*\n\s*run\("bkGo", t\("Import"\), \{ host: CFG\.megammrHost, exec \}, t\("Import this MegaMMR file\?"\)/.test(megaPage), "through the shared question; the window's config read again after any import, failed or not");
-  assert.ok(megaPage.includes("A light node is switched to MegaMMR mode first and restarted.") && megaPage.includes("Turn MegaMMR off goes back, and deletes the MegaMMR file."));
+  assert.ok(megaPage.includes("A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode.") && megaPage.includes("Turn MegaMMR off goes back, and deletes the MegaMMR file."));
   const offPage = body.slice(body.indexOf('if (BK_PAGE === "megaoff")'), body.indexOf("// Private keys"));
   assert.ok(offPage.indexOf('await showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true)') < offPage.indexOf("api.megammrOff()"), "Turn MegaMMR off asks first");
   assert.ok(/MEGAMMR_OFF_WARNING = N_\("The node restarts as a light node\.\\n\\n• Its MegaMMR file \(megammr\.mmr, in the node's data folder\) is DELETED at that restart\./.test(app), "and says the file is deleted");
   assert.ok(/if \(\(CFG\.params \|\| \{\}\)\.megammr\) rows\.splice/.test(body), "offered on a MegaMMR node only");
   assert.ok(megaPage.includes("Your wallet and seed phrase are not touched.") && megaPage.includes("Any transaction still waiting to be mined is dropped."));
   assert.ok(/\["megafile", t\("Resync from a MegaMMR file"\)/.test(body), "listed in Backup & Recovery");
+  // the import's question: the trust warning; no memory figure; nothing about Resync node (it clears the MegaMMR: megammrsync.java)
+  const ask = megaPage.slice(megaPage.indexOf('t("Minima will replace this node\'s chain'), megaPage.indexOf('t("Import")); };'));
+  assert.ok(ask.includes("Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances."));
+  assert.ok(ask.includes("catches up from its peers by itself") && !/GB|memory|Resync node/.test(ask), "what catches the node up; no heap claim; no Resync node");
+  assert.ok(restorePage.includes("Every key's use count is raised by 256"), "the restore says the +256 key uses (restore.java updateIncrementAllKeyUses(256))");
+  // Startup Params: the MegaMMR switch and its checkbox ask when they move away from what is saved
+  const ps = app.slice(app.indexOf("function renderParams("), app.indexOf("function ipcRaw("));
+  assert.ok(/if \(sw\.id === "pMega"\) \{ const on = sw\.getAttribute\("aria-checked"\) !== "true"; if \(await megaAsk\(on\)\) P\.megammr = on;/.test(ps), "the switch");
+  assert.ok(/if \(f === "megammr" && !await megaAsk\(inp\.checked\)\) \{ inp\.checked = !inp\.checked; return; \}/.test(ps), "the checkbox in All parameters");
+  assert.ok(/showConfirm\(t\("Turn MegaMMR on\?"\), t\(MEGAMMR_ON_NOTE\)/.test(ps) && /showConfirm\(t\("Turn MegaMMR off\?"\), t\(MEGAMMR_OFF_WARNING\), t\("Turn MegaMMR off"\), true\)/.test(ps), "on: the empty MegaMMR note; off: the same deletion warning");
+  assert.ok(/MEGAMMR_ON_NOTE = N_\("The node keeps a MegaMMR from its next restart, but it starts empty: until a MegaMMR file is imported it is incomplete and does not know older coins\.\\n\\nTo fill it, import a MegaMMR file instead: Backup & Recovery, Resync from a MegaMMR file/.test(app));
   const pre = fs.readFileSync(path.join(ROOT, "main", "preload.js"), "utf8");
   assert.ok(/pickImport: \(kind\) => ipcRenderer\.invoke\("mcd:pickImport", kind\)/.test(pre) && /importMegammr: \(file\) => ipcRenderer\.invoke\("mcd:importMegammr", file\)/.test(pre));
   const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");

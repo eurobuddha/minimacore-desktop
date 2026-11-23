@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.390] — The MegaMMR questions say what is true: a trust warning on the import, no memory claim, what catches the node up; Startup Params' MegaMMR switch asks; Restore says the +256 key uses
+
+- **Resync from a MegaMMR file's question**: adds "Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances." Removes the memory figure (the node's memory is a setting, and the room is checked by the app). No longer suggests Resync node (megammrsync clears the MegaMMR: megammrsync.java). Says what catches the node up: its peers, by itself, as after any restart.
+- **Startup Params' MegaMMR switch** (and its checkbox under All parameters) asks when it moves away from what is saved: off shows the same deletion warning as Turn MegaMMR off; on says the MegaMMR starts empty and is incomplete until a file is imported, and points to Resync from a MegaMMR file. Proven on the private chain: switched on without an import, the node's MegaMMR held 0 coins and did not know an old coin (`coins megammr:true coinid:` → []). Cancelled, the switch stays as it was.
+- **Restore from file's question** says that every key's use count is raised by 256 (restore.java `updateIncrementAllKeyUses(256)`).
+- Tests: scripts/importfile-test.cjs (the three questions and the switch wiring; fails on 0.19.389); zh / ru / uk for every new text.
+
 ## [0.19.389] — A broken MegaMMR or Cascade at boot is said, with the button that fixes it, on every launch, and Turn MegaMMR off works with the node stopped
 
 - Proven on a private chain: a MegaMMR file whose MegaMMR is newer than its blocks, imported, makes the node print "Your MEGAMMR is BROKEN (does not start 21 where tree ends 19)" at every start. Without -mobile (the contribute role) it then HALTS (exit code 0) at every start, and the app said only "node exited unexpectedly (0)"; with -mobile (the light role) it goes on running with that MegaMMR.

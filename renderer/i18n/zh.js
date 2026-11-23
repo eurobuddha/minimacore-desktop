@@ -234,7 +234,6 @@
   "Restore this node": "恢复此节点",
   "Restore": "恢复",
   "Replace this node?": "替换此节点？",
-  "Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.": "Minima 将用 {f} 替换其钱包和链。\n\n• 此节点现在持有的密钥和币将永久消失，除非它们也在该备份中。\n• 所有仍在等待打包的交易都会被丢弃。",
   "Anyone who reads these words owns your funds. Write them down somewhere only you can reach: never in a photo, a note app or a message.": "任何看到这些单词的人都能拥有您的资金。请把它们抄写在只有您能接触到的地方：绝不要保存在照片、笔记应用或消息中。",
   "Seed": "种子",
   "Show seed phrase": "显示助记词",
@@ -3140,7 +3139,6 @@
     "Minima will rebuild its chain data from {h}.\n\n• Your wallet and seed phrase are not touched.\n• Any transaction still waiting to be mined is dropped.\n\nThis can take a while on a slow connection.",
     "Replaces this node's wallet and chain with the contents of a backup, then catches up to the chain tip from a MegaMMR node.",
     "a .bak file in the node folder, or its full path",
-    "Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.",
     "Anyone who reads these words owns your funds. Write them down somewhere only you can reach: never in a photo, a note app or a message.",
     "higher than any previous rebuild of this seed",
     "Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds.",
@@ -5619,7 +5617,6 @@
   "Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.": "从这台电脑导入 MegaMMR 文件。轻节点会为此切换到 MegaMMR 模式，并在之后保存完整的 MegaMMR。您的钱包和助记词不会被更改。",
   "Turn MegaMMR off": "关闭 MegaMMR",
   "Go back to a light node. The node's MegaMMR file is deleted.": "回到轻节点。节点的 MegaMMR 文件会被删除。",
-  "Minima will replace this node's chain with the one in {f}.\n\n• A light node is switched to MegaMMR mode first and restarted. It then uses up to 3 GB of memory (more for a large file) and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• The node restarts at the end.": "Minima 将用 {f} 中的链替换此节点的链。\n\n• 轻节点会先切换到 MegaMMR 模式并重新启动。之后它最多使用 3 GB 内存（大文件需要更多），并保持 MegaMMR 模式。关闭 MegaMMR 可以回到轻节点，并删除 MegaMMR 文件。\n• 您的钱包和助记词不会被更改。您的代币会从该文件中重新读取。\n• 所有仍在等待打包的交易都会被丢弃。\n• 节点从文件中的最后一个区块继续：较旧的文件会让节点落后，直到它追上为止。\n• 结束时节点会重新启动。",
   "The node restarts as a light node.\n\n• Its MegaMMR file (megammr.mmr, in the node's data folder) is DELETED at that restart. Turning MegaMMR on again needs a MegaMMR file to import.\n• The Web Wallet tab needs MegaMMR and stops working.\n• Your wallet, keys and funds are not touched.": "节点将作为轻节点重新启动。\n\n• 它的 MegaMMR 文件（megammr.mmr，位于节点的数据文件夹中）会在这次重新启动时被删除。再次打开 MegaMMR 需要导入一个 MegaMMR 文件。\n• Web Wallet 标签页需要 MegaMMR，将无法使用。\n• 您的钱包、密钥和资金不会被更改。",
   "Turn MegaMMR off?": "关闭 MegaMMR？",
   "MegaMMR is off. The node is restarting as a light node.": "MegaMMR 已关闭。节点正在作为轻节点重新启动。",
@@ -5630,7 +5627,6 @@
   "Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.",
   "Turn MegaMMR off",
   "Go back to a light node. The node's MegaMMR file is deleted.",
-  "Minima will replace this node's chain with the one in {f}.\n\n• A light node is switched to MegaMMR mode first and restarted. It then uses up to 3 GB of memory (more for a large file) and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• The node restarts at the end.",
   "The node restarts as a light node.\n\n• Its MegaMMR file (megammr.mmr, in the node's data folder) is DELETED at that restart. Turning MegaMMR on again needs a MegaMMR file to import.\n• The Web Wallet tab needs MegaMMR and stops working.\n• Your wallet, keys and funds are not touched.",
   "Turn MegaMMR off?",
   "MegaMMR is off. The node is restarting as a light node.",
@@ -5677,4 +5673,17 @@
   "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).",
   "This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. Press Turn MegaMMR off on this Node tab: the MegaMMR file is deleted and the node starts again as a light node.",
   "This node's chain files do not fit together (the node says \"Your Cascade is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. In Startup Params, set Rescue node to a MegaMMR node (host:port, the one Resync node uses) and press Save, then press Start again: the node rebuilds its chain from that node and stops. Then press Start again once more."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Minima will replace this node's chain with the one in {f}.\n\n• Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances.\n• A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file and catches up from its peers by itself, as after any restart. The older the file, the longer that takes.\n• The node restarts at the end.": "Minima 将用 {f} 中的链替换此节点的链。\n\n• 只导入来自您信任来源的文件。节点检查的是文件是否完整、前后一致，而不是它是否为真正的 Minima 链：错误或伪造的文件会显示另一条链和不同的余额。\n• 轻节点会先切换到 MegaMMR 模式并重新启动，之后保持 MegaMMR 模式。关闭 MegaMMR 可以回到轻节点，并删除 MegaMMR 文件。\n• 您的钱包和助记词不会被更改。您的代币会从该文件中重新读取。\n• 所有仍在等待打包的交易都会被丢弃。\n• 节点从文件中的最后一个区块继续，并像每次重新启动后一样自行从对等节点追上。文件越旧，所需时间越长。\n• 结束时节点会重新启动。",
+  "Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Every key's use count is raised by 256, so the restored wallet never signs again with a one-time key it may already have used.\n• Any transaction still waiting to be mined is dropped.": "Minima 将用 {f} 替换它的钱包和链。\n\n• 此节点现在持有的密钥和代币将会消失，除非它们也在该备份中。\n• 每个密钥的使用次数都会增加 256，这样恢复后的钱包不会再用可能已用过的一次性密钥签名。\n• 所有仍在等待打包的交易都会被丢弃。",
+  "The node keeps a MegaMMR from its next restart, but it starts empty: until a MegaMMR file is imported it is incomplete and does not know older coins.\n\nTo fill it, import a MegaMMR file instead: Backup & Recovery, Resync from a MegaMMR file (it turns MegaMMR on by itself).": "节点会从下次重新启动起保存 MegaMMR，但它一开始是空的：在导入 MegaMMR 文件之前，它不完整，也不知道较早的代币。\n\n要填满它，请改为导入 MegaMMR 文件：备份与恢复，从 MegaMMR 文件重新同步（它会自动打开 MegaMMR）。",
+  "Turn MegaMMR on?": "打开 MegaMMR？",
+  "Turn MegaMMR on": "打开 MegaMMR"
+}, { review: [
+  "Minima will replace this node's chain with the one in {f}.\n\n• Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances.\n• A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file and catches up from its peers by itself, as after any restart. The older the file, the longer that takes.\n• The node restarts at the end.",
+  "Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Every key's use count is raised by 256, so the restored wallet never signs again with a one-time key it may already have used.\n• Any transaction still waiting to be mined is dropped.",
+  "The node keeps a MegaMMR from its next restart, but it starts empty: until a MegaMMR file is imported it is incomplete and does not know older coins.\n\nTo fill it, import a MegaMMR file instead: Backup & Recovery, Resync from a MegaMMR file (it turns MegaMMR on by itself).",
+  "Turn MegaMMR on?",
+  "Turn MegaMMR on"
 ] });

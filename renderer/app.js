@@ -450,10 +450,17 @@ function renderParams(host, firstRun, done) {
       ${g.items.map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
     $("advParams").querySelectorAll("[data-flag]").forEach(inp => {
       const f = inp.dataset.flag;
-      if (inp.type === "checkbox") inp.onchange = () => { P[f] = inp.checked; paintSwitches(); };
+      if (inp.type === "checkbox") inp.onchange = async () => { if (f === "megammr" && !await megaAsk(inp.checked)) { inp.checked = !inp.checked; return; } P[f] = inp.checked; paintSwitches(); };
       else inp.onchange = () => { P[f] = inp.value; };
     });
   }
+  /** Asked when the MegaMMR setting moves away from what is saved: off says what is deleted (as Turn MegaMMR off), on says the
+   *  MegaMMR starts empty until a file is imported. false: the switch stays as it was. */
+  const megaAsk = async (on) => {
+    if (on === ((CFG.params || {}).megammr === true)) return true;
+    return on ? showConfirm(t("Turn MegaMMR on?"), t(MEGAMMR_ON_NOTE), t("Turn MegaMMR on"))
+      : showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true);
+  };
   const paintSwitches = () => { $("pMega").setAttribute("aria-checked", P.megammr === true ? "true" : "false"); $("pKeets").setAttribute("aria-checked", P.keets === true ? "true" : "false"); };
   const applyNet = (n) => {
     net = n;
@@ -463,10 +470,11 @@ function renderParams(host, firstRun, done) {
     $("pServer").disabled = n === "solo";
     renderAdvanced();
   };
-  host.querySelectorAll(".switch--m2").forEach(sw => sw.onclick = () => {
+  host.querySelectorAll(".switch--m2").forEach(sw => sw.onclick = async () => {
+    // MegaMMR: turning it off deletes the node's MegaMMR file at the restart; turning it on alone gives an empty one (megaAsk)
+    if (sw.id === "pMega") { const on = sw.getAttribute("aria-checked") !== "true"; if (await megaAsk(on)) P.megammr = on; paintSwitches(); renderAdvanced(); return; }
     sw.setAttribute("aria-checked", sw.getAttribute("aria-checked") === "true" ? "false" : "true");
-    if (sw.id === "pMega") P.megammr = isOn("pMega");
-    else if (sw.id === "pKeets") P.keets = isOn("pKeets");
+    if (sw.id === "pKeets") P.keets = isOn("pKeets");
     else if (sw.id === "pClassic") FR_CLASSIC = isOn("pClassic");   // kept for this first run only; recorded when the wallet is made
     else if (sw.id === "pServer" && net !== "solo") Object.assign(P, isOn("pServer") ? MINIMA_PARAMS.ROLE_CONTRIBUTE : MINIMA_PARAMS.ROLE_LIGHT);
     renderAdvanced();
@@ -683,7 +691,7 @@ function renderBackup() {
       // The main process checks the backup's key mode and builds the command; a refusal comes before the question below.
       try { $("bkStatus").textContent = ""; await api.restoreBackup(Object.assign({ check: true }, o)); } catch (e) { if (!await offerWithoutDexicon(e)) { $("bkStatus").textContent = ipcError(e); return; } }
       run("bkGo", t("Restore"), { host: o.host, resetsWallet: true, exec: () => api.restoreBackup(o) }, t("Replace this node?"),
-      t("Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Any transaction still waiting to be mined is dropped.", { f: f }), t("Restore")); };
+      t("Minima will replace its wallet and chain with {f}.\n\n• The keys and coins this node holds now are GONE unless they are also in that backup.\n• Every key's use count is raised by 256, so the restored wallet never signs again with a one-time key it may already have used.\n• Any transaction still waiting to be mined is dropped.", { f: f }), t("Restore")); };
     return;
   }
 
@@ -696,7 +704,7 @@ function renderBackup() {
       // the window's config is read again whatever happened: a failed import may have put the MegaMMR setting back
       const exec = async () => { let j; try { j = await api.importMegammr(f); } finally { CFG = await api.getConfig().catch(() => CFG); } return j; };   // a MegaMMR the restarted node finds broken is said from its status (onStatus)
       run("bkGo", t("Import"), { host: CFG.megammrHost, exec }, t("Import this MegaMMR file?"),
-      t("Minima will replace this node's chain with the one in {f}.\n\n• A light node is switched to MegaMMR mode first and restarted. It then uses up to 3 GB of memory (more for a large file) and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file: an old file leaves it behind until it has caught up.\n• The node restarts at the end.", { f: f }), t("Import")); };
+      t("Minima will replace this node's chain with the one in {f}.\n\n• Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances.\n• A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file and catches up from its peers by itself, as after any restart. The older the file, the longer that takes.\n• The node restarts at the end.", { f: f }), t("Import")); };
     return;
   }
 
@@ -735,6 +743,9 @@ function renderBackup() {
     t("Minima will replace this node's wallet with the one for that seed phrase and resync from a MegaMMR node.\n\n• The keys and coins this node holds now are GONE unless they belong to that phrase.\n• Key uses must be HIGHER than any previous rebuild. Minima signatures are stateful, and reusing a key index is how a wallet loses funds."), t("Rebuild")); };
 }
 
+// What turning MegaMMR on in Startup Params does without an import: the node keeps a MegaMMR from its restart, but builds it only from the
+// blocks it sees from then on (no file, no history), so it does not hold the older coins until a MegaMMR file is imported.
+const MEGAMMR_ON_NOTE = N_("The node keeps a MegaMMR from its next restart, but it starts empty: until a MegaMMR file is imported it is incomplete and does not know older coins.\n\nTo fill it, import a MegaMMR file instead: Backup & Recovery, Resync from a MegaMMR file (it turns MegaMMR on by itself).");
 // What turning MegaMMR off does (core/minima-core MinimaDB.java loadAllDB: a start without -megammr deletes databases/megammr.mmr).
 const MEGAMMR_OFF_WARNING = N_("The node restarts as a light node.\n\n• Its MegaMMR file (megammr.mmr, in the node's data folder) is DELETED at that restart. Turning MegaMMR on again needs a MegaMMR file to import.\n• The Web Wallet tab needs MegaMMR and stops working.\n• Your wallet, keys and funds are not touched.");
 /** The node's boot said its MegaMMR does not end where its chain begins (main/node-manager.js megammrBroken): once per launch, from its
