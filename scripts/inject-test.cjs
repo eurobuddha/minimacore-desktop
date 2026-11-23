@@ -82,7 +82,7 @@ test("a chat file path or a Vestr password with ';' is refused with a plain reas
   const chat = require("../main/chat"), vestr = require("../main/vestr"), sent = [];
   chat._setRunner(async (c) => { sent.push(c); return { status: true, response: { url: "keets://" + "ab".repeat(32) + "/chat/img-1.png" } }; });
   const TO = "0x" + "AB".repeat(32);
-  await assert.rejects(chat.sendImageFile(TO, "/Users/me/Pictures/cat;vault action:wipekeys.png"), /holds a ; or a " , which a node command cannot carry\. Rename the file or move it/);
+  await assert.rejects(chat.sendImageFile(TO, "/Users/me/Pictures/cat;vault action:wipekeys.png"), /holds a ; , a " or a control character, which a node command cannot carry\. Rename the file or move it/);   // CHANGED on purpose (0.18.327): names control characters too
   await assert.rejects(chat.sendImageFile(TO, '/Users/me/a"b.png'), /cannot carry/);
   assert.deepEqual(sent, []);
   await chat.sendImageFile(TO, "/Users/me/My Pictures/cat.PNG").catch(() => {});

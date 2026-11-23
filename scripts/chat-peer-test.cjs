@@ -78,3 +78,24 @@ test("chat payment: amount above zero, a valid checked address, pinned, ambiguou
   mode = "ok"; const ok = await chat.sendPayment(PEER, "2", "minima"); assert.equal(ok.status, "delivered");
   assert.ok(sent.some(c => c.startsWith("coins relevant:true sendable:true")), "the Minima send went through the pin");
 });
+
+// ---- 0.18.327: a peer's inbox sender or id, a recipient or a media ref is never pasted into a command unless it is plain ----
+test("an inbox entry whose sender or id is not plain sends nothing with it; a bad recipient, media ref or file path is refused before any command", async () => {
+  const PEER = "c3".repeat(32), sent = [];
+  const ok = JSON.stringify({ application: "maxima_chat_v1", id: "m9", body: "hi", name: "Ann", ts: 2 });
+  let inbox = [{ id: "i9 to:0x" + "ee".repeat(32), from: PEER, message: ok, ts: "1" }, { id: "i10", from: PEER + " datahex:0x00", message: ok, ts: "1" }, { id: "i11", from: PEER, message: ok, ts: "1" }];
+  chat._setRunner(async (c) => { sent.push(c);
+    if (c.startsWith("keets action:info")) return { status: true, response: { pubkey: "cd".repeat(32), drive: "" } };
+    if (c.startsWith("keets action:inbox")) { const r = inbox; inbox = []; return { status: true, response: r }; }
+    return { status: true, response: {} }; });
+  await chat.pollOnce();
+  assert.deepEqual(sent.filter(c => /ee{8}|datahex:0x00\b| to:0x(ee)+/.test(c) && !c.startsWith("keets action:inbox")), [], "nothing from the bad entries reached a command");
+  assert.ok(sent.includes("keets action:ack id:i11"), "the plain entry is handled");
+  sent.length = 0;
+  await assert.rejects(chat.fetchMedia("keets://x;quit"), /bad media ref/);
+  await assert.rejects(chat.sendImageFile("0x" + "ab".repeat(32), "/tmp/a\u007fb.png"), /control character/);
+  await assert.rejects(chat.sendImageFile("0x" + "ab".repeat(32) + " datahex:0x00", "/tmp/a.png"), /recipient/);
+  assert.deepEqual(sent, [], "nothing sent");
+  const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
+  assert.ok(/ipcMain\.handle\("mcd:chatMedia", \(_e, ref\) => \{ if \(typeof ref !== "string" \|\| ref\.length > 620/.test(main), "the IPC checks the ref too");
+});

@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.327] — Chat: a peer's inbox sender or id, a recipient and a media ref reach a keets command only when plain
+
+- main/chat.js: `keets action:ack id:` and `keets action:send to:` pasted the inbox entry's `id` and `from` as the node gave them; an entry whose sender is not 64 hex digits (with or without 0x) or whose id is not plain characters (`[A-Za-z0-9_.-]`, at most 128) is now skipped and logged, never put in a command. Every typed send (payments, photos, voice) checks its recipient (`sendTyped`), and a read receipt is sent only to a plain key.
+- The media ref is checked at the IPC as well (`mcd:chatMedia`, main/main.js: keets:// and plain characters, at most 620) before chat.fetchMedia's whole check (since 0.18.177: no ";", ":", quotes or white space, bounded). A picked file path, and the app's media folder, with a ";", a quote or any control character (DEL included) is refused with a plain message. Together with main/rpc.js's refusal of ";" and control characters under every caller (0.18.317, 0.18.319).
+- Mail: its only command with a pasted value is the constant chain-mail address; nothing from a peer reaches a command there.
+- Test: scripts/chat-peer-test.cjs (in test:chat) — inbox entries with a parameter in the id or the sender send nothing with it, a plain one is acknowledged; bad refs, paths and recipients are refused before any command; fails on 0.18.326. scripts/inject-test.cjs: the path message now names control characters (CHANGED on purpose).
+
 ## [0.18.326] — PandaPools: a txnpost answered after a wallet identity change stays pending
 
 - main/pandapools.js: an answer that arrives after `invalidate()` (a seed restore or wallet change bumps the epoch) was handed to the engine as a bare `{status:false}`, the engine's "refused, nothing was broadcast", which frees the posted inputs' claims. For a `txnpost` that request was sent: it now answers `{status:false, pending:true, error:"the node did not answer txnpost, …"}` like an unanswered post (0.18.324). Other commands answered then stay a plain failure.

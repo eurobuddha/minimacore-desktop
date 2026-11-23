@@ -107,6 +107,11 @@ async function nodeCmd(cmd) {
 }
 
 function hexOf(s) { return "0x" + Buffer.from(s, "utf8").toString("hex"); }
+// Every value from a peer or the window that is pasted into a keets command (0.18.327): a key is 0x + 64 hex, an inbox id plain
+// characters; anything else (a space would add a parameter, a ";" a command) is never put in a command. The inbox names a sender
+// with or without the 0x.
+const PEER_KEY = /^(0x)?[0-9a-fA-F]{64}$/, INBOX_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+const isPeer = (k) => typeof k === "string" && PEER_KEY.test(k);
 
 // ---- identity -------------------------------------------------------------
 async function init() {
@@ -131,6 +136,10 @@ async function pollOnce() {
     const inbox = await nodeCmd("keets action:inbox");
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
+      if (!msg || !isPeer(msg.from) || typeof msg.id !== "string" || !INBOX_ID.test(msg.id)) {   // 0.18.327: never pasted into a command
+        console.error("[chat] an inbox entry whose sender or id is not plain was skipped: " + JSON.stringify(msg && { from: String(msg.from).slice(0, 200), id: String(msg.id).slice(0, 200) }));
+        continue;
+      }
       const m = capDecoded(schema.chatDecode(msg.message));   // every peer string cut to its length before anything uses or stores it (0.18.172)
 
       // control messages: consumed, never stored or notified
@@ -288,7 +297,7 @@ async function fetchMedia(ref) {
   if (!fs.existsSync(f)) {
     // the file path is quoted (0.18.188): the app's data folder holds a space ("Application Support"), and the node's
     // parser takes a "quoted" value whole and drops the quotes
-    if (/["\u0000-\u001f;]/.test(f)) throw new Error("The app's data folder name holds a character a node command cannot carry.");
+    if (/["\u0000-\u001f\u007f;]/.test(f)) throw new Error("The app's data folder name holds a character a node command cannot carry.");
     await nodeCmd("keets action:fetch url:" + ref + ' file:"' + f + '"');
   }
   // 16MB mesh files exist; a >8MB base64 data: URL stalls main + the DOM.
@@ -300,7 +309,7 @@ async function fetchMedia(ref) {
 /** Publish a local image file to our media drive and send it as a photo message. */
 async function sendImageFile(to, filePath) {
   // 0.18.188: said plainly, before anything is sent: a node command cannot carry ; or " (or a control character) in a path
-  if (typeof filePath !== "string" || !filePath || /["\u0000-\u001f;]/.test(filePath)) throw new Error("This file's name or folder holds a ; or a \" , which a node command cannot carry. Rename the file or move it to another folder, then try again.");
+  if (typeof filePath !== "string" || !filePath || /["\u0000-\u001f\u007f;]/.test(filePath)) throw new Error("This file's name or folder holds a ; , a \" or a control character, which a node command cannot carry. Rename the file or move it to another folder, then try again.");
   if (!/^0x[0-9a-fA-F]{64}$/.test(String(to))) throw new Error("recipient must be a keets pubkey: 0x + 64 hex");
   const ext = path.extname(filePath).toLowerCase(), name = "/chat/img-" + Date.now() + (/^\.[a-z0-9]{1,5}$/.test(ext) ? ext : ".jpg");
   const pub = await nodeCmd("keets action:publish path:" + name + ' file:"' + filePath + '"');   // quoted: a path may hold spaces
@@ -349,6 +358,7 @@ async function sendPayment(to, amount, token) {
 
 /** Shared write-before-send for typed messages. */
 async function sendTyped(to, payload, fields) {
+  if (!isPeer(to)) throw new Error("recipient must be a keets pubkey: 64 hex");   // 0.18.327: payments and photos reach here too
   const msgid = JSON.parse(payload).id;
   store.addMessage(Object.assign({ msgid, pubkey: to, incoming: false, name: "", ref: "",
     ts: Date.now(), via: "", read: true, status: "sending" }, fields));
@@ -386,7 +396,7 @@ function thread(pubkey) {
   const msgs = store.thread(pubkey);
   // read receipt to the peer (blue ticks their side), deduped on the newest incoming id
   const latestIn = [...msgs].reverse().find(m => m.incoming);
-  if (latestIn && store.metaGet("receipt:" + pubkey) !== latestIn.msgid) {
+  if (latestIn && isPeer(pubkey) && store.metaGet("receipt:" + pubkey) !== latestIn.msgid) {
     store.metaSet("receipt:" + pubkey, latestIn.msgid);
     const payload = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "read" })), { ref: latestIn.msgid }));
     nodeCmd("keets action:send to:" + pubkey + " datahex:" + hexOf(payload)).catch(() => {});
