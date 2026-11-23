@@ -5838,3 +5838,12 @@
   "Start the node to check the balance.",
   "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Switch to the light theme": "切换为浅色主题",
+  "Switch to the dark theme": "切换为深色主题",
+  "Follow the system again: Settings › Appearance": "重新跟随系统：设置 › 外观"
+}, { review: [
+  "Switch to the light theme",
+  "Switch to the dark theme",
+  "Follow the system again: Settings › Appearance"
+] });

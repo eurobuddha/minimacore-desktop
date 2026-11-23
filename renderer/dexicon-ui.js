@@ -42,7 +42,8 @@ const DexUI = (() => {
       const all = [...$("dxNav").querySelectorAll(".dx-tab")], i = all.indexOf(document.activeElement); if (i < 0) return;
       const next = all[(i + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length]; e.preventDefault(); next.focus(); next.click();
     });
-    $("dxTheme").onclick = () => { C.toggleTheme(mem); write(); paintTheme(); draw(); };   // draw(): an open chart takes the new theme's colours at once (the old AtomiX panel did; 0.18.141)
+    // 0.19.403: Dexicon's sun is one of the app's three theme switches (the bar's, Settings › Appearance): it saves the app's setting
+    $("dxTheme").onclick = () => { if (opts && opts.setAppTheme) return void opts.setAppTheme(mem.theme === "ONYX" ? "light" : "dark"); C.toggleTheme(mem); write(); paintTheme(); draw(); };   // draw(): an open chart takes the new theme's colours at once (the old AtomiX panel did; 0.18.141)
     $("dxClose").onclick = () => opts.leave();
     $("dxPair").onclick = () => { if (node.state === "stopped") opts.start(); };
     $("dxCcy").onclick = () => DexAx.switchCurrency();
@@ -72,7 +73,7 @@ const DexUI = (() => {
     $("shell").dataset.dx = mem.theme;
     const dark = mem.theme === "ONYX";
     $("dxTheme").textContent = dark ? "☀" : "☾";
-    $("dxTheme").setAttribute("aria-label", dark ? I18N.t("Switch Dexicon to its light theme") : I18N.t("Switch Dexicon to its dark theme"));
+    $("dxTheme").setAttribute("aria-label", dark ? I18N.t("Switch to the light theme") : I18N.t("Switch to the dark theme"));
   }
   function paintNav() {
     const tabs = C.ROOMS[mem.room].tabs, on = C.tabOf(mem);
@@ -669,6 +670,6 @@ const DexUI = (() => {
   }
 
   /** app.js, when the app's theme changes (Settings › Appearance, or the OS on Follow the system): Dexicon follows it at once. */
-  function followApp() { C.followApp(mem, appLight()); if (opts) { paintTheme(); draw(); } }
+  function followApp(light) { C.followApp(mem, typeof light === "boolean" ? light : appLight()); if (opts) { paintTheme(); draw(); } }   // light: the theme just saved (before the media query has moved)
   return { init, paint, render, followApp, node: node_, dialog, paintStrip, say, redraw: () => draw(), money, where: () => ({ shown: shown(), shared: ours(), room: C.ROOMS[mem.room].id, tab: C.tabOf(mem) }), pickTab: (tab) => { C.pickTab(mem, tab); write(); paintNav(); render(); }, _service: onService, _preview: (page, stub) => { Page.state = page || {}; Page.stub = stub || (() => Promise.resolve({ error: "" })); draw(); } };
 })();

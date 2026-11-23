@@ -107,7 +107,26 @@ function applyTheme() {
   document.documentElement.setAttribute("data-theme", SYSTEM_LIGHT.matches ? "light" : "dark");
 }
 // the screens with a light / dark button of their own (Dexicon, Future Cash Next, Minima Explorer) start in the app's theme and follow it (0.19.379)
-SYSTEM_LIGHT.addEventListener("change", () => { applyTheme(); try { DexUI.followApp(); } catch (e) {} try { fcnFollowApp(); } catch (e) {} try { exFollowApp(); } catch (e) {} });
+SYSTEM_LIGHT.addEventListener("change", () => { applyTheme(); paintThemeBtn(); try { DexUI.followApp(); } catch (e) {} try { fcnFollowApp(); } catch (e) {} try { exFollowApp(); } catch (e) {} });
+/** The bar's light / dark button (0.19.403; the owner: "no light mode/dark mode toggle on the main homepage"), on every screen
+ *  that wears the bar. It shows the theme the app is NOT in (☀ while dark, ☾ while light, as Dexicon's) and a click saves the
+ *  opposite of what is shown now as config "theme" (light or dark), the SAME setting as Settings › Appearance and Dexicon's
+ *  button: one setting, three switches. "Follow the system" is chosen again in Settings › Appearance. */
+const SUN_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M11 1h2v4h-2zM11 19h2v4h-2zM1 11h4v2H1zM19 11h4v2h-4zM4.2 5.6l1.4-1.4 2.8 2.8-1.4 1.4zM15.6 17l1.4-1.4 2.8 2.8-1.4 1.4zM4.2 18.4l2.8-2.8 1.4 1.4-2.8 2.8zM15.6 7l2.8-2.8 1.4 1.4-2.8 2.8z"/></svg>';
+const MOON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.4 2.1A9.9 9.9 0 1 0 21.9 14 7.9 7.9 0 0 1 12.4 2.1z"/></svg>';
+function paintThemeBtn() {
+  const b = document.getElementById("themeBtn"); if (!b) return;
+  const light = document.documentElement.getAttribute("data-theme") === "light", label = light ? t("Switch to the dark theme") : t("Switch to the light theme");
+  b.innerHTML = light ? MOON_SVG : SUN_SVG; b.setAttribute("aria-label", label); b.title = label + "\n" + t("Follow the system again: Settings › Appearance");
+}
+/** Save the app's theme ("system", "light" or "dark") from any of its switches; everything that shows it follows at once. */
+async function setAppTheme(v) {
+  try { CFG = await api.saveConfig({ theme: v }); } catch (e) { toast(ipcError(e), "err"); return false; }
+  if (v === "light" || v === "dark") document.documentElement.setAttribute("data-theme", v); else applyTheme();   // main's nativeTheme then moves prefers-color-scheme too
+  paintThemeBtn(); try { DexUI.followApp(v === "light" || v === "dark" ? v === "light" : undefined); } catch (e) {}
+  if (activeView === "settings") renderSettings();
+  return true;
+}
 applyTheme();   // at once, not after boot's first IPC: the attribute is never a frame behind the page
 const THEMES = [["system", N_("Follow the system")], ["light", N_("Light")], ["dark", N_("Dark")]];
 
@@ -1073,7 +1092,7 @@ function initShell() {
     const next = shown[(i + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
     e.preventDefault(); next.focus(); next.click();
   });
-  DexUI.init({ go: selectTab, leave: () => selectTab(lastShellView), start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
+  DexUI.init({ go: selectTab, leave: () => selectTab(lastShellView), setAppTheme, start: () => { toast(t("Starting the node…")); api.nodeStart(); } });
   el("backBtn").onclick = () => (activeView === "backup" && BK_PAGE ? bkOpen("") : selectTab(lastTabView));   // a Backup & Recovery screen goes back to its hub
   el("walSend").onclick = () => selectTab("send");
   el("walReceive").onclick = () => selectTab("receive");
@@ -1099,6 +1118,8 @@ function initShell() {
   setTray(!NARROW.matches && store("shellTray") === "1", true);
   NARROW.addEventListener("change", () => setTray(!NARROW.matches && !el("tray").hidden, true));   // also drops `inert` when the window widens
 
+  el("themeBtn").onclick = () => setAppTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+  paintThemeBtn();
   // overflow menu
   el("moreBtn").onclick = () => (el("moreMenu").hidden ? openMenu() : closeMenu());
   el("moreMenu").addEventListener("click", (e) => {
@@ -3298,7 +3319,7 @@ async function renderSettings() {
     else toast(on ? t("Minima Core will open when you log in ✓") : t("Minima Core will no longer open at login"), "ok");
     renderSettings();
   };
-  host.querySelectorAll('input[name="setTheme"]').forEach(r => r.onchange = async () => { try { CFG = await api.saveConfig({ theme: r.value }); } catch (e) { toast(ipcError(e), "err"); } });   // main applies it to the whole app (nativeTheme)
+  host.querySelectorAll('input[name="setTheme"]').forEach(r => r.onchange = () => setAppTheme(r.value));   // main applies it to the whole app (nativeTheme)
   chanceLeftCard();
   if (el("kuOpen")) el("kuOpen").onclick = () => selectTab("keyuses");
 }

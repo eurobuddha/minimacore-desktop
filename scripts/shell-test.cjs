@@ -68,7 +68,7 @@ test("the theme: Settings offers Follow the system, Light and Dark, and saves th
   assert.ok(app.includes('const THEMES = [["system", "Follow the system"], ["light", "Light"], ["dark", "Dark"]];'), "the three choices");
   const set = app.slice(app.indexOf("async function renderSettings()"), app.indexOf("function keysInfo("));
   assert.ok(set.includes('sec("Appearance"') && set.includes('name="setTheme"'), "an Appearance card with the three choices");
-  assert.ok(/input\[name="setTheme"\]'\)\.forEach\(r => r\.onchange = async \(\) => \{ try \{ CFG = await api\.saveConfig\(\{ theme: r\.value \}\)/.test(set), "a choice is saved at once");
+  assert.ok(/input\[name="setTheme"\]'\)\.forEach\(r => r\.onchange = \(\) => setAppTheme\(r\.value\)\);/.test(set) && /CFG = await api\.saveConfig\(\{ theme: v \}\)/.test(app), "a choice is saved at once (setAppTheme, the one save of all three switches)");
   assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", \(\) => \{ applyTheme\(\);/.test(app) && /\napplyTheme\(\);/.test(app), "data-theme follows the applied theme, from the first frame and live");
 });
 // 0.19.379 (owner: History was dark with the app light): no screen container of the desktop's own stylesheets has a dark
@@ -111,7 +111,7 @@ test("the screens with a light / dark button of their own start in the app's the
   const fc = fs.readFileSync(path.join(R, "futurecash.js"), "utf8"), tools = fs.readFileSync(path.join(R, "apps-tools.js"), "utf8");
   assert.ok(fc.includes('const fcnTheme = () => FCN_PICK || (SYSTEM_LIGHT.matches ? "light" : "dark");') && !/localStorage/.test(fc), "Future Cash: the app's theme unless its button was pressed since; nothing of its own saved");
   assert.ok(tools.includes("const exLight = () => (EX_PICK != null ? EX_PICK : SYSTEM_LIGHT.matches);") && tools.includes("const light = exLight();") && !/explorerTheme/.test(tools), "Explorer: the same");
-  assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", \(\) => \{ applyTheme\(\); try \{ DexUI\.followApp\(\); \} catch \(e\) \{\} try \{ fcnFollowApp\(\); \} catch \(e\) \{\} try \{ exFollowApp\(\); \} catch \(e\) \{\} \}\);/.test(app), "a change of the app's theme reaches all three");
+  assert.ok(/SYSTEM_LIGHT\.addEventListener\("change", \(\) => \{ applyTheme\(\); paintThemeBtn\(\); try \{ DexUI\.followApp\(\); \} catch \(e\) \{\} try \{ fcnFollowApp\(\); \} catch \(e\) \{\} try \{ exFollowApp\(\); \} catch \(e\) \{\} \}\);/.test(app), "a change of the app's theme reaches all three");
 });
 test("the theme: Pandamonium's exact tokens", () => {
   assert.ok(/prefers-color-scheme: light/.test(css) && /prefers-color-scheme: light/.test(app));
@@ -344,4 +344,33 @@ test("C5: the Web Wallet send stops if logged out meanwhile and says main's reas
   const chat = fs.readFileSync(path.join(R, "chat.js"), "utf8");
   assert.ok(/const done = \(v\) => \{ document\.removeEventListener\("keydown", esc\); ov\.remove\(\); resolve\(v\); \};/.test(chat), "no Escape listener is left behind by a button or a click outside");
   for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); const cat = I18N.catalog(c); for (const k of ["just now", "awaiting payment", "Unverified", "Sending…"]) assert.ok(cat[k] && cat[k] !== k, c + ": " + k); }
+});
+
+// 0.19.403 (owner: "There is still no light mode/dark mode toggle on the main homepage wallet page of Pandamonium. There is one inside Dexicon."):
+// the bar's button, Settings › Appearance and Dexicon's sun save ONE setting (config theme) and each shows it at once
+test("0.19.403: the bar's light / dark button: on every screen with the bar, a click saves theme and sets data-theme; Settings and Dexicon follow at once; Dexicon's sun saves the same setting", async () => {
+  const html = fs.readFileSync(path.join(R, "index.html"), "utf8"), app = fs.readFileSync(path.join(R, "app.js"), "utf8"), ts = require("typescript");
+  const bar = html.slice(html.indexOf('<header class="bar" id="bar">'), html.indexOf("</header>", html.indexOf('<header class="bar" id="bar">')));
+  assert.ok(bar.indexOf('id="themeBtn"') > 0 && bar.indexOf('id="themeBtn"') < bar.indexOf('id="moreBtn"'), "in the shared bar, left of the menu");
+  // the real functions of app.js, run over stand-ins
+  const sf = ts.createSourceFile("app.js", app, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), decl = {};
+  for (const st of sf.statements) { if (ts.isFunctionDeclaration(st) && st.name) decl[st.name.text] = st.getText(sf); if (ts.isVariableStatement(st)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) decl[d.name.text] = st.getText(sf); }
+  const attrs = { "data-theme": "dark" }, btn = { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, innerHTML: "", title: "" }, did = [];
+  const env = { document: { documentElement: { getAttribute: (k) => attrs[k], setAttribute: (k, v) => { attrs[k] = v; } }, getElementById: (id) => (id === "themeBtn" ? btn : null) },
+    t: (s) => s, SYSTEM_LIGHT: { matches: false }, CFG: { theme: "system" }, activeView: "settings", toast: (m) => did.push("toast " + m), ipcError: (e) => e.message,
+    api: { saveConfig: async (p) => { did.push("save " + JSON.stringify(p)); return { theme: p.theme }; } }, DexUI: { followApp: (l) => did.push("dexicon " + l) }, renderSettings: () => did.push("settings " + env.CFG.theme) };
+  const f = new Function("env", "with (env) { " + ["SUN_SVG", "MOON_SVG", "applyTheme", "paintThemeBtn", "setAppTheme"].map(n => decl[n]).join("\n") + "\n return { paintThemeBtn, setAppTheme }; }")(env);
+  f.paintThemeBtn(); assert.equal(btn.attrs["aria-label"], "Switch to the light theme"); assert.ok(/<circle/.test(btn.innerHTML), "dark: the sun, as Dexicon's");
+  assert.ok(/Settings › Appearance/.test(btn.title), "says where Follow the system is");
+  const click = app.slice(app.indexOf('el("themeBtn").onclick'), app.indexOf('el("themeBtn").onclick') + 200);
+  assert.ok(/setAppTheme\(document\.documentElement\.getAttribute\("data-theme"\) === "light" \? "dark" : "light"\)/.test(click), "a click sets the opposite of what is shown now");
+  await f.setAppTheme("light");
+  assert.deepEqual(did, ['save {"theme":"light"}', "dexicon true", "settings light"]); assert.equal(attrs["data-theme"], "light"); assert.equal(env.CFG.theme, "light", "Settings' radio reads CFG");
+  assert.equal(btn.attrs["aria-label"], "Switch to the dark theme");
+  // Dexicon's sun: the same setting, through the app's own save
+  const sent = []; const C = require("../renderer/dexicon-core.js"), ui = fs.readFileSync(path.join(R, "dexicon-ui.js"), "utf8");
+  assert.ok(/\$\("dxTheme"\)\.onclick = \(\) => \{ if \(opts && opts\.setAppTheme\) return void opts\.setAppTheme\(mem\.theme === "ONYX" \? "light" : "dark"\);/.test(ui));
+  assert.ok(/DexUI\.init\(\{ go: selectTab, leave: \(\) => selectTab\(lastShellView\), setAppTheme,/.test(app), "the app hands Dexicon its save");
+  const mem = C.load(null, false); C.followApp(mem, true); assert.equal(mem.theme, "DAYLIGHT", "followApp(light) as setAppTheme calls it"); sent.push(mem.theme);
+  const css = fs.readFileSync(path.join(R, "shell.css"), "utf8"); assert.ok(/\.bar__theme \{ margin-left: auto; \}/.test(css));
 });

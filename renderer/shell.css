@@ -65,6 +65,9 @@
 .bar__tray { margin-left: 11px; color: var(--bar-nav); }
 .bar__tray svg { width: 19px; height: 14px; }
 .bar__more { margin-left: auto; margin-right: 6px; }
+/* the light / dark button (0.19.403) sits left of the menu and takes over its push to the right */
+.bar__theme { margin-left: auto; }
+.bar__theme + .bar__more { margin-left: 0; }
 .bar__back { margin-left: 4px; color: var(--text); }
 /* a count is waiting on a tray row while the tray is closed / an update is waiting in the menu */
 .bar__dot, .bar__more--update::after { position: absolute; top: 10px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--orange); }
@@ -87,7 +90,7 @@
 .shell[data-mode="app"] .bar__brand { color: var(--tray-text); line-height: 20px; }
 .shell[data-mode="app"] .bar__sub { color: var(--tray-muted); line-height: 15px; }
 /* the overflow menu stays on sub screens and in tray apps: it is the only route to Logs, Terminal, Settings and Shutdown */
-.shell[data-mode="app"] .bar__more { color: var(--tray-muted); }
+.shell[data-mode="app"] .bar__more, .shell[data-mode="app"] .bar__theme { color: var(--tray-muted); }
 .shell[data-mode="app"] .bar__more:hover { background: #212A2F; }
 .shell[data-mode="app"] .menu { top: 3px; }
 .shell[data-mode="app"] .bar__back, .shell[data-mode="app"] .bar__page,
