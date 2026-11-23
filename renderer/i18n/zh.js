@@ -5736,3 +5736,18 @@
   "Reading your coins from the new chain…",
   "Saved. Restarting the node…"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.": "此文件未被导入：{why}。没有导入任何内容，节点的链也未被改动。",
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "此文件未被导入：{why}。没有导入任何内容，节点的链也未被改动。节点已按之前的状态重启（MegaMMR 关闭）。",
+  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)": "它的链到达区块 {chaintip}，而此节点位于区块 {tip}，所以它来自另一条链，或者此节点尚未到达网络的最新区块（请等它到达后再试）",
+  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)": "它的链结束于区块 {chaintip}，比此节点的区块 {tip} 落后超过 30 天的区块（请使用较新的 MegaMMR 文件）",
+  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.": "MegaMMR 导入后正在追赶。待节点到达网络的最新区块并在新链上找到它自己之前的区块后，交易应用将重新启动。",
+  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node.": "此 MegaMMR 文件来自另一条链：节点自己之前的区块不在其中，或者它追不上网络。你的资金是安全的。交易应用保持停止。请关闭 MegaMMR，然后重新同步节点。"
+}, { review: [
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.",
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).",
+  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)",
+  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)",
+  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.",
+  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node."
+] });

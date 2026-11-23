@@ -5749,3 +5749,18 @@
   "Reading your coins from the new chain…",
   "Saved. Restarting the node…"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.": "Этот файл не импортирован: {why}. Ничего не импортировано, цепочка узла не затронута.",
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "Этот файл не импортирован: {why}. Ничего не импортировано, цепочка узла не затронута. Узел перезапущен как был (MegaMMR выключен).",
+  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)": "его цепочка доходит до блока {chaintip}, а этот узел на блоке {tip}, значит, файл из другой цепочки или этот узел ещё не догнал сеть (дождитесь этого и повторите)",
+  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)": "его цепочка заканчивается на блоке {chaintip}, более чем на 30 дней блоков позади блока {tip} этого узла (используйте свежий файл MegaMMR)",
+  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.": "Узел догоняет сеть после импорта MegaMMR. Торговые приложения запустятся снова, когда узел догонит сеть и его собственные прежние блоки найдутся в новой цепочке.",
+  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node.": "Этот файл MegaMMR из другой цепочки: собственных прежних блоков узла в нём нет, или узел не догоняет сеть. Ваши средства в безопасности. Торговые приложения остаются остановленными. Выключите MegaMMR, затем выполните синхронизацию узла."
+}, { review: [
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.",
+  "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).",
+  "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)",
+  "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)",
+  "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.",
+  "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node."
+] });

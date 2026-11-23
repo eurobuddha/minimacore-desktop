@@ -788,11 +788,16 @@ function paintImportProgress(s) {
 /** An unfinished MegaMMR file import (main/megammrfile.js marker, carried by the node's status): said on every screen, with Resync node from
  *  the MegaMMR node the app uses (config megammrHost), one press, never by itself. Not while the import itself or a resync runs. */
 const MEGA_UNFINISHED = N_("Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.");
+// After a finished import (main/megammrfile.js verify, M4): waiting for the node's own earlier blocks on the new chain and the network's tip;
+// or they are not there: the file is from another chain.
+const MEGA_CATCHUP = N_("Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.");
+const MEGA_FOREIGN = N_("This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node.");
 function paintMegaBar(s) {
   const stage = (s && s.megammrImport) || "", show = !!stage && !s.megafileBusy && !s.resyncing && !!CFG.walletDone;
   el("megaBar").hidden = !show; if (!show) return;
-  el("megaBarText").textContent = t(MEGA_UNFINISHED, { host: CFG.megammrHost || "" });
-  const b = el("megaBarResync"); b.textContent = t("Resync node now"); b.disabled = s.state !== "running";
+  el("megaBarText").textContent = stage === "catchup" ? t(MEGA_CATCHUP) : stage === "foreign" ? t(MEGA_FOREIGN) : t(MEGA_UNFINISHED, { host: CFG.megammrHost || "" });
+  const b = el("megaBarResync"); b.hidden = stage === "catchup"; b.textContent = t("Resync node now"); b.disabled = s.state !== "running";
+  const off = el("megaBarOff"); off.hidden = !(stage === "foreign" && (CFG.params || {}).megammr); off.textContent = t("Turn MegaMMR off");
 }
 async function megaResyncNow() {
   const built = resyncCommand({ host: CFG.megammrHost });
@@ -1008,7 +1013,7 @@ function initShell() {
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
   el("stopStart").onclick = () => { toast(t("Starting the node…")); api.nodeStart(); };
-  el("megaBarResync").onclick = megaResyncNow;
+  el("megaBarResync").onclick = megaResyncNow; el("megaBarOff").onclick = megammrOffNow;
   el("trayLang").onclick = () => { if (NARROW.matches) setTray(false); chooseLanguage(); };
 
   // tray

@@ -359,6 +359,7 @@ ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", asy
   return r;
 }));
 ipcMain.handle("mcd:importMegammr", (_e, shown) => megafile.importMegammr(shown));
+node.on("status", (s) => { if (s && s.state === "running") megafile.verify().catch(() => {}); });   // after an import: its own blocks found on the new chain, at the network's tip (M4)
 ipcMain.handle("mcd:megammrOff", () => megafile.megammrOff());
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {

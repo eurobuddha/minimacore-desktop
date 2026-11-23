@@ -177,6 +177,14 @@ async function flowWorld(o) {
   const mega = o.file || megaFile("flow/" + (++flowWorld.n) + "/mega 19 Nov.mmr");
   const params = Object.assign({ isclient: true }, "was" in o ? { megammr: o.was } : { megammr: answers[0] });
   const listeners = [], cfg = { megammrImport: o.marker || null };
+  // this node's chain (M4): its tip and its blocks' ids, before the import (o.before) and after it (o.after, else the same chain)
+  const ids = (n, tag) => "0x" + (tag + String(n)).padStart(64, "0").slice(-64).replace(/[^0-9A-F]/gi, "0");
+  const before = Object.assign({ tip: 1000, tag: "AA" }, o.before), t0 = Date.now();
+  let imported = false;
+  const chain = (c) => { const now = imported ? Object.assign({}, before, { at: t0 }, o.after) : before, m = /^txpow block:(\d+)$/.exec(c);
+    if (o.chain) { const r = o.chain(c, imported); if (r) return r; }
+    if (!m) return { status: true, response: { block: String(now.tip), hash: ids(now.tip, now.tag), timemilli: String(now.at || Date.now()) } };
+    return Number(m[1]) <= now.tip ? { status: true, response: { txpowid: ids(Number(m[1]), now.tag) } } : { status: false, error: "TxPoW not found @ height " + m[1] }; };
   const node = { state: o.state || "running", proc: {}, resyncing: !!o.resyncing, megammrBroken: false, heapMbNow: o.heapMbNow == null ? 3072 : o.heapMbNow, kind: () => o.kind || "parlons", dataDir: () => DIR,
     restart: async () => { did.push("restart with megammr:" + params.megammr); node.proc = {}; say(o.restartLines); node.state = o.downAfter && did.filter(x => x.startsWith("restart")).length === o.downAfter ? "error" : "running"; }, snapshot: () => ({ state: node.state }),
     start: async () => { did.push("start"); node.proc = {}; node.state = "running"; },
@@ -188,26 +196,27 @@ async function flowWorld(o) {
     config: { load: () => ({ heapMb: o.heapMb || 0, params: Object.assign({}, params), megammrImport: cfg.megammrImport ? JSON.parse(JSON.stringify(cfg.megammrImport)) : undefined }), save: (p) => { did.push("save " + JSON.stringify(p.params)); Object.assign(params, p.params); },
       setMegammrImport: (v) => { did.push("marker " + (v ? v.stage : "cleared")); cfg.megammrImport = v || null; } },
     status: async () => { const m = answers.length > 1 ? answers.shift() : answers[0]; did.push("status " + m); if (m === null) throw new Error("ECONNREFUSED"); return { status: true, response: { megammr: m } }; },
-    call: async (c) => { did.push(c.replace(mega, "F")); say(o.checkLines); return o.check ? o.check(c, { node, say }) : { status: true, response: {} }; },
+    call: async (c) => { if (/^(block|txpow block:\d+)$/.test(c)) return chain(c); did.push(c.replace(mega, "F")); say(o.checkLines); return o.check ? o.check(c, { node, say }) : { status: true, response: {} }; },
     mayStop: async () => { did.push("guard"); if (o.refuse) throw new Error("The node keeps running: nothing was stopped."); }, held: (op) => op(),
-    runResync: async (c) => { did.push(c.replace(mega, "F")); if (o.swap) o.swap(mega); say(o.importLines); return o.import ? o.import(c, { node, say, cfg }) : { status: true }; },
+    runResync: async (c) => { did.push(c.replace(mega, "F")); imported = true; if (o.swap) o.swap(mega); say(o.importLines); return o.import ? o.import(c, { node, say, cfg }) : { status: true }; },
     work: async () => o.work || [], holdEngines: async () => { did.push("hold"); }, releaseEngines: async () => { did.push("release"); } };
   if (o.emit) { node.emit = () => o.emit(node); d.showMs = 0; }
-  if (o.sleep) d.sleep = (ms) => o.sleep(ms, { node, say, did }); if (o.stallMs) d.stallMs = o.stallMs;
+  if (o.sleep) d.sleep = (ms) => o.sleep(ms, { node, say, did }); if (o.stallMs) d.stallMs = o.stallMs; if (o.stuckMs) d.stuckMs = o.stuckMs;
   const mf = MF.create(d);
   await imports.pick("megammr");
   let r; try { r = await (o.off ? mf.megammrOff() : mf.importMegammr(mega)); } catch (e) { r = e.message; }
+  for (let i = 0; i < 30; i++) await new Promise(res => setImmediate(res));   // the check after the import (verify) runs by itself
   return { did, r, params, mf, MF, cfg, node };
 }
 
 test("Resync from a MegaMMR file: engines held for the whole import; only {megammr:true} saved, always, before any restart; the node's own reader checks the whole file before anything is reset", async () => {
   let w = await flowWorld({});
   assert.deepEqual(w.did, ["status false", "guard", "hold", 'save {"megammr":true}', "restart with megammr:true", "status true", "guard",
-    'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker cleared", "release"]);   // the marker, right before the import (0.19.392)
+    'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker catchup", "marker cleared", "release"]);   // the marker, right before the import (0.19.392)
   assert.deepEqual(w.r, { status: true, broken: false, on: true }); assert.equal(w.params.megammr, true);
   // already a MegaMMR node: no switch, but the setting is still saved before the import (its restart must keep the MegaMMR)
   w = await flowWorld({ megammr: [true], was: false });
-  assert.deepEqual(w.did, ["status true", "guard", "hold", 'save {"megammr":true}', 'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker cleared", "release"]);
+  assert.deepEqual(w.did, ["status true", "guard", "hold", 'save {"megammr":true}', 'megammr action:integrity file:"F"', "marker importing", 'megammr action:import file:"F"', "marker catchup", "marker cleared", "release"]);
   // ...whose memory setting was changed since it started: restarted first, so the room counted is the room it has
   w = await flowWorld({ megammr: [true, true], heapMb: 8192, heapMbNow: 3072 });
   assert.deepEqual(w.did.slice(0, 6), ["status true", "guard", "hold", 'save {"megammr":true}', "restart with megammr:true", "status true"]);
@@ -383,7 +392,7 @@ test("M2: a Resync node that ended well clears the marker and releases the engin
   assert.ok(/this\.emit\("line", scrub\(l, this\.secret\)\);[^\n]*\n\s*this\.log\(l\);\n\s*\}/.test(nm) && /megammrImport: \(\(m\) => \(m && typeof m === "object" && String\(m\.stage \|\| ""\)\) \|\| ""\)\(config\.load\(\)\.megammrImport\)/.test(nm), "the node's fresh lines and the marker's stage in its status");
   // the window: the banner on every screen, its one press, never by itself
   const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8"), html = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
-  assert.ok(/id="megaBar" role="alert" hidden><span id="megaBarText"><\/span><button class="btn btn--primary btn--sm" id="megaBarResync"><\/button>/.test(html));
+  assert.ok(/id="megaBar" role="alert" hidden><span id="megaBarText"><\/span><button class="btn btn--outline btn--sm" id="megaBarOff" hidden><\/button><button class="btn btn--primary btn--sm" id="megaBarResync"><\/button>/.test(html));
   assert.ok(/MEGA_UNFINISHED = N_\("Balance incomplete after an unfinished MegaMMR import\. Your funds are safe\. Resync node rebuilds the chain from \{host\}\."\)/.test(app));
   assert.ok(/show = !!stage && !s\.megafileBusy && !s\.resyncing && !!CFG\.walletDone;/.test(app) && /t\(MEGA_UNFINISHED, \{ host: CFG\.megammrHost \|\| "" \}\)/.test(app), "with the host from config");
   assert.equal((app.match(/megaResyncNow\b/g) || []).length, 2, "defined once, called only from its button"); assert.ok(/el\("megaBarResync"\)\.onclick = megaResyncNow;/.test(app));
@@ -396,7 +405,7 @@ test("M3: no answer from a node that is still importing is not an end: it is fol
   let w = await flowWorld({ importLines: RESET_LINES, import: () => { throw new Error("RPC timeout. The node did not answer, and it may still be resyncing"); },
     sleep: async (ms, x) => { if (steps.length) x.say([steps.shift()]); else if (x.node.proc) { x.did.push("node exits by itself"); x.node.proc = null; x.node.state = "error"; } } });
   assert.deepEqual(w.r, { status: true, broken: false, on: true }, String(w.r));
-  assert.deepEqual(w.did.slice(-5), ['megammr action:import file:"F"', "node exits by itself", "start", "marker cleared", "release"], "no restart while it worked");
+  assert.deepEqual(w.did.slice(-6), ['megammr action:import file:"F"', "node exits by itself", "start", "marker catchup", "marker cleared", "release"], "no restart while it worked");
   // no new step for longer than the stall bound: given up (after the reset: the marker stays, the node is restarted)
   w = await flowWorld({ importLines: RESET_LINES, stallMs: 30, import: () => { throw new Error("RPC timeout"); }, sleep: () => new Promise(r => setTimeout(r, 5)) });
   assert.match(w.r, /the node showed no progress for 0 minutes/); assert.equal(w.cfg.megammrImport.stage, "failed"); assert.ok(w.did.includes("restart with megammr:false"));
@@ -444,4 +453,47 @@ test("the owner's complaint (2026-11-23): the import's screen shows every step l
   assert.ok(/if \(activeView === "backup" && BK_PAGE === "megafile"\) paintImportProgress\(s\);/.test(app) && /wirePick\("megammr"\); paintImportProgress\(LAST_STATUS\);/.test(app), "from every status, and when the screen is opened again");
   const nm = fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8");
   assert.ok(/megafileLog: this\.megafileBusy && Array\.isArray\(this\.megafileLog\) \? this\.megafileLog\.slice\(\) : \[\]/.test(nm) && /this\.emit\("line", scrub\(l, this\.secret\)\)/.test(nm), "redacted as the Logs are");
+});
+
+// ---- second review, M4 (0.19.394): a file from another chain is refused by its tip, or found out after the import; the engines wait for the network's tip ----
+test("M4: the file's chain tip against this node's: far above, starting above it, or more than 30 days below is refused before anything is reset", async () => {
+  const MF = require("../main/megammrfile.js"), at = (chaintip, cascadetip) => () => ({ status: true, response: { cascadetip: String(cascadetip), chaintip: String(chaintip), weight: "1" } });
+  let w = await flowWorld({ check: at(1101, 1000) });   // 101 above a node at 1000
+  assert.equal(w.r, F.say(MF.TIP_REFUSED_BACK, { why: F.say(MF.AHEAD_WHY, { chaintip: "1101", tip: "1000" }) })); assert.ok(!w.did.some(x => /action:import/.test(x)) && w.did.includes("restart with megammr:false"));
+  w = await flowWorld({ megammr: [true], check: at(1050, 1000) });   // its block list starts at this node's tip: none of its blocks could be found in it
+  assert.equal(w.r, F.say(MF.TIP_REFUSED, { why: F.say(MF.AHEAD_WHY, { chaintip: "1050", tip: "1000" }) }));
+  w = await flowWorld({ before: { tip: 60000 }, check: at(8159, 7000) });   // 51841 blocks behind
+  assert.equal(w.r, F.say(MF.TIP_REFUSED_BACK, { why: F.say(MF.BEHIND_WHY, { chaintip: "8159", tip: "60000" }) }));
+  for (const [top, casc] of [[1100, 999], [990, 900], [8160, 7000 + 52000 - 52000]]) { w = await flowWorld({ before: { tip: top === 8160 ? 60000 : 1000 }, check: at(top, casc) }); assert.deepEqual(w.r, { status: true, broken: false, on: true }, top + ": " + w.r); }
+  assert.equal(MF.AHEAD, 100); assert.equal(MF.BEHIND, 51840); assert.equal(MF.DEEP, 300);
+  // this node's tip cannot be read: nothing decided on an unknown
+  w = await flowWorld({ chain: (c) => (c === "block" ? { status: false, error: "x" } : null) });
+  assert.equal(w.r, MF.STATUS_UNKNOWN); assert.ok(!w.did.some(x => /action:(integrity|import)/.test(x)));
+});
+
+test("M4: after the import the engines wait until this node's own earlier blocks are on the new chain and it is at the network's tip; another chain is said, and nothing is released", async () => {
+  // the anchors are recorded before anything is touched: DEEP back, NEAR back and the tip, with their ids, whole
+  let w = await flowWorld({ after: { tip: 1000, tag: "AA", at: Date.now() - 2 * 3600 * 1000 } });   // same chain, tip 2 hours old: not caught up
+  assert.deepEqual(w.cfg.megammrImport.anchors.map(a => a.block), [700, 997, 1000]); assert.ok(w.cfg.megammrImport.anchors.every(a => /^0x[0-9A-F]{64}$/i.test(a.txpowid)));
+  assert.equal(w.cfg.megammrImport.stage, "catchup"); assert.ok(!w.did.includes("release"), "held while it catches up");
+  // ...then it reaches the tip: confirmed, released
+  const after = { tip: 950, tag: "AA", at: Date.now() - 3 * 3600 * 1000 };
+  w = await flowWorld({ after });   // an older file: below the old tip
+  assert.equal(w.cfg.megammrImport.stage, "catchup");
+  Object.assign(after, { tip: 1012, at: Date.now() }); await w.mf.verify();
+  assert.equal(w.cfg.megammrImport, null); assert.equal(w.did.at(-1), "release");
+  // another chain at the anchors' heights: "foreign" at once, nothing released, the banner says so with Turn MegaMMR off and Resync node
+  w = await flowWorld({ after: { tip: 1040, tag: "BB", at: Date.now() } });
+  assert.equal(w.cfg.megammrImport.stage, "foreign"); assert.ok(!w.did.includes("release"));
+  // a shorter chain that never grows towards the old tip (its peers are on another chain): foreign after STUCK_MS
+  w = await flowWorld({ after: { tip: 650, tag: "BB", at: Date.now() - 3600 * 1000 } });
+  assert.equal(w.cfg.megammrImport.stage, "catchup");
+  const MF = require("../main/megammrfile.js"); assert.equal(MF.STUCK_MS, 30 * 60 * 1000); assert.equal(MF.FRESH_MS, 30 * 60 * 1000);
+  w = await flowWorld({ after: { tip: 650, tag: "BB", at: Date.now() - 3600 * 1000 }, stuckMs: 1 });
+  await new Promise(r => setTimeout(r, 5)); await w.mf.verify(); assert.equal(w.cfg.megammrImport.stage, "foreign");
+  const main = fs.readFileSync(path.join(ROOT, "main", "main.js"), "utf8");
+  assert.ok(/node\.on\("status", \(s\) => \{ if \(s && s\.state === "running"\) megafile\.verify\(\)\.catch\(\(\) => \{\}\); \}\);/.test(main), "asked at every status, at launch too");
+  const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8");
+  assert.ok(/stage === "catchup" \? t\(MEGA_CATCHUP\) : stage === "foreign" \? t\(MEGA_FOREIGN\)/.test(app) && /off\.hidden = !\(stage === "foreign" && \(CFG\.params \|\| \{\}\)\.megammr\)/.test(app) && /el\("megaBarOff"\)\.onclick = megammrOffNow;/.test(app));
+  assert.ok(/b\.hidden = stage === "catchup";/.test(app), "no Resync offered while it only catches up");
 });
