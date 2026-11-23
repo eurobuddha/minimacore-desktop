@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.401] — The real-node proof script follows 0.19.400 (released only on a matched block), with --cases and --offer-minutes
+
+- scripts/megammr-import-private-chain.cjs: `--cases older,crash,behind,mismatch` runs a subset; `--offer-minutes` shortens the app's 10 minutes for the Keep offer and the "not receiving new blocks" line, and the transcript says so. The older-file case waits for the release or the stuck line (then Resync node); the other-genesis case checks that nothing is released, then presses Keep.
+- Run 2026-11-23 (`--cases older,mismatch --offer-minutes 2`): the older file was held at "block 50 of at least 57", then released when "block 57 is the same block as before the import and the node's tip is fresh (block 62, 8 s old)"; the other genesis' file was NOT released ("catchup" from block 40 to 47 of at least 60, Keep offered after 2 minutes), and Keep released it.
+- Not reproduced on this run: the stuck-on-orphan case (it came about by chance in an earlier run: the node stayed on its file's last block, "Invalid TxPoW Super Parents"); a lone -test node mines its own blocks, so a stall cannot be forced here. The stalled banner is covered by scripts/importfile-test.cjs.
+
 ## [0.19.400] — After a MegaMMR file import the trading engines start only when one of the node's own earlier blocks is found again; freshness alone never releases
 
 - The owner's decision on the gap the 0.19.399 run found (a file from another genesis, ending at a block under 30 minutes old, was released before any block was compared): in "catchup" the engines are released only when BOTH hold: the node has reached a block height recorded before the import and holds the SAME block id there, and its tip block is at most 30 minutes old.

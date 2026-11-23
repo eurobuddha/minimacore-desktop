@@ -3,7 +3,8 @@
  * megammr-import-private-chain.cjs — MANUAL proof of Backup & Recovery's "Resync from a MegaMMR file" (main/megammrfile.js) against
  * THROWAWAY PRIVATE test chains. NEVER in CI, never a test:* script, never against a node holding funds.
  *
- *   node scripts/megammr-import-private-chain.cjs --jar <minima jar> --out <empty dir> [--base 29900]
+ *   node scripts/megammr-import-private-chain.cjs --jar <minima jar> --out <empty dir> [--base 29900] [--cases older,crash,behind,mismatch]
+ *                                                 [--offer-minutes 10]   (the app's 10; a shorter one is said in the transcript)
  *
  * It starts every node it talks to itself, in fresh folders under --out, all with -test -nop2p:
  *   G   a genesis -megammr node (port base)        the chain the wallet lives on; exports the MegaMMR files
@@ -31,6 +32,7 @@ const ROOT = path.resolve(__dirname, "..");
 const arg = (n) => { const i = process.argv.indexOf("--" + n); return i > 0 ? process.argv[i + 1] : undefined; };
 function refuse(why) { console.error("REFUSED: " + why + ". Nothing was started."); process.exit(2); }
 const JAR = arg("jar"), OUT = arg("out") && path.resolve(arg("out")), BASE = Number(arg("base") || 29900);
+const CASES = String(arg("cases") || "older,crash,behind,mismatch").split(","), OFFER_MIN = Number(arg("offer-minutes") || 10);   // the app's Keep offer and "not receiving blocks" line come after 10 minutes
 if (!JAR || !fs.existsSync(JAR)) refuse("--jar must name the minima jar to run");
 if (!OUT) refuse("--out must name an output folder");
 if (!Number.isInteger(BASE) || BASE < 29900 || BASE > 65000) refuse("--base must be 29900 or above (the owner's nodes and other agents' live below)");
@@ -100,7 +102,7 @@ function newApp(label) {
 let picked = "", steps = [], onStatus = null; const banners = [];
 function flow(o = {}) {
   const imports = importfile.create({ fs, platform: process.platform, showOpen: async () => ({ canceled: false, filePaths: [picked] }), dataDir: () => node.dataDir() });
-  const d = { node, config: o.config || configStub, status: () => L("status"), call: (c) => L(c), imports, mayStop: async () => {}, held: (op) => op(), runResync: o.runResync || ((c) => node.runResync(c)),
+  const d = { offerMs: OFFER_MIN * 60000, node, config: o.config || configStub, status: () => L("status"), call: (c) => L(c), imports, mayStop: async () => {}, held: (op) => op(), runResync: o.runResync || ((c) => node.runResync(c)),
     work: async () => [], holdEngines: async () => { events.push("loops stopped"); return node.onEnginesHold(); }, releaseEngines: () => node.releaseEngines(), fs, totalmem: () => os.totalmem(),
     platform: process.platform, log: (l) => node.log(l), sleep, upMs: 5 * 60 * 1000 };
   const mf = MF.create(d);
@@ -163,15 +165,8 @@ async function main() {
   const foreign = await exportFrom(G2, "other-chain.megammr");
   await node.start(); await lUp(); await waitFor(async () => (await block(L)) >= (await block(G.call)) - 1, "L caught up");
   await lState("before the cases");
+  if (OFFER_MIN !== 10) say("NOTE: the Keep offer and the 'not receiving new blocks' line come after " + OFFER_MIN + " minutes in this run, instead of the app's 10");
 
-  // ---- older file (the normal case), its RPC cut at 300 ms: followed, never restarted, released once the tip is fresh; no verdict ----
-  say("=== CASE older file + timeout: a file older than this node's tip; the import's RPC gives up after 300 ms while the node imports");
-  await runImport(fresh, { runResync: (c) => { events.push("import sent, its RPC cut at 300 ms"); return raw(LP + 4, c, { pw: LPW, timeout: 300 }); } });
-  await waitFor(async () => (configStub.load().megammrImport ? null : true), "released", 600000, 3000).catch(e => say(e.message));
-  say("  banners shown meanwhile:", JSON.stringify(banners), "| engines:", events.join(", ")); await lState("after the older file");
-  await sleep(60000); say("  a minute later: L at block", await block(L), "| G at block", await block(G.call)); await recover();
-
-  // ---- crashes mid-import: the app dies when the node prints "IBD blocks processed.." ----
   // L back on G's tip before the next case: it catches up by itself, or (seen on this private chain after importing a file whose last block
   // G then orphaned: "Invalid TxPoW Super Parents" for every next block) a Resync node from G puts it back
   async function recover() {
@@ -182,6 +177,22 @@ async function main() {
     await lUp(); await waitFor(async () => ((await block(L)) >= (await block(G.call)) - 1 ? true : null), "L caught up after resync", 600000, 3000);
     say("  recovered:", JSON.stringify(r.response || r.error));
   }
+  if (CASES.includes("older")) {
+  // ---- older file (the normal case), its RPC cut at 300 ms: followed, never restarted; released once a recorded block is found again
+  // with the same id AND the tip is fresh. Seen once on this chain: L stuck on the file's last block after G orphaned it (the stuck case)
+  say("=== CASE older file + timeout: a file older than this node's tip; the import's RPC gives up after 300 ms while the node imports");
+  const ro = await runImport(fresh, { runResync: (c) => { events.push("import sent, its RPC cut at 300 ms"); return raw(LP + 4, c, { pw: LPW, timeout: 300 }); } });
+  const got = await waitFor(async () => (!configStub.load().megammrImport ? "released" : node.megafileBanner && node.megafileBanner.stalled ? "stalled" : null), "released", (OFFER_MIN + 5) * 60000, 3000).catch(e => e.message);
+  say("  outcome:", got, "| banners shown meanwhile:", JSON.stringify(banners), "| engines:", events.join(", ")); await lState("after the older file");
+  if (got === "stalled") {
+    say("  STUCK: the node is not receiving new blocks; the banner says so and offers Resync node (engines still held: " + !events.includes("engines released") + ")");
+    const rs = await node.runResync("megammrsync action:resync host:127.0.0.1:" + GP).catch(e => ({ status: false, error: e.message }));
+    if (rs.status === true) await ro.mf.resynced(); await lUp();
+  }
+  await sleep(30000); say("  then: L at block", await block(L), "| G at block", await block(G.call)); await recover();
+  }
+  if (CASES.includes("crash")) {
+  // ---- crashes mid-import: the app dies when the node prints "IBD blocks processed.." ----
   async function crash(label, beforeRelaunch) {
     say("=== CASE " + label);
     await recover();
@@ -224,7 +235,9 @@ async function main() {
   say("  Resync node ->", JSON.stringify(rs.response || rs.error)); if (rs.status === true) await mf2.resynced();   // main.js runResync
   await lUp(); await sleep(8000); await lState("after Resync node"); say("  engines:", events.join(", "));
   await recover();
+  }
 
+  if (CASES.includes("behind")) {
   // ---- a node that is behind imports a newer file: allowed (the old refusals are gone) ----
   say("=== CASE behind: L cut off from G (connect to a closed port) while G goes on; then a NEWER file from G is imported");
   configStub.save({ params: { connect: "127.0.0.1:" + (BASE + 63) } }); await node.restart(); await lUp();
@@ -239,23 +252,25 @@ async function main() {
   if (verdict === "mismatch") { say("  the node had mined its own fork while cut off; the user presses Keep the imported chain"); await rb.mf.keep(); await sleep(1000); say("  engines:", events.join(", ")); }
   configStub.save({ params: { connect: "127.0.0.1:" + GP } }); await node.restart(); await lUp();
   await sleep(30000); say("  reconnected to G: L at block", await block(L), "| G at block", await block(G.call)); await recover();
+  }
 
-  // ---- a different block id at a recorded height: the fork said as such, Keep releases ----
-  say("=== CASE mismatch: a MegaMMR file exported by ANOTHER chain (G2, genesis " + G2.genesis + ")");
+  if (CASES.includes("mismatch")) {
+  // ---- a file from ANOTHER genesis: its last block is fresh, but none of this node's recorded blocks is on its chain: NOT released ----
+  say("=== CASE other genesis: a MegaMMR file exported by ANOTHER chain (G2, genesis " + G2.genesis + ")");
   banners.length = 0; const r = await runImport(foreign);
   if (r.out.ok) {
-    // a lone -test node mines on by itself, so it grows towards the old tip until a recorded height shows another block
-    // released already when the file's own last block is under 30 minutes old (the freshness rule): then no block of this node's was compared
-    const outcome = await waitFor(async () => { const m = configStub.load().megammrImport; return !m ? "released" : m.stage === "mismatch" ? "mismatch" : null; }, "mismatch or released", 1800000, 3000).catch(e => e.message);
-    say("  outcome:", outcome);
-    if (outcome === "released") { say("  RELEASED WITHOUT A COMPARISON: the other chain's file ended at a block under 30 minutes old, so the tip counted as fresh before any recorded height was reached"); }
-    await lState("after the other chain's file"); say("  banner:", JSON.stringify(node.megafileBanner || null)); say("  banners on the way:", JSON.stringify(banners.map(b => b.kind + (b.block ? ":" + b.block : "")))); say("  engines:", events.join(", "));
-    if (outcome === "mismatch") say("  the user presses Keep the imported chain"); await r.mf.keep(); await sleep(1000); say("  engines:", events.join(", ")); await lState("after Keep");
+    await sleep((OFFER_MIN * 60 + 30) * 1000);
+    const m = configStub.load().megammrImport;
+    await lState("after the other chain's file, " + OFFER_MIN + " minutes on"); say("  marker:", m && m.stage, "| banner:", JSON.stringify(node.megafileBanner || null));
+    say("  banners on the way:", JSON.stringify(banners.map(b => b.kind + (b.block ? ":" + b.block : "") + (b.target ? "/" + b.target : "") + (b.offer ? " offer" : "") + (b.stalled ? " stalled" : ""))));
+    say("  engines (released?", events.includes("engines released") + "):", events.join(", "));
+    say("  the owner presses Keep the imported chain"); await r.mf.keep(); await sleep(1000); say("  engines:", events.join(", ")); await lState("after Keep");
     say("  (proof cleanup: Turn MegaMMR off, then Resync node, back to G's chain)");
     await r.mf.megammrOff(); await lUp();
     const rs2 = await node.runResync("megammrsync action:resync host:127.0.0.1:" + GP).catch(e => ({ status: false, error: e.message }));
     if (rs2.status === true) await r.mf.resynced();
     await lUp(); await sleep(8000); await lState("after Turn MegaMMR off + Resync node");
+  }
   }
 }
 
