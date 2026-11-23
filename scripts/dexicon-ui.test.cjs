@@ -1141,9 +1141,15 @@ test("0.19.406: SWEEP sends: one confirmation with both parts and the worst pric
   const intent = u.cmds.filter(c => c.op === "intent").pop();
   assert.deepEqual(JSON.parse(JSON.stringify(intent)), { op: "intent", type: "LIMIT", buy: false, price: "0.004413", amount: "1234.56789012" }, "the remainder, at the 6-decimal limit (SELL up)");
   const d2 = u.drives()[1].drive;
-  assert.equal(d2.act, "sweepChain"); assert.deepEqual(JSON.parse(JSON.stringify(d2.args)), { buy: false, price: "0.004413", amount: "1234.56789012" });
+  assert.equal(d2.act, "sweepChain"); const ref = d2.args.ref;
+  assert.match(ref, /^[A-Za-z0-9]{8,40}$/, "0.19.411: the on-chain part carries its own reference");
+  assert.deepEqual(JSON.parse(JSON.stringify(d2.args)), { buy: false, price: "0.004413", amount: "1234.56789012", ref });
   u.answer(d2.id, {}); await u.settle();
-  u.win.DexUI._service(JSON.stringify({ origin: "service", type: "POSTED", data: { message: "Blended trade submitted — waiting for confirmation", tx: CHAINTX } })); await u.settle(); await u.settle();
+  // 0.19.411 (gate review MINOR-4): another action's answer is not this sweep's, however soon it comes
+  u.win.DexUI._service(JSON.stringify({ origin: "service", type: "ERROR", data: { message: "That is not one of your active orders" } }));
+  u.win.DexUI._service(JSON.stringify({ origin: "service", type: "POSTED", data: { message: "Consolidation submitted", tx: H("3D"), ref: "swOTHER00001" } })); await u.settle(); await u.settle();
+  assert.ok(!u.els.dxLog.innerHTML.includes("On-chain:"), "still waiting for its own answer: " + u.els.dxLog.innerHTML);
+  u.win.DexUI._service(JSON.stringify({ origin: "service", type: "POSTED", data: { message: "Blended trade submitted — waiting for confirmation", tx: CHAINTX, ref } })); await u.settle(); await u.settle();
   const log = u.els.dxLog.innerHTML;
   assert.ok(log.includes("FAST: 500 MINIMA co-signed and sent.") && log.includes("FAST transaction " + FILLTX), log);
   assert.ok(log.includes("On-chain: Blended trade submitted") && log.includes("On-chain transaction " + CHAINTX), "every id whole");

@@ -1456,6 +1456,26 @@ test("0.19.409 (gate review MINOR-1): the page's FAST create reads the resting e
   assert.deepEqual(refused, []);
 });
 
+test("0.19.411 (gate review MINOR-4): the service's POSTED / ERROR for a page LIMIT carries that LIMIT's ref — told at once, after the pool refresh, or from the transaction's own callback — and no other packet does", async () => {
+  const b = await boot(), packets = [];
+  b.host.emitter.on("comms", (m) => { try { const p = JSON.parse(m); if (p.origin === "service" && (p.type === "POSTED" || p.type === "ERROR")) packets.push(p); } catch (e) {} });
+  const limit = async (data) => { await b.host.command({ op: "intent", type: "LIMIT", buy: !!data.buy, price: data.price, amount: data.minima }); await b.host.command({ op: "comms", message: JSON.stringify({ origin: "ui", type: "LIMIT", data }) }); };
+  const answer = async (n) => { await M.until(() => packets.length >= n); return packets[n - 1].data; };
+  // nothing crosses (told after the pool refresh, through limitWithPools)
+  await limit({ buy: false, minima: "10", price: "0.004413", takeOnly: true, ref: "swTEST000001" });
+  let d = await answer(1); assert.match(d.message, /Nothing on-chain crosses 0\.004413/); assert.equal(d.ref, "swTEST000001");
+  // the same without a ref: no ref on its answer; a malformed ref is never echoed
+  await limit({ buy: false, minima: "10", price: "0.004413", takeOnly: true }); d = await answer(2); assert.equal(d.ref, undefined);
+  await limit({ buy: false, minima: "10", price: "0.004413", takeOnly: true, ref: "bad ref!" }); d = await answer(3); assert.equal(d.ref, undefined);
+  // a book take: the ERROR comes from inside the transaction's build (PandaTxn.fill → the funding read), long after the packet
+  vm.runInContext("PandaBook.plan = function () { return { takes: [{ order: { sell: true, coinid: '0x" + "D1".repeat(32) + "' }, pay: PandaDEX.d('1'), lockedTake: PandaDEX.d('10') }], totalMinima: PandaDEX.d('10'), average: PandaDEX.d('0.0045'), totalUsdt: PandaDEX.d('0.045') }; };", b.ctx);
+  await limit({ buy: false, minima: "10", price: "0.004413", takeOnly: true, ref: "swTEST000004" });
+  d = await answer(4); assert.match(d.message, /Could not select 1 from at most 8/, d.message); assert.equal(d.ref, "swTEST000004", "the transaction callback's answer carries the LIMIT's ref");
+  // another action meanwhile (a cancel of an order that is not mine): its ERROR has no ref
+  await b.host.command({ op: "comms", message: JSON.stringify({ origin: "ui", type: "CANCEL", data: { coinid: "0x" + "E1".repeat(32) } }) });
+  d = await answer(5); assert.match(d.message, /not one of your active orders/); assert.equal(d.ref, undefined);
+});
+
 test("0.19.406: the FAST backing-coin settings: read and written by the app's own Settings (only what is given), never by the page", async () => {
   const b = await boot();
   assert.deepEqual(b.host.fastCoins(), { legacyFresh: true, coinMaxAge: "", maxAgeLimit: 900 }, "unset: refresh ON, 900 blocks");

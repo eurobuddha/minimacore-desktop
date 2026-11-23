@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.411] — SWEEP's on-chain part waits for the engine's answer to ITS order, not the next answer to anything
+
+- The page's take-only LIMIT carries a reference (renderer/dexicon/mds.js sweepChain); main/dexicon/service.desktop.js ACTION REF puts it on the first POSTED or ERROR told while that LIMIT is handled — at once, after the pool refresh, or from the callback of the transaction it started (the vendored engine's limitWithPools and PandaTxn fill / fillComposite / create are wrapped, not edited). The Trade screen takes only the packet with its own reference; another action's answer within the 180 s no longer stands in for it.
+
 ## [0.19.410] — SWEEP: the FAST part never fills past the worst price its confirmation showed
 
 - renderer/dexicon-ui.js sweep(): the FAST part's limit (sent to the page's take run and to the signing check) is the worst FAST price the confirmation named, not the typed price. With a typed limit looser than the FAST orders in the plan, the run could have taken a FAST order that appeared in between at a price the dialog never showed. What the FAST part cannot take at that price falls to the on-chain part, inside the typed limit as before.

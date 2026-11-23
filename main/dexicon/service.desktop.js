@@ -674,8 +674,28 @@ function pdBoot() {
     PDService.tell = function (type, data) {
         if (type === 'ERROR' && !PDService.ready) { var booting = pdBootingSince > 0; pdBootingSince = 0; if (booting) pdNotReady(data && data.message); }
         if (type === 'STATE' && data && typeof data === 'object') data.restingWhy = PDService.ready ? '' : pdWhy;
+        if ((type === 'POSTED' || type === 'ERROR') && CUR_REF && data && typeof data === 'object') { data.ref = CUR_REF; CUR_REF = null; }   // ACTION REF (below): once
         return tell.apply(PDService, arguments);
     };
+})();
+/* ACTION REF (0.19.411): a page LIMIT may carry `ref` (renderer/dexicon/mds.js sweepChain: the SWEEP's on-chain part). The
+   FIRST POSTED or ERROR told while that LIMIT is handled carries the same ref: told at once (a refusal, nothing crosses), or
+   in the callback of the pool refresh or the transaction it started. So the screen waits for ITS answer, never for another
+   action's packet that happens to come within its 180 s. The vendored engine is not edited: its entry points are wrapped. */
+var CUR_REF = null;
+function refOf(data) { var r = data && data.ref; return typeof r === 'string' && /^[A-Za-z0-9]{8,40}$/.test(r) ? r : null; }
+function withRef(ref, f) { var was = CUR_REF; CUR_REF = ref; try { return f(); } finally { CUR_REF = ref && CUR_REF === null ? null : was; } }
+(function () {
+    var lwp = PDService.limitWithPools;
+    PDService.limitWithPools = function (data) { var self = this, ref = refOf(data); return ref ? withRef(ref, function () { return lwp.call(self, data); }) : lwp.call(self, data); };
+    ['fill', 'fillComposite', 'create'].forEach(function (n) {
+        var orig = PandaTxn[n];
+        PandaTxn[n] = function () {
+            var a = Array.prototype.slice.call(arguments), ref = CUR_REF, cb = a[a.length - 1];
+            if (ref && typeof cb === 'function') a[a.length - 1] = function () { var self = this, args = arguments; return withRef(ref, function () { return cb.apply(self, args); }); };
+            return orig.apply(PandaTxn, a);
+        };
+    });
 })();
 
 /** The FAST maker (this file) and the vendored PandaDEX RESTING engine (PDService) share one MDS.init. */
@@ -685,9 +705,8 @@ function pdEvent(msg) {
         if (msg.event === 'inited' || msg.event === 'MDS_TIMER_10SECONDS') pdBoot();
         else if (msg.event === 'NEWBLOCK') { if (PDService.ready) PDService.cmd('block', function (result) { var tip = PandaSafety.tipBlock(result); if (tip > 0) { PDService.block = tip; PDService.refresh(); } }); }   // BOOT FIRST (header)
         else if (msg.event === 'MDSCOMMS' && msg.data && !msg.data.public) {
-            var packet = JSON.parse(msg.data.message || '{}');
-            if (packet.origin === 'ui' && packet.type === 'LIMIT' && onlyOwnOrders(packet.data || {})) return;
-            if (packet.origin === 'ui') PDService.action(packet);
+            var packet = JSON.parse(msg.data.message || '{}'), ref = packet.origin === 'ui' && packet.type === 'LIMIT' ? refOf(packet.data) : null;   // ACTION REF
+            if (packet.origin === 'ui') withRef(ref, function () { if (packet.type === 'LIMIT' && onlyOwnOrders(packet.data || {})) return; PDService.action(packet); });
             else if (packet.origin === 'dexicon' && packet.type === 'CONSOLIDATE') consolidate(packet.data || {});
             // SAVE / STOP on the market maker: reconcile NOW, not on the next 10 s timer after the 8 s inbox hold
             else if (packet.origin === 'dexicon' && packet.type === 'LADDER' && READY) ladderPass(function () { });

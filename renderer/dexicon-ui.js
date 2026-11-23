@@ -154,7 +154,7 @@ const DexUI = (() => {
 
   // ---- room 3, Exchange: the Android screens over the engine's read model ----
   const MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
-  const X = { kv: {}, takes: {}, mm: {}, acts: [], actRows: [], onlyOpen: false, sub: 0, asub: 0, open: {}, book: null, mine: { orders: [], pending: [] }, orders: [], fills: [], bal: null, balErr: "", svc: {}, buy: true, group: 0, fundsBig: false, said: null, loaded: false };
+  const X = { kv: {}, takes: {}, mm: {}, acts: [], actRows: [], onlyOpen: false, sub: 0, asub: 0, open: {}, book: null, mine: { orders: [], pending: [] }, orders: [], fills: [], bal: null, balErr: "", svc: {}, buy: true, group: 0, fundsBig: false, said: null, loaded: false, refSeq: 0 };
   try { X.group = Math.min(3, Math.max(0, Number(localStorage.getItem("dexicon_group")) || 0)); X.fundsBig = localStorage.getItem("dexicon_funds_big") === "1"; } catch (e) {}
   const pref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
@@ -182,7 +182,8 @@ const DexUI = (() => {
     if (p && !p.origin && /^(save_failed|take_refused|relock_failed)$/.test(String(p.type))) return void say(serviceAlert(p), "error");
     if (!p || p.origin !== "service") return;
     if (p.type === "STATE") X.svc = p.data || {};
-    if ((p.type === "POSTED" || p.type === "ERROR") && X.chainWait) { const w = X.chainWait; X.chainWait = null; w(p); }   // SWEEP part 2 waits for the service's answer
+    // SWEEP part 2 waits for the service's answer to ITS LIMIT (0.19.411: the packet carries the sweep's ref; any other action's is not it)
+    if ((p.type === "POSTED" || p.type === "ERROR") && X.chainWait && p.data && p.data.ref === X.chainWait.ref) { const w = X.chainWait; X.chainWait = null; w.done(p); }
   }
   /** The service's alert in plain words, its own message whole (identifiers in full). */
   function serviceAlert(p) {
@@ -452,8 +453,8 @@ const DexUI = (() => {
     if (left.v > 0n) {
       try { await api.dxCommand({ op: "intent", type: "LIMIT", buy, price: C.str(lim), amount: C.str(left) }); }
       catch (e) { lines.push(I18N.t("On-chain: not sent: {message}", { message: C.refusal(e && e.message) })); say(lines.join("\n"), "error"); return; }
-      let tm = null; const heard = new Promise(res => { X.chainWait = (p) => { clearTimeout(tm); res(p); }; tm = setTimeout(() => { X.chainWait = null; res(null); }, 180000); });
-      const r2 = await drive("sweepChain", { buy, price: C.str(lim), amount: C.str(left) });
+      let tm = null; const ref = "sw" + Date.now().toString(36) + (++X.refSeq), heard = new Promise(res => { X.chainWait = { ref, done: (p) => { clearTimeout(tm); res(p); } }; tm = setTimeout(() => { if (X.chainWait && X.chainWait.ref === ref) X.chainWait = null; res(null); }, 180000); });
+      const r2 = await drive("sweepChain", { buy, price: C.str(lim), amount: C.str(left), ref });
       if (r2.error) { X.chainWait = null; clearTimeout(tm); lines.push(I18N.t("On-chain: not sent: {message}", { message: r2.error })); }
       else {
         const p = await heard, d = (p && p.data) || {};

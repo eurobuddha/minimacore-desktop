@@ -275,15 +275,17 @@
     },
     /** 0.19.406, SWEEP part 2: the on-chain remainder as a TAKE-ONLY LIMIT (resting/pd_service.js 0.4.33+: takes what
      *  crosses up to the amount, never rests; nothing crosses → its ERROR, nothing sent). Sent as the page sends a LIMIT;
-     *  the service's POSTED or ERROR says how it went (the native screen waits for it). The limit is on the 6-decimal grid. */
+     *  the service's POSTED or ERROR says how it went (the native screen waits for the one that carries this call's `ref`).
+     *  The limit is on the 6-decimal grid. */
     sweepChain: function (a) {
       need(typeof a.buy === "boolean" && NUM.test(a.price) && NUM.test(a.amount), "Enter a valid price and amount.");
       need((a.price.split(".")[1] || "").length <= 6 && (a.amount.split(".")[1] || "").length <= 8, "An on-chain order takes a price of at most 6 decimals and an amount of at most 8. Nothing was sent.");
+      need(typeof a.ref === "string" && /^[A-Za-z0-9]{8,40}$/.test(a.ref), "bad sweep reference");   // 0.19.411: the service's answer carries it back (service.desktop.js ACTION REF)
       chainReady();
       var own = window.AX && AX.ownskip ? String(AX.ownskip.onlyOwn(state.book || [], state.pools || [], !!a.buy, a.amount, a.price, Number(state.block || 0)) || "") : "";
       need(!own, own);
       need(chainCrosses(a), "Nothing on the chain crosses this price now. Nothing was sent.");
-      send("LIMIT", { buy: !!a.buy, minima: a.amount, price: a.price, takeOnly: true });
+      send("LIMIT", { buy: !!a.buy, minima: a.amount, price: a.price, takeOnly: true, ref: a.ref });
     },
     addRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.addRelay(a.url); },
     removeRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.removeRelay(a.url); },
