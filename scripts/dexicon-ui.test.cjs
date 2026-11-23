@@ -1116,6 +1116,35 @@ test("0.19.404: History is one chronological list of every kind; NET counts FAST
   const heads = [...html.matchAll(/<div class="dx-day">([^<]*)<\/div>/g)].map(m => m[1]); assert.ok(heads.every((d, i) => heads.indexOf(d) === i), "each day header once");
 });
 
+test("0.19.416 (gate review NIT): History says that older on-chain trades are not listed once the engine's list of 200 is full", async () => {
+  const vm = require("node:vm"), H = (c) => "0x" + c.repeat(64), now = new Date(2026, 10, 22, 12).getTime();
+  const trade = (i) => ({ spentcoin: "0x" + String(i).padStart(64, "0"), timems: now - i * 60000, block: 2417301 - i, price: "0.0032", size: "1", buy: 0, maker: 1, orderid: H("F"), txpowid: H("1"), verification_status: "verified" });
+  const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
+    appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, showModal() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
+  const els = {}, win = { DexCore: C, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+    DexPools: { tick() {}, render() {}, shared() {}, part: () => "", activityItems: () => [], historyItems: () => [] },
+    DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false, activityItems: () => [], historyItems: () => [] },
+    document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener() {} };
+  win.window = win;
+  win.mcd = { dxStatus: async () => ({ version: "0.0.156", started: true, ready: true, restingReady: true, epoch: 1, relays: [], price: {}, block: 2417310 }), onDexicon() {}, clip: async () => true,
+    dxBook: async () => ({ fast: [], book: [], poolAsks: [], poolBids: [], pools: [] }), dxMine: async () => ({ orders: [], pending: [] }), cmd: async () => ({ status: true, response: [] }), dxCommand: async () => ({ status: true, rows: [] }) };
+  Object.assign(win, require("./i18n-plain.cjs").globals());
+  vm.createContext(win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon/lib/activity.js"), "utf8"), win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
+  const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setImmediate(r)); };
+  win.document.getElementById("shell").dataset.mode = "dex";
+  win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
+  const NOTE = "Older on-chain trades are not listed: only your newest 200 are kept here.";
+  win.DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { myTrades: Array.from({ length: 199 }, (_, i) => trade(i)) } }));
+  win.DexUI.paint("dexicon"); win.DexUI.pickTab("history"); await settle();
+  assert.ok(!els.dxBody.innerHTML.includes(NOTE), "199: the whole list is there, nothing said");
+  win.DexUI._service(JSON.stringify({ origin: "service", type: "STATE", data: { myTrades: Array.from({ length: 200 }, (_, i) => trade(i)) } }));
+  win.DexUI.pickTab("history"); await settle();
+  assert.ok(els.dxBody.innerHTML.includes(NOTE), "200: the engine's cap is reached and said");
+  assert.match(els.dxBody.innerHTML, /data-hmore="1">Show more \(140 remaining\) ▾<\/button><div class="dx-fsmall">Older on-chain trades are not listed/);
+});
+
 // ---- 0.19.406: engine 0.0.153 on the native screen ----
 test("0.19.406: SWEEP sends: one confirmation with both parts and the worst price; the FAST part take-only through the page's run, then the on-chain remainder as a take-only LIMIT; results with every transaction id whole", async () => {
   const H = (c) => "0x" + c.repeat(32), ORDER = H("0A"), FILLTX = H("1B"), CHAINTX = H("2C");

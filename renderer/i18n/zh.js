@@ -5931,3 +5931,8 @@
   "the FAST book is not checked: no relay has answered yet",
   "the FAST book is still not checked after a minute; only your own FAST orders are shown"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Older on-chain trades are not listed: only your newest {n} are kept here.": "较早的链上交易未列出：这里只保留您最新的 {n} 笔。"
+}, { review: [
+  "Older on-chain trades are not listed: only your newest {n} are kept here."
+] });

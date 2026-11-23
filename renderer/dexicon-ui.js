@@ -621,6 +621,7 @@ const DexUI = (() => {
     return out.join("");
   }
   const HIST_INFO = L_("Everything this node finished trading, in one list by time, newest first: Exchange fills on the fast book, your on-chain trades, finished AtomiX swaps (and any you hid, with Unhide) and finished pool operations, each line marked with its kind. Click a fill for the amounts, the block and the full on-chain identifiers. The net above counts settled fast-book fills only. A fill that is co-signed and posted shows as waiting until a block holds it. The txpow id is the pre-mining id; settlement is proven by the output coins. Show more pages the whole list by date. Export CSV saves every fast-book fill for your accounts; AtomiX swaps have their own file in Activity.");
+  const MY_TRADES_MAX = 200;   // resting/pd_service.js loadTape: PandaTape.myTrades(200, …), vendored
   const HIST_PAGE = 60;   // History shows this many rows of the mixed list, then "Show more" pages every kind together by date
   const kindLabel = (tag, pending) => tag + (pending ? " · " + th("PENDING") : "");
   /** A mixed list (Activity, History) drawn in its one order, a day header over each day's run, each row marked with its kind. */
@@ -658,6 +659,8 @@ const DexUI = (() => {
     const items = historyItems(), shown = X.histShown || HIST_PAGE;
     out.push(mixRows(items.slice(0, shown), now));
     if (items.length > shown) out.push(`<button class="pp-link pp-link--row" data-hmore="1">${tr("Show more ({shown} remaining) ▾", { shown: items.length - shown })}</button>`);
+    // 0.19.416: the on-chain engine hands over only its newest MY_TRADES_MAX trades (resting/pd_service.js loadTape, vendored): said, never implied complete
+    if (X.svc && Array.isArray(X.svc.myTrades) && X.svc.myTrades.length >= MY_TRADES_MAX) out.push(`<div class="dx-fsmall">${tr("Older on-chain trades are not listed: only your newest {n} are kept here.", { n: MY_TRADES_MAX })}</div>`);
     return out.join("");
   }
   function fillFacts(f) {

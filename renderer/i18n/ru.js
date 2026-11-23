@@ -5944,3 +5944,8 @@
   "the FAST book is not checked: no relay has answered yet",
   "the FAST book is still not checked after a minute; only your own FAST orders are shown"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "Older on-chain trades are not listed: only your newest {n} are kept here.": "Более ранние сделки в блокчейне не показаны: здесь хранятся только ваши последние {n}."
+}, { review: [
+  "Older on-chain trades are not listed: only your newest {n} are kept here."
+] });

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.416] — History says when older on-chain trades are not listed
+
+- renderer/dexicon-ui.js History: the on-chain engine hands over only its newest 200 trades (resting/pd_service.js loadTape, vendored and not changed here). When that list is full, the footer under Show more says "Older on-chain trades are not listed: only your newest 200 are kept here." In zh / ru / uk.
+
 ## [0.19.415] — Back from an older build, a fill that build applied itself is never deducted again
 
 - main/dexicon/service.desktop.js DOWNGRADE GUARD: an app before 0.19.406 (engine 0.0.91) running on this store applies its fills itself and records them without `verified` and without listing them on the order. Back on this build, the refresh deducted them a second time (an order of 100 with a fill of 30 here and 20 there was left at 30, not 50). At boot, before the engine is ready, such a record of a live order (from its fillsFrom on, not listed) is listed as applied; this build's own unapplied records (which always carry `verified`) are still deducted. Going back and forth between builds stays discouraged: cancel your FAST orders first.
