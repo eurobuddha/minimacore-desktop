@@ -85,3 +85,15 @@ test('checkmode on the plain minima node kind is answered from `status` (writemo
     locked = true; sent.length = 0; r = await ask('getaddress'); assert.equal(r.status, false); assert.match(r.error, /WALLET_LOCKED/); assert(!sent.includes('getaddress'));
   } finally { try { api.stopLoop(); } catch (e) {} for (const c of contexts) c.ActivityChain.stop(); for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// 0.18.319: one refusal regex for every caller, [;\x00-\x1f\x7f] (it was ";", CR, LF and NUL, and each shim kept its own copy)
+test('every control character and DEL is refused like ";", through one regex the shims share', async () => {
+  const V = require('../main/cmdverb'), rpc = require('../main/rpc');
+  assert.equal(String(V.UNSAFE_RE), String(/[;\x00-\x1f\x7f]/));
+  for (const ch of ['\t', '\x1b', '\x7f', '\x0b', '\x01']) {
+    assert.equal(V.refuse('t', 'status' + ch), V.UNSAFE, JSON.stringify(ch));
+    await assert.rejects(rpc.rpcCall(1, 'x', 'status' + ch), (e) => e.message === V.UNSAFE);
+  }
+  for (const ok of ['status', 'send amount:1 address:0xFF tokenid:0x00 state:{"0":"0x01"}', 'txnstate id:a port:1 value:"[a b]"']) assert.equal(V.refuse('t', ok), '');
+  for (const f of ['main/pandapools.js', 'main/atomix.js']) assert.doesNotMatch(fs.readFileSync(path.join(desktop, f), 'utf8'), /\/\[;\\r\\n\\u0000\]\//, f + ' keeps no regex of its own');
+});

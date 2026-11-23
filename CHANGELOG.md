@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.319] — one refusal regex: every control character and DEL, not only CR, LF and NUL
+
+- main/cmdverb.js `UNSAFE_RE = /[;\x00-\x1f\x7f]/` is the one test `refuse()` applies (main/rpc.js under every caller, the Terminal, and the PandaPools and AtomiX shims, which no longer keep their own `/[;\r\n\u0000]/` copy). A tab, ESC, vertical tab or DEL in a command is now refused like ";" and said in the same notification. The Terminal keeps its sentence: send the commands one at a time.
+- Test: scripts/engine-inject.test.cjs (in test:inject) — each such character refused by `refuse` and by `rpcCall`, plain commands still pass, no shim keeps a regex of its own; fails on 0.18.318.
+
 ## [0.18.318] — P2P Chance (Zero Edge Casino) is removed, pending an audit and a rebuild
 
 - Why: on 23 Nov 2026 the casino was found to put coin state written by a stranger into node commands (coin-state-to-command injection; 0.18.317 closed the hole under every caller). The owner's call: take the casino out entirely and audit and rebuild it later.

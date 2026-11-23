@@ -208,13 +208,13 @@ ipcMain.handle("mcd:cmdKind", (_e, command) => {
 });
 // The whole policy of the general command channel is one tested function (main/cmdgate.js checkCommand, 0.18.201): control
 // characters, a send that repeats a parameter, the secret-command gate, then the beacon-dust pin of a MINIMA send.
-// 0.18.317: a command holding ";", a line break or NUL is refused under every caller (main/cmdverb.js refuse, main/rpc.js). An app or
+// 0.18.317: a command holding ";" or a control character (0.18.319: any of \x00-\x1f, \x7f) is refused under every caller (main/cmdverb.js refuse, main/rpc.js). An app or
 // engine refused so is said in a notification naming it (at most once a minute per source); the Terminal says it in its own output.
 const refusedSaid = new Map();
 require("./cmdverb").onRefused((source) => {
   if (!source) return;   // the Terminal or the wallet: the refusal is the answer on screen
   const now = Date.now(); if (now - (refusedSaid.get(source) || 0) < 60000) return; refusedSaid.set(source, now);
-  try { const n = new Notification({ title: source, body: "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it.", silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ }
+  try { const n = new Notification({ title: source, body: "A command holding \";\" or a control character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it.", silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ }
 });
 ipcMain.handle("mcd:cmd", async (_e, command) => {
   { const why = require("./cmdverb").refuse("", command); if (why) throw new Error(why); }   // before any question or gate: one command at a time (0.18.317)

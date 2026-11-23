@@ -58,7 +58,7 @@ function buildMds() {
     // two-arg then(): a throw inside the success cb must NOT fall through to the error handler (double-invoke →
     // negative `pending` in the counted-completion scans → a wedged scan). One reply = exactly one cb call.
     cmd: function (command, cb) { if(epoch!==contextEpoch){if(cb)cb({status:false});return;}
-      if(/[;\r\n\u0000]/.test(String(command))){const why=require("./cmdverb").refuse("PandaPools",command);if(cb)cb({status:false,pending:false,error:why});return;}   // one command (0.18.317)
+      {const why=require("./cmdverb").refuse("PandaPools",command);if(why){if(cb)cb({status:false,pending:false,error:why});return;}}   // one command, one regex (0.18.317, 0.18.319)
       // checkmode is an MDS command: the plain minima.jar answers it "Command not found" and the engine's write guard then
       // refused every write. The RPC is the node's own admin interface (always WRITE); the lock comes from `status` (0.18.317).
       if(/^checkmode\b/.test(String(command))&&node.kind&&node.kind()==="minima"){runner("status").then(function(r){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}if(cb)cb(r&&r.status===true?{status:true,pending:false,response:{writemode:true,dblocked:!!(r.response&&r.response.locked)}}:{status:false,pending:false,error:"The node's status could not be read."});},function(){if(cb)cb({status:false});});return;}
