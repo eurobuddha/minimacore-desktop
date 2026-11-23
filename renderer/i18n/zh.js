@@ -5621,7 +5621,6 @@
   "Turn MegaMMR off?": "关闭 MegaMMR？",
   "MegaMMR is off. The node is restarting as a light node.": "MegaMMR 已关闭。节点正在作为轻节点重新启动。",
   "This node's MegaMMR does not fit its chain": "此节点的 MegaMMR 与其链不匹配",
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。导入它大约需要 {need} MB 的节点内存，而节点设置为 {heap} MB。请在设置中把 Parlons 节点内存提高到至少 {need}，然后重试。未做任何更改。",
   "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.": "节点的数据文件夹剩余 {free} MB，而此次导入大约需要 {need} MB。请腾出空间，然后重试。未做任何更改。"
 }, { review: [
   "Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.",
@@ -5631,11 +5630,9 @@
   "Turn MegaMMR off?",
   "MegaMMR is off. The node is restarting as a light node.",
   "This node's MegaMMR does not fit its chain",
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.",
   "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed."
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。导入它大约需要 {need} MB 的节点内存，而普通 Minima 节点在这里只有 {heap} MB（这台电脑内存的四分之一）。请在设置中切换到 Parlons 节点，并把它的内存设为至少 {need} MB，然后重试。未做任何更改。",
   "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.": "这台电脑有 {ram} MB 内存。节点需要其中的 {heap} MB 来处理此 MegaMMR 文件，剩下的内存太少，因此无法在这台电脑上导入。未做任何更改。",
   "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.": "节点没有以 MegaMMR 模式重新运行，因此没有导入任何内容，设置已恢复原样。请查看日志；如果节点已停止，请从节点标签页重新启动它。",
   "Unknown kind of file.": "未知的文件类型。",
@@ -5650,7 +5647,6 @@
   "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "导入在中途失败（{why}）。节点已重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "导入在中途失败（{why}）。节点已按之前的状态作为轻节点重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。"
 }, { review: [
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.",
   "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.",
   "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.",
   "Unknown kind of file.",
@@ -5699,13 +5695,44 @@
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.": "导入在节点的链被改动之前就停止了（{why}）。没有导入或重置任何内容。节点已按之前的状态作为轻节点重启。你的钱包和资金未受影响。",
   "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.": "MegaMMR 导入未完成，余额不完整。你的资金是安全的。“重新同步节点”会从 {host} 重建链。",
   "Resync node now": "立即重新同步节点",
-  "Resyncing from {host}…": "正在从 {host} 重新同步…",
-  "The node is working: {step}": "节点正在处理：{step}"
+  "Resyncing from {host}…": "正在从 {host} 重新同步…"
 }, { review: [
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.",
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.",
   "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.",
   "Resync node now",
-  "Resyncing from {host}…",
-  "The node is working: {step}"
+  "Resyncing from {host}…"
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and it is set to {heap} MB. In Settings, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。节点在检查和导入时需要约四倍的内存：{need} MB，而当前设置为 {heap} MB。请在“设置”中将 Parlons 节点内存设为 {need} 或更高，并点击“应用并重启节点”，然后重试。未做任何更改。",
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). In Settings, choose the Parlons Node, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.": "此 MegaMMR 文件为 {file} MB。节点在检查和导入时需要约四倍的内存：{need} MB，而普通 Minima 节点在这里只有 {heap} MB（本机内存的四分之一）。请在“设置”中选择 Parlons 节点，将 Parlons 节点内存设为 {need} 或更高，并点击“应用并重启节点”，然后重试。未做任何更改。",
+  "Node log": "节点日志",
+  "Restarting the node in MegaMMR mode…": "正在以 MegaMMR 模式重启节点…",
+  "The node is reading the whole file to check it…": "节点正在读取整个文件进行检查…",
+  "The node is importing the file…": "节点正在导入文件…",
+  "Loading the node's MegaMMR: {n} of {total} coins": "正在加载节点的 MegaMMR：{n} / {total} 个币",
+  "Reading the MegaMMR file…": "正在读取 MegaMMR 文件…",
+  "Checking the file's blocks…": "正在检查文件中的区块…",
+  "Checking coins: {n} of {total}": "正在检查币：{n} / {total}",
+  "Reading the file's MegaMMR…": "正在读取文件中的 MegaMMR…",
+  "Replacing the chain…": "正在替换链…",
+  "Importing blocks: {n} of {total}": "正在导入区块：{n} / {total}",
+  "Reading your coins from the new chain…": "正在从新链读取你的币…",
+  "Saved. Restarting the node…": "已保存。正在重启节点…"
+}, { review: [
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and it is set to {heap} MB. In Settings, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.",
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). In Settings, choose the Parlons Node, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.",
+  "Node log",
+  "Restarting the node in MegaMMR mode…",
+  "The node is reading the whole file to check it…",
+  "The node is importing the file…",
+  "Loading the node's MegaMMR: {n} of {total} coins",
+  "Reading the MegaMMR file…",
+  "Checking the file's blocks…",
+  "Checking coins: {n} of {total}",
+  "Reading the file's MegaMMR…",
+  "Replacing the chain…",
+  "Importing blocks: {n} of {total}",
+  "Reading your coins from the new chain…",
+  "Saved. Restarting the node…"
 ] });

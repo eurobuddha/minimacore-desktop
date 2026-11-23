@@ -208,8 +208,7 @@ function onStatus(s) {
   if (activeView === "node") renderNode(s);
   if (s.megammrBroken && !megaBrokenSaid) { megaBrokenSaid = true; megammrBrokenNotice(); }
   paintMegaBar(s);
-  // what the node is doing for a MegaMMR file import, from its log (main/megammrfile.js): on the import's own screen while it runs
-  if (s.megafileBusy === "import" && s.megafileStep && activeView === "backup" && BK_PAGE === "megafile") { const st = el("backupBody").querySelector("#bkStatus"); if (st) st.textContent = t("The node is working: {step}", { step: s.megafileStep }); }
+  if (activeView === "backup" && BK_PAGE === "megafile") paintImportProgress(s);   // every step of a MegaMMR file import, on its own screen
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
     const sig = (s.parlons.ready ? "1" : "0") + "|" + (s.parlons.error || "") + "|" + s.state;
@@ -702,8 +701,9 @@ function renderBackup() {
 
   if (BK_PAGE === "megafile") {
     host.innerHTML = head(t("Resync from a MegaMMR file"), t("Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.")) + filePick(t("MegaMMR file")) +
-      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Import")}">${th("Import")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
-    wirePick("megammr");
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Import")}">${th("Import")}</button><div class="bk-status" id="bkStatus" role="status"></div>
+      <div id="bkProg" hidden><div class="bk-stage" id="bkStage" role="status" aria-live="polite"></div><div class="eyebrow ps-label">${th("Node log")}</div><div class="bk-mono bk-log" id="bkLog"></div></div>`;
+    wirePick("megammr"); paintImportProgress(LAST_STATUS);
     $("bkGo").onclick = () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
       // the main process switches a light node to MegaMMR mode first, imports, and restarts (main.js mcd:importMegammr)
       // the window's config is read again whatever happened: a failed import may have put the MegaMMR setting back
@@ -757,6 +757,34 @@ const MEGAMMR_OFF_WARNING = N_("The node restarts as a light node.\n\n• Its Me
  *  status, whether it stopped (without -mobile it stops at every start) or goes on. The Node tab keeps saying it, with the button. */
 const MEGAMMR_BROKEN_NOTE = N_("This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).");
 let megaBrokenSaid = false;
+/** What the node is doing for a MegaMMR file import, said in the window's language from its last log line (main/megammrfile.js STEP, or
+ *  the flow's own "app:<stage>"). Numbers are shown as the node wrote them. Anything else: the node's own words. */
+function importStage(step) {
+  const s = String(step || ""); let m;
+  if (s === "app:restart-on") return t("Restarting the node in MegaMMR mode…");
+  if (s === "app:check") return t("The node is reading the whole file to check it…");
+  if (s === "app:import") return t("The node is importing the file…");
+  if (s === "app:restart-end") return t("Restarting the node…");
+  if ((m = /^MegaMMR loading coins\.\. (\d+)\/(\d+)/.exec(s))) return t("Loading the node's MegaMMR: {n} of {total} coins", { n: m[1], total: m[2] });
+  if (/^(Loading MegaMMR size|Load MegaMMR\.\.)/.test(s)) return t("Reading the MegaMMR file…");
+  if (/^(Check IBD|Now check all coin proofs)/.test(s)) return t("Checking the file's blocks…");
+  if ((m = /^(?:Checking coins @|All coins checked) (\d+) \/ (\d+)/.exec(s))) return t("Checking coins: {n} of {total}", { n: m[1], total: m[2] });
+  if (/^(MegaMMR import pre-flight|Loading MegaMMR portion|MegaMMR loaded)/.test(s)) return t("Reading the file's MegaMMR…");
+  if (/^Streaming IBD/.test(s)) return t("Replacing the chain…");
+  if ((m = /^IBD blocks processed\.\. (\d+)\/(\d+)/.exec(s))) return t("Importing blocks: {n} of {total}", { n: m[1], total: m[2] });
+  if (/^(System memory clean|Current |Get all your CoinProofs|Transfer your CoinProofs)/.test(s)) return t("Reading your coins from the new chain…");
+  if (/^(All saved|Main Instance Cleared)/.test(s)) return t("Saved. Restarting the node…");
+  return s;
+}
+/** The import's screen while it runs: the step, and the node's last lines (redacted as the Logs are), whole. */
+function paintImportProgress(s) {
+  const host = el("backupBody"), box = host && host.querySelector("#bkProg"); if (!box) return;
+  const on = !!(s && s.megafileBusy === "import");
+  box.hidden = !on; if (!on) return;
+  host.querySelector("#bkStage").textContent = importStage(s.megafileStep) || t("Starting…");
+  const log = host.querySelector("#bkLog"), lines = Array.isArray(s.megafileLog) ? s.megafileLog : [];
+  log.textContent = lines.join("\n"); log.scrollTop = log.scrollHeight;
+}
 /** An unfinished MegaMMR file import (main/megammrfile.js marker, carried by the node's status): said on every screen, with Resync node from
  *  the MegaMMR node the app uses (config megammrHost), one press, never by itself. Not while the import itself or a resync runs. */
 const MEGA_UNFINISHED = N_("Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.");

@@ -781,7 +781,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || "")(config.load().megammrImport), megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || "")(config.load().megammrImport), megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
@@ -856,7 +856,7 @@ class NodeManager extends EventEmitter {
         ? "a port this node needs is already in use (base port " + config.load().basePort + "). Start again: this app's own earlier node is stopped first; any other program is named and left alone"
         : "another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first";
     }
-    this.emit("line", l);   // the node's own fresh lines only (no continuation, no Parlons chatter): main/megammrfile.js follows an import's steps
+    this.emit("line", scrub(l, this.secret));   // the node's own fresh lines only (no continuation, no Parlons chatter), redacted as the Logs are: main/megammrfile.js follows and shows an import's steps
     this.log(l);
   }
   /** The Parlons Node narrates its account in its log; that is the honest readiness signal. Only ITS OWN status lines:

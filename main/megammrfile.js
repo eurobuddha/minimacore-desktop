@@ -45,10 +45,11 @@ const NOT_STARTED = "The import stopped before the node's chain was touched ({wh
 const NOT_STARTED_BACK = "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.";
 // MinimaLogger's prefix, then the steps megammr.java (import, integrity) and MegaMMR.java (loading) print
 const LOGGER = /^Minima @ [\d/]+ [\d:]+ \[[^\]]*\] : /;
-const STEP = /^(Load MegaMMR\.\. |Check IBD\.\.|Now check all coin proofs\.\.|Checking coins @ \d+ \/ \d+|All coins checked \d+ \/ \d+|MegaMMR import pre-flight\.\.|Loading MegaMMR portion\.\.|MegaMMR loading coins\.\. \d+\/\d+|MegaMMR loaded\.\.|Streaming IBD\.\.|IBD blocks processed\.\. \d+\/\d+|System memory clean\.\.|Current (Top Block|Tree Root|MegaMMR Tip) : |Get all your CoinProofs|Transfer your CoinProofs\.\.|All saved\.\.|Main Instance Cleared\.\.)/;
+const STEP = /^(Loading MegaMMR size : |Load MegaMMR\.\. |Check IBD\.\.|Now check all coin proofs\.\.|Checking coins @ \d+ \/ \d+|All coins checked \d+ \/ \d+|MegaMMR import pre-flight\.\.|Loading MegaMMR portion\.\.|MegaMMR loading coins\.\. \d+\/\d+|MegaMMR loaded\.\.|Streaming IBD\.\.|IBD blocks processed\.\. \d+\/\d+|System memory clean\.\.|Current (Top Block|Tree Root|MegaMMR Tip) : |Get all your CoinProofs|Transfer your CoinProofs\.\.|All saved\.\.|Main Instance Cleared\.\.)/;
 // ponytail: 30 minutes with no new step, fitted to nothing measured (the node's slowest silent stretch is reading a whole 1.6 GB file in
 // the integrity check, unmeasured); raise it if a real import is given up while the node is still reading
 const STALL_MS = 30 * 60 * 1000;
+const SHOWN_LINES = 8;   // the node's last lines on the import's screen
 const FAILED_BACK = "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.";
 
 function create(d) {
@@ -58,11 +59,28 @@ function create(d) {
   async function exclusive(what, fn) {
     if (busy || node.resyncing) throw new Error(BUSY);
     busy = what; said();
-    try { return await fn(); } finally { busy = ""; said(); }
+    const shown = what === "import" ? show() : null;   // the import's screen shows every step, from the first restart to the last
+    try { return await fn(); } finally { if (shown) shown(); busy = ""; said(); }
   }
   /** The window disables what would stop or reset the node meanwhile (main.js refuses it anyway): the node's status carries it, the step
    *  the node is at, and the marker. */
-  function said() { node.megafileBusy = busy; if (!busy) node.megafileStep = ""; if (typeof node.emit === "function" && typeof node.snapshot === "function") node.emit("status", node.snapshot()); }
+  function said() { node.megafileBusy = busy; if (!busy) { node.megafileStep = ""; node.megafileLog = []; } if (typeof node.emit === "function" && typeof node.snapshot === "function") node.emit("status", node.snapshot()); }
+  /** For the import's screen, from its first step to its last (the owner's import, 2026-11-23: no progress was shown for 4.5 minutes): the
+   *  node's last lines as the Logs show them (redacted by node-manager), and its last STEP line, or the flow's own stage ("app:<stage>",
+   *  said in the window's language by renderer/app.js importStage). Said to the window at most every 400 ms, and at every stage. → stop(). */
+  function show() {
+    const ring = [], every = d.showMs == null ? 400 : d.showMs; let last = 0, timer = null;
+    const tell = () => { timer = null; last = Date.now(); if (busy) said(); };
+    const on = (raw) => {
+      const l = String(raw); ring.push(l); if (ring.length > SHOWN_LINES) ring.shift(); node.megafileLog = ring.slice();
+      const m = LOGGER.exec(l), text = m ? l.slice(m[0].length) : "";
+      if (text && STEP.test(text)) node.megafileStep = text;
+      if (Date.now() - last >= every) tell(); else if (!timer) timer = setTimeout(tell, every - (Date.now() - last));   // the last line of a burst is said too
+    };
+    if (typeof node.on === "function") node.on("line", on);
+    return () => { clearTimeout(timer); if (typeof node.removeListener === "function") node.removeListener("line", on); };
+  }
+  const stage = (k) => { node.megafileStep = "app:" + k; said(); };
   const marker = () => { const m = d.config.load().megammrImport; return m && typeof m === "object" ? m : null; };
   const setMarker = (v) => { d.config.setMegammrImport(v); said(); };
   /** What the node's log says of the command running now (STEP lines only, after the logger's prefix): the last step and when, whether
@@ -74,11 +92,10 @@ function create(d) {
       if (/OutOfMemoryError|Java heap space/.test(l)) w.oom = true;   // an uncaught one is printed without the prefix
       const m = LOGGER.exec(l); if (!m) return;
       const text = l.slice(m[0].length); if (!STEP.test(text)) return;
-      w.at = Date.now(); w.step = text.slice(0, 160);
+      w.at = Date.now(); w.step = text;
       if (/^Streaming IBD/.test(text)) w.reset = true;
       if (/^All coins checked/.test(text)) w.checked = true;
       if (/^(All saved|Main Instance Cleared)/.test(text)) w.saved = true;
-      node.megafileStep = w.step; said();
     };
     if (typeof node.on === "function") node.on("line", on);
     w.stop = () => { if (typeof node.removeListener === "function") node.removeListener("line", on); };
@@ -130,6 +147,7 @@ function create(d) {
         setMegammr(true);   // always, before any restart: the restart after the import must keep the MegaMMR
         const turnedOn = !on;
         if (turnedOn || stale) {
+          stage("restart-on");
           d.log("[app] MegaMMR file import: restarting the node in MegaMMR mode" + (stale ? " with its memory setting (" + heapMb + " MB)" : "") + " first (saved before the restart)");
           await d.held(() => node.restart());
           const now = (await nodeUp(d.upMs)) ? await keeps() : null;
@@ -144,6 +162,7 @@ function create(d) {
         // The node's own reader over the whole file, before anything is reset (see the top of this file). The file is checked again
         // here and right before the import (it may have been changed while the node restarted or read it).
         let target = "";
+        stage("check");
         const wc = watch();
         const chk = await followed(() => d.call(F.megammrCheckCommand(d.imports.confirm("megammr", shown), d.platform)), wc, (w) => w.checked)
           .then(r => { if (r && r.status === true) target = d.imports.confirm("megammr", shown); return r; })
@@ -158,11 +177,13 @@ function create(d) {
         d.imports.forget("megammr");
         // THE MARKER, right before the node is given the import: a quit or a crash from here on leaves this trace (see the top of this file)
         setMarker({ stage: "importing", at: new Date().toISOString(), turnedOn });
+        stage("import");
         const wi = watch();
         const j = await followed(() => d.held(() => d.runResync(F.megammrImportCommand(target, d.platform))), wi, (w) => w.saved)
           .catch(e => ({ status: false, error: brief(e) })).finally(() => wi.stop());
         if (j && j.status === true) {
           // followed to its end: the node finished, saved and exits by itself; it is started again here (runResync's own restart had ended)
+          stage("restart-end");
           if (j.followed) { for (const end = Date.now() + 60000; node.proc && Date.now() < end; await d.sleep(1000)); if (node.proc) await node.restart(); else await node.start(); }
           const up = await nodeUp(d.upMs);
           d.log("[app] MegaMMR file import finished; the node " + (up ? "is running" : "has not come back yet") + (node.megammrBroken ? "; it says its MegaMMR is BROKEN, so the trading engines stay stopped until Resync node or Turn MegaMMR off" : ""));

@@ -178,7 +178,7 @@ async function flowWorld(o) {
   const params = Object.assign({ isclient: true }, "was" in o ? { megammr: o.was } : { megammr: answers[0] });
   const listeners = [], cfg = { megammrImport: o.marker || null };
   const node = { state: o.state || "running", proc: {}, resyncing: !!o.resyncing, megammrBroken: false, heapMbNow: o.heapMbNow == null ? 3072 : o.heapMbNow, kind: () => o.kind || "parlons", dataDir: () => DIR,
-    restart: async () => { did.push("restart with megammr:" + params.megammr); node.proc = {}; node.state = o.downAfter && did.filter(x => x.startsWith("restart")).length === o.downAfter ? "error" : "running"; }, snapshot: () => ({ state: node.state }),
+    restart: async () => { did.push("restart with megammr:" + params.megammr); node.proc = {}; say(o.restartLines); node.state = o.downAfter && did.filter(x => x.startsWith("restart")).length === o.downAfter ? "error" : "running"; }, snapshot: () => ({ state: node.state }),
     start: async () => { did.push("start"); node.proc = {}; node.state = "running"; },
     on: (ev, f) => { if (ev === "line") listeners.push(f); }, removeListener: (ev, f) => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); } };
   // the node's log: what each command prints, with MinimaLogger's prefix (main/megammrfile.js reads only those lines)
@@ -192,6 +192,7 @@ async function flowWorld(o) {
     mayStop: async () => { did.push("guard"); if (o.refuse) throw new Error("The node keeps running: nothing was stopped."); }, held: (op) => op(),
     runResync: async (c) => { did.push(c.replace(mega, "F")); if (o.swap) o.swap(mega); say(o.importLines); return o.import ? o.import(c, { node, say, cfg }) : { status: true }; },
     work: async () => o.work || [], holdEngines: async () => { did.push("hold"); }, releaseEngines: async () => { did.push("release"); } };
+  if (o.emit) { node.emit = () => o.emit(node); d.showMs = 0; }
   if (o.sleep) d.sleep = (ms) => o.sleep(ms, { node, say, did }); if (o.stallMs) d.stallMs = o.stallMs;
   const mf = MF.create(d);
   await imports.pick("megammr");
@@ -244,7 +245,7 @@ test("Resync from a MegaMMR file: refused, before anything changes, while work i
   w = await flowWorld({ refuse: true }); assert.equal(w.r, "The node keeps running: nothing was stopped."); assert.deepEqual(w.did, ["status false", "guard"]);
   // the plain Minima node gets Java's default memory, a quarter of the computer's, whatever the Parlons Node setting says
   const G = 1024 * 1024 * 1024, big = megaFile("flow/big.mmr", 64); fs.truncateSync(big, Math.floor(1.6 * G));
-  w = await flowWorld({ kind: "minima", ram: 16 * G, file: big }); assert.match(w.r, /needs about 5941 MB of node memory, and the plain Minima node gets 4096 MB here/);
+  w = await flowWorld({ kind: "minima", ram: 16 * G, file: big }); assert.match(w.r, /four times that in memory while it checks and imports it: 6556 MB, and the plain Minima node gets 4096 MB here \(a quarter of this computer's memory\)\. In Settings, choose the Parlons Node, set Parlons Node memory to 6556 or more/);
   w = await flowWorld({ kind: "minima", ram: 32 * G, file: big }); assert.deepEqual(w.r, { status: true, broken: false, on: true });
   // swapped for a link after the node checked it: the import is not sent
   const MF = require("../main/megammrfile.js");
@@ -270,12 +271,14 @@ test("Turn MegaMMR off: the guard, only {megammr:false} saved, then the restart;
   assert.equal(rpc._timeoutFor('megammr action:integrity file:"/a.mmr"'), 60 * 60 * 1000, "the whole-file check is not cut at 3 minutes");
 });
 
-test("room for a MegaMMR import: the 460 MB snapshot fits the default 3072 MB; the 1.6 GB file needs about 6 GB", () => {
+test("room for a MegaMMR import: four times the file (the owner's 1.5 GB mainnet file peaked at 5.5 GB of a 6144 MB heap)", () => {
   const M = 1024 * 1024, G = 1024 * M, roomy = { ramBytes: 16 * G, freeDiskBytes: 100 * G };
   assert.equal(F.megammrHeapMb(0), 3072); assert.equal(F.megammrHeapMb("6144"), 6144);
   assert.equal(F.roomProblem(Object.assign({ size: 460 * M, heapMb: 3072 }, roomy)), "");
-  assert.match(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 3072 }, roomy)), /needs about 5617 MB of node memory, and the node is set to 3072 MB/);
+  assert.match(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 3072 }, roomy)), /This MegaMMR file is 1531 MB\. The node needs about four times that in memory while it checks and imports it: 6124 MB, and it is set to 3072 MB\. In Settings, set Parlons Node memory to 6124 or more and press Apply and restart the node/);
   assert.equal(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 6144 }, roomy)), "");
+  assert.equal(F.roomProblem(Object.assign({ size: 1536 * M, heapMb: 6144 }, roomy)), "", "the owner's import: 1.5 GB in 6144 MB");
+  assert.match(F.roomProblem(Object.assign({ size: 1536 * M, heapMb: 5120 }, roomy)), /: 6144 MB, and it is set to 5120 MB/, "below its measured peak: refused");
   assert.match(F.roomProblem({ size: 460 * M, heapMb: 3072, ramBytes: 4 * G - 1, freeDiskBytes: 100 * G }), /This computer has 4095 MB/);
   assert.equal(F.roomProblem({ size: 460 * M, heapMb: 3072, ramBytes: 16 * G, freeDiskBytes: null }), "", "free disk not known: not refused on it");
 });
@@ -377,7 +380,7 @@ test("M2: a Resync node that ended well clears the marker and releases the engin
   const cfgSrc = fs.readFileSync(path.join(ROOT, "main", "config.js"), "utf8");
   assert.ok(!/^\s*megammrImport:/m.test(cfgSrc.slice(cfgSrc.indexOf("const DEFAULTS"), cfgSrc.indexOf("function load()"))) && /function setMegammrImport\(v\)/.test(cfgSrc), "never from the window's patch (save() drops a key DEFAULTS does not name)");
   const nm = fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8");
-  assert.ok(/this\.emit\("line", l\);[^\n]*\n\s*this\.log\(l\);\n\s*\}/.test(nm) && /megammrImport: \(\(m\) => \(m && typeof m === "object" && String\(m\.stage \|\| ""\)\) \|\| ""\)\(config\.load\(\)\.megammrImport\)/.test(nm), "the node's fresh lines and the marker's stage in its status");
+  assert.ok(/this\.emit\("line", scrub\(l, this\.secret\)\);[^\n]*\n\s*this\.log\(l\);\n\s*\}/.test(nm) && /megammrImport: \(\(m\) => \(m && typeof m === "object" && String\(m\.stage \|\| ""\)\) \|\| ""\)\(config\.load\(\)\.megammrImport\)/.test(nm), "the node's fresh lines and the marker's stage in its status");
   // the window: the banner on every screen, its one press, never by itself
   const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8"), html = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
   assert.ok(/id="megaBar" role="alert" hidden><span id="megaBarText"><\/span><button class="btn btn--primary btn--sm" id="megaBarResync"><\/button>/.test(html));
@@ -409,6 +412,36 @@ test("M3: no answer from a node that is still importing is not an end: it is fol
   const MF = require("../main/megammrfile.js");
   assert.equal(MF.STALL_MS, 30 * 60 * 1000);
   for (const l of ["Load MegaMMR.. 1.6 GB", "Checking coins @ 5000 / 9000", "IBD blocks processed.. 2560/34000", "MegaMMR loading coins.. 250000/9000000 kept:12", "Streaming IBD.. blocks:34 (with cascade)", "All saved.."]) assert.ok(MF.STEP.test(l), l);
+});
+
+test("the owner's complaint (2026-11-23): the import's screen shows every step live, from the node's own log, with its last lines, not only after a timeout", async () => {
+  const shots = [];
+  const restartLines = ["Loading MegaMMR size : 1.5 GB", "MegaMMR loading coins.. 250000/663414 kept:250000", "MegaMMR loading coins.. 500000/663414 kept:500000"];
+  const w = await flowWorld({ checkLines: ["Load MegaMMR.. 1.5 GB", "Check IBD..", "Now check all coin proofs..", "Checking coins @ 5000 / 663588", "All coins checked 663588 / 663588"],
+    importLines: RESET_LINES.concat(["IBD blocks processed.. 1102/1102", "Transfer your CoinProofs.. 2", "All saved.."]),
+    restartLines, emit: (node) => shots.push({ step: node.megafileStep, log: (node.megafileLog || []).slice(), busy: node.megafileBusy }) });
+  assert.deepEqual(w.r, { status: true, broken: false, on: true });
+  const steps = shots.filter(x => x.busy).map(x => x.step);
+  for (const k of ["app:restart-on", "app:check", "app:import", "app:restart-end"]) assert.ok(steps.includes(k), k + " in " + steps.join(" | "));
+  assert.ok(steps.indexOf("app:restart-on") < steps.indexOf("app:check") && steps.indexOf("app:check") < steps.indexOf("app:import"), "in order");
+  assert.ok(steps.some(x => /^MegaMMR loading coins/.test(x)) && steps.some(x => /^Load MegaMMR\.\. 1\.5 GB|^Check IBD|^Checking coins @/.test(x)), "the node's own steps, before any timeout: " + steps.join(" | "));
+  assert.ok(shots.some(x => x.log.some(l => /^Minima @ .* : (Streaming IBD|IBD blocks processed)/.test(l))), "the node's last lines, whole");
+  assert.equal(shots.at(-1).busy, ""); assert.deepEqual(shots.at(-1).log, [], "gone with the import");
+  // the window says each step in its language (renderer/app.js importStage), numbers as the node wrote them
   const app = fs.readFileSync(path.join(ROOT, "renderer", "app.js"), "utf8");
-  assert.ok(/if \(s\.megafileBusy === "import" && s\.megafileStep && activeView === "backup" && BK_PAGE === "megafile"\) \{[^\n]*t\("The node is working: \{step\}", \{ step: s\.megafileStep \}\)/.test(app), "the step on screen");
+  const I18N = require("../renderer/i18n.js"); for (const c of ["en", "zh"]) require("../renderer/i18n/" + c + ".js");
+  const src = app.slice(app.indexOf("function importStage(step)"), app.indexOf("/** The import's screen while it runs"));
+  const importStage = new Function("t", src + "; return importStage;")((k, v) => I18N.t(k, v));
+  I18N.set("en");
+  const said = (l) => importStage(l);
+  assert.equal(said("MegaMMR loading coins.. 250000/663414 kept:250000"), "Loading the node's MegaMMR: 250000 of 663414 coins");
+  assert.equal(said("Checking coins @ 5000 / 663588"), "Checking coins: 5000 of 663588");
+  assert.equal(said("IBD blocks processed.. 1102/1102"), "Importing blocks: 1102 of 1102");
+  assert.equal(said("Load MegaMMR.. 1.5 GB"), "Reading the MegaMMR file…"); assert.equal(said("Streaming IBD.. blocks:1102 (with cascade)"), "Replacing the chain…");
+  assert.equal(said("app:restart-on"), "Restarting the node in MegaMMR mode…"); assert.equal(said("All saved.."), "Saved. Restarting the node…");
+  I18N.set("zh"); assert.ok(/663414/.test(said("MegaMMR loading coins.. 250000/663414 kept:250000")) && !/Loading/.test(said("MegaMMR loading coins.. 1/2"))); I18N.set("en");
+  assert.ok(/<div id="bkProg" hidden><div class="bk-stage" id="bkStage" role="status" aria-live="polite"><\/div><div class="eyebrow ps-label">\$\{th\("Node log"\)\}<\/div><div class="bk-mono bk-log" id="bkLog"><\/div><\/div>/.test(app));
+  assert.ok(/if \(activeView === "backup" && BK_PAGE === "megafile"\) paintImportProgress\(s\);/.test(app) && /wirePick\("megammr"\); paintImportProgress\(LAST_STATUS\);/.test(app), "from every status, and when the screen is opened again");
+  const nm = fs.readFileSync(path.join(ROOT, "main", "node-manager.js"), "utf8");
+  assert.ok(/megafileLog: this\.megafileBusy && Array\.isArray\(this\.megafileLog\) \? this\.megafileLog\.slice\(\) : \[\]/.test(nm) && /this\.emit\("line", scrub\(l, this\.secret\)\)/.test(nm), "redacted as the Logs are");
 });

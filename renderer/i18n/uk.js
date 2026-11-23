@@ -5634,7 +5634,6 @@
   "Turn MegaMMR off?": "Вимкнути MegaMMR?",
   "MegaMMR is off. The node is restarting as a light node.": "MegaMMR вимкнено. Вузол перезапускається як легкий вузол.",
   "This node's MegaMMR does not fit its chain": "MegaMMR цього вузла не збігається з його ланцюжком",
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.": "Цей файл MegaMMR має {file} МБ. Для імпорту потрібно близько {need} МБ пам’яті вузла, а вузлу задано {heap} МБ. Збільште пам’ять вузла Parlons у налаштуваннях щонайменше до {need} і спробуйте знову. Нічого не змінено.",
   "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.": "У теці даних вузла вільно {free} МБ, а для цього імпорту потрібно близько {need} МБ. Звільніть місце і спробуйте знову. Нічого не змінено."
 }, { review: [
   "Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.",
@@ -5644,11 +5643,9 @@
   "Turn MegaMMR off?",
   "MegaMMR is off. The node is restarting as a light node.",
   "This node's MegaMMR does not fit its chain",
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.",
   "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed."
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.": "Цей файл MegaMMR має {file} МБ. Для імпорту потрібно близько {need} МБ пам’яті вузла, а звичайний вузол Minima отримує тут {heap} МБ (чверть пам’яті цього комп’ютера). Перейдіть на вузол Parlons у налаштуваннях і задайте йому щонайменше {need} МБ пам’яті, потім спробуйте знову. Нічого не змінено.",
   "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.": "На цьому комп’ютері {ram} МБ пам’яті. Вузлу знадобилося б {heap} МБ з них для цього файлу MegaMMR, і для решти залишилося б замало, тому на цьому комп’ютері його не імпортувати. Нічого не змінено.",
   "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.": "Вузол не повернувся в режимі MegaMMR, тому нічого не імпортовано, а налаштування повернуто як було. Перегляньте журнал і знову запустіть вузол на вкладці «Вузол», якщо його зупинено.",
   "Unknown kind of file.": "Невідомий тип файлу.",
@@ -5663,7 +5660,6 @@
   "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "Імпорт перервався на півдорозі ({why}). Вузол перезапущено. Гаманець і кошти не зачеплено: ключі в гаманці, монети в ланцюжку. Доки вузол не синхронізовано заново, баланс може показувати менше, ніж у вас є: скористайтеся «Синхронізація вузла», щоб перебудувати ланцюжок з вузла MegaMMR.",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "Імпорт перервався на півдорозі ({why}). Вузол перезапущено як легкий вузол, як було раніше. Гаманець і кошти не зачеплено: ключі в гаманці, монети в ланцюжку. Доки вузол не синхронізовано заново, баланс може показувати менше, ніж у вас є: скористайтеся «Синхронізація вузла», щоб перебудувати ланцюжок з вузла MegaMMR."
 }, { review: [
-  "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.",
   "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.",
   "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.",
   "Unknown kind of file.",
@@ -5712,13 +5708,44 @@
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.": "Імпорт зупинився до того, як ланцюжок вузла було змінено ({why}). Нічого не імпортовано й не скинуто. Вузол перезапущено як легкий вузол, як і було. Ваш гаманець і кошти не зачеплено.",
   "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.": "Баланс неповний після незавершеного імпорту MegaMMR. Ваші кошти в безпеці. «Синхронізація вузла» відновить ланцюжок з {host}.",
   "Resync node now": "Синхронізувати вузол зараз",
-  "Resyncing from {host}…": "Синхронізація з {host}…",
-  "The node is working: {step}": "Вузол працює: {step}"
+  "Resyncing from {host}…": "Синхронізація з {host}…"
 }, { review: [
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.",
   "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.",
   "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.",
   "Resync node now",
-  "Resyncing from {host}…",
-  "The node is working: {step}"
+  "Resyncing from {host}…"
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and it is set to {heap} MB. In Settings, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.": "Розмір цього файлу MegaMMR: {file} МБ. Під час перевірки та імпорту вузлу потрібно приблизно вчетверо більше пам’яті: {need} МБ, а для нього задано {heap} МБ. У «Налаштуваннях» встановіть «Пам’ять вузла Parlons» на {need} або більше й натисніть «Застосувати й перезапустити вузол», потім повторіть. Нічого не змінено.",
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). In Settings, choose the Parlons Node, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.": "Розмір цього файлу MegaMMR: {file} МБ. Під час перевірки та імпорту вузлу потрібно приблизно вчетверо більше пам’яті: {need} МБ, а звичайний вузол Minima отримує тут {heap} МБ (чверть пам’яті цього комп’ютера). У «Налаштуваннях» виберіть Parlons Node, встановіть «Пам’ять вузла Parlons» на {need} або більше й натисніть «Застосувати й перезапустити вузол», потім повторіть. Нічого не змінено.",
+  "Node log": "Журнал вузла",
+  "Restarting the node in MegaMMR mode…": "Перезапуск вузла в режимі MegaMMR…",
+  "The node is reading the whole file to check it…": "Вузол читає весь файл, щоб перевірити його…",
+  "The node is importing the file…": "Вузол імпортує файл…",
+  "Loading the node's MegaMMR: {n} of {total} coins": "Завантаження MegaMMR вузла: {n} з {total} монет",
+  "Reading the MegaMMR file…": "Читання файлу MegaMMR…",
+  "Checking the file's blocks…": "Перевірка блоків файлу…",
+  "Checking coins: {n} of {total}": "Перевірка монет: {n} з {total}",
+  "Reading the file's MegaMMR…": "Читання MegaMMR із файлу…",
+  "Replacing the chain…": "Заміна ланцюжка…",
+  "Importing blocks: {n} of {total}": "Імпорт блоків: {n} з {total}",
+  "Reading your coins from the new chain…": "Читання ваших монет із нового ланцюжка…",
+  "Saved. Restarting the node…": "Збережено. Перезапуск вузла…"
+}, { review: [
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and it is set to {heap} MB. In Settings, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.",
+  "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). In Settings, choose the Parlons Node, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.",
+  "Node log",
+  "Restarting the node in MegaMMR mode…",
+  "The node is reading the whole file to check it…",
+  "The node is importing the file…",
+  "Loading the node's MegaMMR: {n} of {total} coins",
+  "Reading the MegaMMR file…",
+  "Checking the file's blocks…",
+  "Checking coins: {n} of {total}",
+  "Reading the file's MegaMMR…",
+  "Replacing the chain…",
+  "Importing blocks: {n} of {total}",
+  "Reading your coins from the new chain…",
+  "Saved. Restarting the node…"
 ] });

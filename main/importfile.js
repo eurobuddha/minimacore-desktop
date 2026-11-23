@@ -45,11 +45,11 @@ const IN_DATABASES = "This file is inside the node's own databases folder, which
 // the MegaMMR's version 1, then its MMR (block time, entry number, entry count). Anything else (a renamed file, a web page saved
 // under the name) is refused before the node is touched; the whole file is read by the node's own reader later (megammr integrity).
 const NOT_MEGAMMR = "This is not a MegaMMR file: it does not begin as a MegaMMR export does. Nothing was sent.";
-// Room for a MegaMMR import (owner, 2026-11-22). The node refuses a file larger than its free heap and holds the whole MegaMMR in memory
+// Room for a MegaMMR import (owner, 2026-11-22; refitted to the owner's mainnet import of 2026-11-23). The node refuses a file larger than its free heap and holds the whole MegaMMR in memory
 // (megammr.java pre-flight); it writes it to <data>/…/databases/megammr.mmr and rebuilds the chain beside it.
-const ROOM_HEAP = "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the node is set to {heap} MB. Raise Parlons Node memory in Settings to at least {need}, then try again. Nothing was changed.";
+const ROOM_HEAP = "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and it is set to {heap} MB. In Settings, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.";
 // the plain Minima node is started with no memory setting: Java gives it a quarter of this computer's memory (node-manager buildArgs)
-const ROOM_HEAP_PLAIN = "This MegaMMR file is {file} MB. Importing it needs about {need} MB of node memory, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). Switch to the Parlons Node in Settings and set its memory to at least {need} MB, then try again. Nothing was changed.";
+const ROOM_HEAP_PLAIN = "This MegaMMR file is {file} MB. The node needs about four times that in memory while it checks and imports it: {need} MB, and the plain Minima node gets {heap} MB here (a quarter of this computer's memory). In Settings, choose the Parlons Node, set Parlons Node memory to {need} or more and press Apply and restart the node, then try again. Nothing was changed.";
 const ROOM_RAM = "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.";
 const ROOM_DISK = "The node's data folder has {free} MB free, and this import needs about {need} MB. Make room, then try again. Nothing was changed.";
 const ON_FAILED = "The node did not come back in MegaMMR mode, so nothing was imported, and the setting was put back as it was. Look at the Logs, and start the node again from the Node tab if it is stopped.";
@@ -61,9 +61,11 @@ const megammrHeapMb = (heapMb) => (parseInt(heapMb, 10) > 0 ? parseInt(heapMb, 1
 /** Why there is no room for this import ("" = there is). o = { kind ("parlons" | "minima"), size (bytes), heapMb (the node's heap for the import:
  *  importHeapMb), ramBytes, freeDiskBytes (null: not known) }. */
 function roomProblem(o) {
-  // ponytail: about three times the file plus 1 GB, fitted to two files (the 460 MB snapshot runs in the default 3072 MB; the 1.6 GB
-  // unpruned one needs about 6 GB); measure again if a file is refused that the node would have taken
-  const file = Math.ceil(o.size / MB), need = file * 3 + 1024, heap = o.heapMb;
+  // Measured (owner, mainnet, 2026-11-23, Parlons Node 0.2.160): a 1.5 GB file with 663,588 coins peaked at 5.5 GB of a 6144 MB heap during
+  // the integrity check, on a node that had restarted into MegaMMR mode with a MegaMMR of 663,414 coins already loaded (its own copy in
+  // memory too). So four times the file, which that import passes (1531 MB → 6124 MB) and nothing less than its peak would.
+  // ponytail: one measurement; measure again if a file is refused that the node would have taken, or a node runs out at 4x
+  const file = Math.ceil(o.size / MB), need = file * 4, heap = o.heapMb;
   if (heap < need) return say(o.kind === "minima" ? ROOM_HEAP_PLAIN : ROOM_HEAP, { file, need, heap });
   if (o.ramBytes < (heap + 1024) * MB) return say(ROOM_RAM, { ram: Math.floor(o.ramBytes / MB), heap });
   const disk = file * 2 + 512;   // the megammr.mmr the node writes, and the chain it rebuilds beside it
