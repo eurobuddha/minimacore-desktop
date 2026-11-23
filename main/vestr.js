@@ -14,7 +14,7 @@
  */
 const { EventEmitter } = require("events");
 const crypto = require("crypto");
-const { rpcCall, oneCommand } = require("./rpc");
+const { rpcCall, oneCommand, neverSent } = require("./rpc");
 const { pinMinimaSend } = require("./sendpin");
 const V = require("./validate");
 let app = null; try { app = require("electron").app; } catch (e) {}
@@ -45,7 +45,7 @@ let runner0 = (cmd) => {
 };
 // every command this module sends is ONE command (main/rpc.js oneCommand, 0.18.177): a contract coin's state is the chain's,
 // anyone can make one that names this wallet, and a ";" in it started a second command through runscript / txnstate
-const runner = (cmd) => { try { return runner0(oneCommand(cmd)); } catch (e) { return Promise.reject(e); } };
+const runner = (cmd) => { try { return runner0(oneCommand(cmd)); } catch (e) { e.notSent = true; return Promise.reject(e); } };   // refused here: never sent
 function log(line) { const e = new Date().toISOString().slice(11, 19) + " " + String(line); LOG_RING.push(e); if (LOG_RING.length > 200) LOG_RING.shift(); console.log("[vestr]", String(line)); }
 
 // ---- helpers ----
@@ -207,9 +207,18 @@ async function create(opts) {
 }
 
 // ---- collect / claim (VERBATIM 1.8.1 order — amount from the NODE via runscript) ----
+// One collect per coin at a time (0.18.322): a second click, or a second window's, while the first is still being built or posted
+// built a second transaction of the same coin.
+const collecting = new Set();
 async function collect(coinid, burn) {
   await init();
   if (!V.isHexId(coinid)) throw new Error("Invalid coin id");
+  const key = String(coinid).toLowerCase();
+  if (collecting.has(key)) throw new Error("A collect of this coin is already being sent. Nothing more was sent.");
+  collecting.add(key);
+  try { return await collectOnce(coinid, burn); } finally { collecting.delete(key); }
+}
+async function collectOnce(coinid, burn) {
   if (burn != null && burn !== "" && !V.isAmount(String(burn))) throw new Error("Invalid burn amount");
   // checkmempool:true (0.18.291): a coin a collect already spends is not listed, so a second collect before the first is mined is not built.
   // The phone's rule (0.18.296, base-vestr-2.2.76 Contract.alreadySpending): only a clean, successful, empty answer refuses, and not before
@@ -261,8 +270,14 @@ async function collect(coinid, burn) {
     // step that cannot be called failed when there is no answer, because the transaction may have gone
     for (const c of cmds) {
       const post = c.startsWith("txnpost");
-      let r; try { r = await runner(c); } catch (e) { r = undefined; }
-      if (post && (!r || typeof r !== "object")) { throw new Error("The collect may have been posted (the node did not answer). Check your History and wait for the list to refresh before you collect again."); }
+      let r, err; try { r = await runner(c); } catch (e) { r = undefined; err = e; }
+      // the post (0.18.322): only the node's own refusal (status false, not pending) is a failure. No answer, a pending or an unreadable
+      // reply is "posted, outcome unknown", not an error; a post that never reached the node (main/rpc.js neverSent) was not sent.
+      if (post && !(r && typeof r === "object" && (r.status === true || (r.status === false && r.pending !== true)))) {
+        if (err && neverSent(err)) throw new Error("collect step failed: " + (err.message || "txnpost") + ". Nothing was collected.");
+        emitter.emit("update");
+        return { ok: true, unknown: true, collected: cancollect, tokenid };
+      }
       // status true only (0.18.291): a pending reply (waiting for someone's approval) is not a collect
       if (!r || r.status !== true) throw new Error("collect step failed: " + ((r && r.error) || c.split(" ")[0]) + ". Nothing was collected.");
       if (c.startsWith("txncheck") && !judged(r)) throw new Error("The node checked this collect and judged it invalid, so it was not sent. Nothing was collected.");

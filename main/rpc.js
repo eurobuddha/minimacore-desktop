@@ -34,14 +34,19 @@ function timeoutFor(command) {   // the verb read as the node reads it, in every
   return V.parts(command).some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
 }
 
+/** A command that never reached the node (0.18.322): refused here, refused at the connection (ECONNREFUSED) or by the node's
+ *  password check. Every other failure (a timeout, a reset, a cut or unreadable reply) may have been run: a write's outcome is unknown. */
+const notSent = (e) => { e.notSent = true; return e; };
+function neverSent(e) { return !!(e && e.notSent === true); }
+
 /** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
 function rpcCall(port, secret, command) {
   return new Promise((resolve, reject) => {
-    { const unsafe = V.refuse("", command); if (unsafe) { reject(new Error(unsafe)); return; } }   // 0.18.317: one command, under every caller (main/cmdverb.js refuse)
+    { const unsafe = V.refuse("", command); if (unsafe) { reject(notSent(new Error(unsafe))); return; } }   // 0.18.317: one command, under every caller (main/cmdverb.js refuse)
     const auth = "Basic " + Buffer.from("minima:" + secret).toString("base64");
     const ascii = ASCII.test(command), path = "/" + encodeURIComponent(command);
     const usePost = ascii && command.length > GET_MAX;
-    if (!ascii && path.length > GET_NONASCII_MAX) { reject(new Error(TOO_LONG)); return; }   // no body whose length a node could misread (0.18.240)
+    if (!ascii && path.length > GET_NONASCII_MAX) { reject(notSent(new Error(TOO_LONG))); return; }   // no body whose length a node could misread (0.18.240)
     // The node's RPC handler reads a POST body ONLY via the Content-Length header (CMDHandler.java). Node's
     // http client would otherwise use chunked transfer-encoding — which the node ignores, reading an EMPTY body
     // and returning "[]" (zero commands run). So we MUST set Content-Length explicitly on POST, or every command
@@ -71,13 +76,13 @@ function rpcCall(port, secret, command) {
       res.on("data", d => { body += d; });
       res.on("error", reject);
       res.on("end", () => {
-        if (res.statusCode === 401) { reject(new Error("RPC authentication failed")); return; }
+        if (res.statusCode === 401) { reject(notSent(new Error("RPC authentication failed"))); return; }
         try { resolve(JSON.parse(body)); }
         catch (e) { reject(new Error("bad RPC reply (HTTP " + res.statusCode + ", " + body.length + " characters, not JSON)")); }   // never the body (0.18.211): a reply can carry a seed or a key
       });
     });
     req.on("timeout", () => { req.destroy(new Error("RPC timeout")); });
-    req.on("error", reject);
+    req.on("error", (e) => { if (e && e.code === "ECONNREFUSED") notSent(e); reject(e); });
     if (usePost) req.write(command);
     req.end();
   });
@@ -100,4 +105,4 @@ function oneCommand(command) {
 /** Does this text sign or change something (send, txn…, vault…): the commands that wait the long write timeout. */
 function isWrite(command) { return timeoutFor(command) === WRITE_TIMEOUT_MS; }
 
-module.exports = { rpcCall, oneCommand, isWrite, _timeoutFor: timeoutFor };
+module.exports = { rpcCall, oneCommand, isWrite, neverSent, _timeoutFor: timeoutFor };

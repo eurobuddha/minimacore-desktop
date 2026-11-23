@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.322] — Vestr collect: one at a time per coin; only the node's own refusal of the post is a failure
+
+- main/vestr.js `collect`: a per-coin in-flight set. A second collect of a coin (a second click, the list re-rendered) while the first is being built or posted is refused ("already being sent. Nothing more was sent.") instead of building a second transaction of the same coin.
+- The post: only the node's own refusal (`status:false`, not pending) fails ("Nothing was collected"). No answer (a timeout, a reset, an unreadable reply) or a pending reply is "posted, outcome unknown": `{ ok:true, unknown:true }`, and the screen says to check History and wait for the list before collecting again (it said "Collect failed"). A post that never reached the node is still a failure: main/rpc.js marks those (`neverSent`: refused before sending, ECONNREFUSED, a wrong RPC password).
+- Tests: scripts/inject-test.cjs (in test:inject) — the second collect refused while the first posts, one post; no answer and pending → unknown; refusal and never-sent → failure; rpcCall marks a refused and an unconnected call. V4 / V5 and the 0.18.209 line CHANGED on purpose. Fails on 0.18.321.
+
 ## [0.18.321] — the node-jar pin is checked on every build path and inside the built Mac app
 
 - scripts/assert-jars.sh takes an optional directory (default resources/). scripts/verify-mac.sh runs it on the built app's `Contents/Resources`, so the jars checked are the jars that ship under the signature.

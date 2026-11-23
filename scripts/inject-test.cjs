@@ -178,7 +178,8 @@ test("Vestr: state checked before use; collected exact; cadence a whole count; e
   // longer lists (a collect of it in the mempool, or spent) is refused; an unanswered post whose coin is still listed may be collected again
   const all = coins; coins = all.filter(x => x.coinid !== "0xC0");
   await assert.rejects(vestr.collect("0xC0"), /^Error: A collect of this coin is already waiting for the chain, or the coin is already spent\. Nothing was sent\.$/); coins = all;
-  step = { txnpost: "throw" }; await assert.rejects(vestr.collect("0xC0"), /may have been posted/);
+  // CHANGED on purpose (0.18.322): an unanswered post is "posted, outcome unknown", not an error; only the node's refusal fails
+  step = { txnpost: "throw" }; { const u = await vestr.collect("0xC0"); assert.deepEqual([u.ok, u.unknown, u.collected], [true, true, "0.2"]); }
   step = {}; assert.equal((await vestr.collect("0xC0")).ok, true, "the post did not take (the coin is still listed, not in the mempool): collected");
   // create
   const base = { tokenid: "0x00", amount: "5", beneficiary: "Mx" + "A".repeat(50), startMs: Date.now() + 1e6, endMs: Date.now() + 2e6 };
@@ -475,7 +476,7 @@ test("Vestr collect (V1): both reads send checkmempool:true; a clean empty answe
 // the review's scenario (0.18.296): an unanswered post, the coin still listed and not in the mempool, three list refreshes: collected again
 test("Vestr collect (V4): after a post the node did not answer, a coin still listed (not in the mempool) can be collected again", async () => {
   const R = vestrRig();
-  await R.reset(); R.post = undefined; await assert.rejects(R.collect(), /may have been posted|may have gone/);
+  await R.reset(); R.post = undefined; assert.equal((await R.collect()).unknown, true, "CHANGED on purpose (0.18.322): posted, outcome unknown, not an error");
   R.post = { status: true, response: {} };
   for (let i = 0; i < 3; i++) await R.vestr.list();
   R.sent = []; assert.deepEqual(await R.collect(), { ok: true, collected: "400", tokenid: "0x00" }); assert.ok(R.txns().includes("txnpost"));
@@ -519,7 +520,8 @@ test("Vestr: the list's Collect button agrees with collect() at coin age 0 (CHEC
 });
 test("Vestr collect (V5): a pending reply to txnpost is not 'collected'", async () => {
   const R = vestrRig();
-  await R.reset(); R.txncheck = R.OK; R.post = { pending: true, status: false }; await assert.rejects(R.collect(), /collect step failed/);
+  // CHANGED on purpose (0.18.322): a pending reply is not the node's refusal: "posted, outcome unknown", never "Collected"
+  await R.reset(); R.txncheck = R.OK; R.post = { pending: true, status: false }; const r = await R.collect(); assert.equal(r.unknown, true);
   R.done();
 });
 
@@ -532,4 +534,38 @@ test("main/vestr.js names the covenant's address whole, and no hexadecimal id in
   // the check finds what 0.18.302 wrote: built here from CONTRACT's own first and last digits (0.18.308), so no shortened id is in this file either
   const C = require("../main/vestr.js").CONTRACT;
   for (const cut of ["\u2026", "..."]) assert.ok(shortened.test(C.slice(0, 6) + cut + C.slice(-4)), "the check would find " + JSON.stringify(cut));
+});
+
+// ---- 0.18.322: Vestr collect: one at a time per coin; only the node's own refusal of the post is a failure ----
+test("Vestr collect: a second collect of a coin in flight is refused; an unanswered or pending post is 'posted, outcome unknown'; a refused or never-sent post fails", async () => {
+  const vestr = require("../main/vestr"), B = "0x" + "BE".repeat(32);
+  const coin = { coinid: "0xD0", tokenid: "0x00", amount: "0.3", created: 1, state: [{ port: 0, data: B }, { port: 1, data: "1.1" }, { port: 2, data: "10" }, { port: 3, data: "20" }, { port: 4, data: "0" }, { port: 5, data: "1" }, { port: 6, data: "1" }, { port: 7, data: "24" }, { port: 8, data: "2" }, { port: 199, data: "0xAB" }] };
+  let post = () => ({ status: true, response: {} }), posts = 0, hold = null;
+  vestr._setRunner(async (c) => {
+    const k = c.split(" ")[0];
+    if (k === "newscript") return { status: true, response: { address: vestr.CONTRACT } };
+    if (k === "block") return { status: true, response: { block: 15 } };
+    if (k === "coins") return { status: true, response: [coin] };
+    if (k === "runscript") return { status: true, response: { variables: { cancollect: "0.2" } } };
+    if (k === "txncheck") return TXNCHECK_OK;
+    if (k === "txnpost") { posts++; if (hold) await hold; return post(); }
+    return { status: true, response: {} }; });
+  let open; hold = new Promise((r) => { open = r; });
+  const first = vestr.collect("0xD0");
+  await new Promise((r) => setTimeout(r, 30));
+  const second = Promise.race([vestr.collect("0xD0"), new Promise((_, no) => setTimeout(() => no(new Error("the second collect went on to post")), 300))]);
+  await assert.rejects(second, /already being sent\. Nothing more was sent/, "the second click while the first posts");
+  open(); hold = null; assert.equal((await first).ok, true); assert.equal(posts, 1, "one post");
+  const timeout = Object.assign(new Error("RPC timeout"));
+  post = () => { throw timeout; }; let r = await vestr.collect("0xD0"); assert.equal(r.unknown, true, "no answer: posted, outcome unknown");
+  post = () => ({ status: false, pending: true }); r = await vestr.collect("0xD0"); assert.equal(r.unknown, true, "pending: outcome unknown");
+  post = () => ({ status: true }); r = await vestr.collect("0xD0"); assert.equal(r.unknown, undefined);
+  post = () => ({ status: false, error: "invalid" }); await assert.rejects(vestr.collect("0xD0"), /invalid\. Nothing was collected/, "the node's refusal");
+  post = () => { const e = new Error("connect ECONNREFUSED 127.0.0.1:1"); e.code = "ECONNREFUSED"; e.notSent = true; throw e; };
+  await assert.rejects(vestr.collect("0xD0"), /ECONNREFUSED.*Nothing was collected/, "never reached the node");
+  // main/rpc.js marks what never reached the node
+  const rpc = require("../main/rpc");
+  const refused = await rpc.rpcCall(1, "x", "status;x").catch((e) => e); assert.equal(rpc.neverSent(refused), true);
+  const conn = await rpc.rpcCall(1, "x", "status").catch((e) => e); assert.equal(conn.code, "ECONNREFUSED"); assert.equal(rpc.neverSent(conn), true);
+  assert.equal(rpc.neverSent(new Error("RPC timeout")), false);
 });

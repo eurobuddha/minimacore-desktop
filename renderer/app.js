@@ -3209,7 +3209,10 @@ async function renderVestrList() {
 async function vestrDoCollect(coinid, burn) {
   if (vestrBusy[coinid]) return;
   vestrBusy[coinid] = true; renderVestrList();
-  try { const r = await api.vestrCollect(coinid, burn); delete vestrBusy[coinid]; toast("Collected " + vFmt(r && r.collected) + " " + vTok(r && r.tokenid) + " ✓", "ok"); renderVestrList(); }
+  try { const r = await api.vestrCollect(coinid, burn); delete vestrBusy[coinid];
+    if (r && r.unknown) toast("The collect was posted but the node did not answer, so its outcome is not known yet. Check History, and wait for the list to refresh before you collect again.", "warn");   // 0.18.322
+    else toast("Collected " + vFmt(r && r.collected) + " " + vTok(r && r.tokenid) + " ✓", "ok");
+    renderVestrList(); }
   catch (e) { delete vestrBusy[coinid]; toast("Collect failed: " + (e && e.message ? e.message : e), "err"); renderVestrList(); }
 }
 
