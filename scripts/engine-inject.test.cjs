@@ -107,3 +107,20 @@ test('the vendored PandaPools engine is 0.6.51 and refuses with the desktop\'s o
   assert(guard.includes("!/^0x0+$/.test(tok)"), 'an all-zero token of any length is not a pool');
   assert.equal(require('./pandapools-parity.manifest.json').donor.mdsVersion, '0.6.51');
 });
+
+// 0.18.328: AtomiX engine 0.1.71 re-vendored (it was 0.1.48 in four files and older in eight): the engine refuses an ETH gas price above
+// 8000 gwei before signing (0.1.67, decided on three quotes 0.1.70), which this desktop's highest tier price (the 5000 gwei ceiling after
+// the multiplier, 0.18.323) never reaches; a balance it could not read is never published as 0 (0.1.64); the Minima dollar token is MxUSD
+// (0.1.66); the wallet keeper's split asks for coinage:3 (0.1.62) and goes only to an address the node is proven to own (0.1.68)
+test('the vendored AtomiX engine is 0.1.71: the 8000 gwei signing ceiling sits above the desktop\'s own, MxUSD, no 0 balance published, a proven keeper split', () => {
+  const rd = (f) => fs.readFileSync(path.join(desktop, f), 'utf8');
+  const ceil = /var MAX_GAS_PRICE_WEI = (\d+)n;/.exec(rd('main/atomix/lib/ethtx.js')); assert(ceil, 'the engine has a signing ceiling');
+  const T = require('../main/atomix')._ethtest;
+  assert.equal(BigInt(ceil[1]), 8000000000000n);
+  assert(T.ethTierGp(T.ETH_MAX_GAS_PRICE, T.ETH_FEE_MULT.high) * 9n / 8n <= BigInt(ceil[1]), 'no tier the desktop offers is refused by the engine');
+  const trading = rd('main/atomix/lib/trading.js'); assert(/coinLabel: 'MxUSD'/.test(trading) && !/coinLabel: 'mxUSDT'/.test(trading));
+  assert(rd('main/atomix/service.js').includes('AX.maker.sellableFrom(r)'), 'a failed balance read skips the keep-alive');
+  const keeper = rd('main/atomix/lib/responder.js');
+  assert(/ coinage:3 mine:true/.test(keeper) && !/coinage:1 mine:true/.test(keeper), 'the keeper split asks for coinage:3');
+  assert(/proveOwned: proveOwned/.test(keeper), 'and proves the address is owned');
+});

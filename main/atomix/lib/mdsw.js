@@ -20,7 +20,11 @@
     function unsafe(command) {
         if (typeof command !== 'string' || !command.replace(/\s/g, '')) return 'Empty node command.';
         if (command.length > 100000) return 'Node command is too large.';
-        if (/[;\x00-\x1f\x7f]/.test(command)) return 'Unsafe command data. Nothing was sent to the node.';
+        if (/[;\x00-\x1f\x7f]/.test(command)) {
+            // loudly (0.1.61): a refused ";" / control character is somebody's text trying to become a second command
+            try { if (g.MDS && typeof g.MDS.log === 'function') g.MDS.log('SECURITY AtomiX refused node command (";" or a control character): ' + JSON.stringify(command)); } catch (e) { }
+            return 'Unsafe command data. Nothing was sent to the node.';
+        }
         return null;
     }
 

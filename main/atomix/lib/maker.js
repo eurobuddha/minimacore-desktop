@@ -6,7 +6,7 @@
  *
  * Config lives in kv (async), loaded into plain objects — keys are PER-CURRENCY (suffix `_<currency.key>`), the
  * native 0.1.5 market-memory: switching currency parks one market's config and restores the other's, no bleed:
- *   maker_cfg_<ccy>   = { pegEnable, step, size, bias, reprice, levels, min, manualEnable }
+ *   maker_cfg_<ccy>   = { pegEnable, step, size, bias, reprice, levels, min, manualEnable, spread, rand, randSeed }
  *   maker_manual_<ccy>= { bids:[{p,a}], asks:[{p,a}] }   (used when pegEnable=false)
  *   peg_state_<ccy>   = { lastMid, withdrawn, wide, lastOk, lastPrice }   (runtime; commitPeg advances it)
  * The service RE-LOADS these + the active currency every poll (loadConfig is cheap) so a UI edit / withdraw /
@@ -24,6 +24,9 @@
     var KEEPALIVE_MS = 30 * 60 * 1000;   // republish at least this often (coin age-out safety)
 
     var C = null, ORDER = null, lastPublishMs = 0;
+    // A balance the host could not read: since when (0 = the last read was good), and whether the user was told.
+    var balBadSince = 0, balBadNotified = false;
+    var _now = function () { return Date.now(); };
 
     function configure(ctx) { C = ctx; if (!cfgCache) cfgCache = {}; if (!manualCache) manualCache = { bids: [], asks: [] }; if (!stateCache) stateCache = {}; }
     function num(v, d) { var n = (v == null || v === '') ? d : Number(v); return isFinite(n) ? n : d; }
@@ -31,7 +34,13 @@
     function notify(t, b) { if (C && C.notify) C.notify(t, b); }
     /** The live order the responder answers takes against, armSafe'd (withdrawn → empty, declines all). Uses the
      *  merged pegCfg so armSafe sees BOTH enable (user config) and withdrawn (runtime state). */
-    function currentOrder() { return PEG.armSafe(ORDER, pegCfg()); }
+    function currentOrder() { return balanceBlind() ? O.make() : PEG.armSafe(ORDER, pegCfg()); }
+    /** The keep-alive has not read a balance for longer than KEEPALIVE_MS: the live ladder was published against
+     *  figures nobody can confirm any more, so the responder stops answering takes from it (empty order = decline
+     *  all) until a read succeeds. */
+    function balanceBlind() { return balBadSince > 0 && _now() - balBadSince > KEEPALIVE_MS; }
+    /** A usable balance pair: both legs real numbers (a failed read is null / NaN / a string, never a 0). */
+    function validAvail(a) { return !!a && typeof a.minima === 'number' && typeof a.usdt === 'number' && isFinite(a.minima) && isFinite(a.usdt); }
 
     var cfgCache = null, manualCache = null, stateCache = null;
 
@@ -76,7 +85,7 @@
         var c = cfgCache || {}, s = stateCache || {};
         return { enable: !!c.pegEnable, step: num(c.step, 0), size: num(c.size, 0),
             askSize: num(c.askSize, num(c.size, 0)), bidSize: num(c.bidSize, num(c.size, 0)),   // independent per-side sizes (0 = don't publish that side)
-            bias: num(c.bias, 0), reprice: num(c.reprice, 1), levels: num(c.levels, 1), min: num(c.min, 0),
+            bias: num(c.bias, 0), reprice: num(c.reprice, 1), levels: num(c.levels, 1), min: num(c.min, 0), spread: num(c.spread, 0), rand: num(c.rand, 0), randSeed: num(c.randSeed, 1),
             lastMid: s.lastMid, withdrawn: !!s.withdrawn, wide: !!s.wide };
     }
 
@@ -101,6 +110,8 @@
     /** Publish the live order. avail = { minima, usdt }. cb(err). Pegged + no usable price → auto-tombstone. */
     function publish(avail, cb) {
         cb = cb || function () {};
+        // every publish path routes here: a live order is never stamped with a balance that was not read
+        if (!validAvail(avail)) return cb(new Error('your balances could not be read, so nothing was published — try again in a moment'));
         var o = buildOrder(avail);
         var c = cfgCache || {};
         if (c.pegEnable) {
@@ -170,6 +181,10 @@
         // HALTED (identitywatch): never publish an order under a key the node does not own.
         if (AX.identitywatch && AX.identitywatch.halted()) return cb && cb();
         cb = cb || function () {};
+        // A balance the host could not read (null, or a leg that is not a number) is never published as 0: that drops
+        // the market from every taker's book and spends a key use. The live order keeps its last good figures.
+        if (!validAvail(avail)) return unreadBalance(cb);
+        balBadSince = 0; balBadNotified = false;
         var c = cfgCache || {};
         if (!c.pegEnable && !(manualCache && ((manualCache.bids || []).length || (manualCache.asks || []).length))) return cb(null);  // nothing configured
         var due = (Date.now() - lastPublishMs) >= KEEPALIVE_MS;
@@ -182,6 +197,37 @@
             if (k !== TR.active().key) return cb(null);
             publish(avail, cb);
         });
+    }
+
+    /** keepAlive with no readable balance. The published market stands — EXCEPT that the dead-feed safety still runs:
+     *  a pegged market whose price is gone (never fetched, or older than the hard ceiling: applyPeg's PEG_STALE) is
+     *  tombstoned and marked withdrawn exactly as the normal path would, so an unreadable balance can never keep a
+     *  ladder live on a price nobody has. Reads failing longer than KEEPALIVE_MS are told once (and currentOrder()
+     *  stops answering takes until a read succeeds). cb(err). */
+    function unreadBalance(cb) {
+        if (!balBadSince) balBadSince = _now();
+        if (balanceBlind() && !balBadNotified) {
+            balBadNotified = true;
+            notify('Balance unreadable', 'Your ' + TR.active().coinLabel + ' / USDT balance has not been readable for over '
+                + Math.round(KEEPALIVE_MS / 60000) + ' min — new takes are declined until it reads again');
+        }
+        var c = cfgCache || {};
+        if (!c.pegEnable || (stateCache && stateCache.withdrawn) || !PEG.noUsablePrice()) return cb(null);
+        M.kvGet('trading_currency', TR.active().key, function (k) {
+            if (k !== TR.active().key) return cb(null);
+            tombstone(null, cb);   // a tombstone carries no liquidity: no balance needed
+        });
+    }
+
+    /** The sellable amount in a `balance tokenid:` reply, or null when the node did not answer it (status not true,
+     *  pending, no array, a sendable that is not a number). An empty array is a real zero: no coins of that token. */
+    function sellableFrom(r) {
+        if (!r || r.status !== true || r.pending === true || !Array.isArray(r.response)) return null;
+        if (!r.response.length) return 0;
+        var s = r.response[0] && r.response[0].sendable;
+        if (typeof s !== 'string' && typeof s !== 'number') return null;
+        var v = Number(s);
+        return String(s).trim() !== '' && isFinite(v) && v >= 0 ? v : null;
     }
 
     /** Refresh the oracle price (drives shouldReprice), persisting the last-good stamp. cb(). */
@@ -212,7 +258,8 @@
         configure: configure, loadConfig: loadConfig, saveConfig: saveConfig, pegCfg: pegCfg,
         buildOrder: buildOrder, publish: publish, tombstone: tombstone, keepAlive: keepAlive,
         refreshPeg: refreshPeg, onCurrencySwitch: onCurrencySwitch, resetForReload: resetForReload, currentOrder: currentOrder,
-        clampAsks: clampAsks,
+        clampAsks: clampAsks, sellableFrom: sellableFrom, validAvail: validAvail, balanceBlind: balanceBlind,
+        _setNow: function (fn) { _now = fn; }, _resetBalanceWatch: function () { balBadSince = 0; balBadNotified = false; },
         _state: function () { return { cfg: cfgCache, manual: manualCache, state: stateCache, lastPublishMs: lastPublishMs }; },
         _setLastPublish: function (t) { lastPublishMs = t; }, KEEPALIVE_MS: KEEPALIVE_MS
     };

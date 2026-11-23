@@ -224,16 +224,16 @@
     /** True iff v is a non-empty hex string (optional 0x prefix). */
     function isHex(v) {
         if (v == null) return false;
-        var s = String(v).trim();
+        var s = String(v);   // 0.1.61: never trimmed — the UNtrimmed value is what goes into the command
         if (s.indexOf('0x') === 0 || s.indexOf('0X') === 0) s = s.substring(2);
         return s.length > 0 && /^[0-9a-fA-F]+$/.test(s);
     }
     /** reqToken is a hex ETH token address OR the currency-agnostic literal 'minima' (the mxUSDT counter-leg
      *  marker — see responder.js). Both are OUR OWN values, never peer input; whitelist 'minima' so the guard
      *  does not reject every mxUSDT counter-leg lock (the native 0.1.35 regression this mirror must not repeat). */
-    function isHexOrMinima(v) { return isHex(v) || (v != null && String(v).trim().toLowerCase() === 'minima'); }
+    function isHexOrMinima(v) { return isHex(v) || (v != null && String(v).toLowerCase() === 'minima'); }
     /** True iff v is a plain non-negative decimal amount (no space/letter that could inject a parameter). */
-    function isDecimal(v) { return v != null && /^[0-9]+(\.[0-9]+)?$/.test(String(v).trim()); }
+    function isDecimal(v) { return v != null && /^[0-9]+(\.[0-9]+)?$/.test(String(v)); }
 
     /** Read a coin state value by port, handling both {"port":val} simplestate and [{port,data}] shapes.
      *  SECURITY (review 7 Nov, mirror of APK 0.2.8): fund-deciding scans ask for the ARRAY and this returns the FIRST

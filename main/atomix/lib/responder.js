@@ -181,9 +181,11 @@
                     onChanged();
                     o.newContract(C.myMinimaPk, receiverEth, hash, BigInt(timelock), token.address, sellRaw, reqRaw, false, function (eN, txhash) {
                         if (eN) {
-                            // ETH_BUSY (cross-instance lock deferred us) PROVABLY didn't broadcast → drop the record-
-                            // before-broadcast row so the next poll re-locks (the row would otherwise dedup us out).
-                            if (eN.busy) return DB.deleteSwap(hash, function () { releaseHash(hash); next(); });
+                            // ETH_BUSY (cross-instance lock deferred us) and ETH_FEE_REFUSED (refused before signing)
+                            // PROVABLY didn't broadcast → drop the record-before-broadcast row so the next poll re-locks
+                            // (a LOCKED row would otherwise dedup us out for good).
+                            if (eN.feeRefused) log('[AtomiX] USDT counter-leg ' + hash + ' not sent: ' + eN.message);
+                            if (eN.busy || eN.feeRefused) return DB.deleteSwap(hash, function () { releaseHash(hash); next(); });
                             releaseHash(hash); return next();
                         }
                         DB.logEvent(hash, DB.EV_CPSENT, 'ETH:' + token.address, tokenHuman, txhash, function () {
@@ -470,11 +472,24 @@
     // Every sell take lands as a new coin, so a busy maker fragments until the safe coin read (53 tokens / 200
     // MINIMA, htlc.guardedCoins) refuses and EVERY buy is declined (live 2026-10-26: 56 MxUSD coins). Merge well
     // before that; split when a single coin would serialise concurrent takes. Same commands as native AtomiX's
-    // manual Wallet tools (MinimaHtlc.consolidateCoins / splitCoins). A split makes 10 coins, merging stops at 30,
+    // manual Wallet tools (MinimaHtlc.consolidateCoins / splitCoins). A split leaves 10 coins, merging stops at 30,
     // so the two can never chase each other.
+    // coinage:3 — the node refuses anything lower on send AND consolidate ("Coinage MUST be >= 3", GlobalParams
+    // MINIMA_CONFIRM_DEPTH). A failed op is logged, never notified, and the next try of THAT op backs off (2 min
+    // doubling, 1 h cap; merge and split count separately) so a wallet the node will not split cannot raise a
+    // notification every 2-3 minutes, and a failing split never slows a needed merge.
+    //
+    // The split names an address (consolidate does not: the node picks its own). It is the swap identity
+    // (C.myMinimaAddr, persisted), and nothing else proves the node still owns it — identitywatch fails open by design
+    // and an orphaned identity after a reseed has cost money for real. So immediately before every split the keeper
+    // PROVES ownership (proveOwned: `scripts address:` is a simple row whose public key is in a COMPLETE `keys` list);
+    // anything less sends nothing. The split also moves only HALF the sendable balance (9 coins; the other half
+    // comes back as the node's own change coin = 10 coins): two takes at once is the whole purpose (CP_LOCK_BURST
+    // is 2), and the large change coin still backs the biggest take.
     var KEEP_MERGE_ABOVE = 30, KEEP_MERGE_ABOVE_MINIMA = 120, KEEP_MERGE_INPUTS = 20;
-    var KEEP_SPLIT_BELOW = 2, KEEP_SPLIT_INTO = 10, KEEP_GAP_MS = 120000;
-    var keepBusy = false, keepLast = 0;
+    var KEEP_SPLIT_BELOW = 2, KEEP_SPLIT_INTO = 10, KEEP_GAP_MS = 120000, KEEP_BACKOFF_MAX_MS = 3600000;
+    var keepBusy = false, keepLast = 0, keepFails = { merge: 0, split: 0 }, keepLastOf = { merge: 0, split: 0 };
+    function keepGap(kind) { return Math.min(KEEP_GAP_MS * Math.pow(2, kind ? keepFails[kind] : 0), KEEP_BACKOFF_MAX_MS); }
     /** Pure: what (if anything) to run for this settled balance. null = wallet is fine. */
     function keepPlan(b, tokenId, myAddr) {
         if (!b || !isHexTok(tokenId) || Number(b.unconfirmed) !== 0) return null;   // only ever act on a settled wallet
@@ -482,29 +497,57 @@
         if (b.coins > (minima ? KEEP_MERGE_ABOVE_MINIMA : KEEP_MERGE_ABOVE))
             return { kind: 'merge', cmd: 'consolidate tokenid:' + tokenId + ' coinage:3 maxcoins:' + KEEP_MERGE_INPUTS + ' maxsigs:5',
                 why: b.coins + ' coins (keeping it at or below ' + (minima ? KEEP_MERGE_ABOVE_MINIMA : KEEP_MERGE_ABOVE) + ')' };
-        if (b.coins < KEEP_SPLIT_BELOW && Number(b.sendable) >= KEEP_SPLIT_INTO && myAddr)
-            return { kind: 'split', cmd: 'send amount:' + b.sendable + ' address:' + myAddr + ' tokenid:' + tokenId
-                + ' split:' + KEEP_SPLIT_INTO + ' coinage:1 mine:true',
-                why: b.coins + ' coin holding ' + b.sendable + ' (two takes cannot share one coin)' };
+        if (b.coins < KEEP_SPLIT_BELOW && Number(b.sendable) >= KEEP_SPLIT_INTO && myAddr) {
+            var half = D.divFloor(b.sendable, '2', 8);   // truncated, never rounded
+            return { kind: 'split', addr: myAddr, cmd: 'send amount:' + half + ' address:' + myAddr + ' tokenid:' + tokenId
+                + ' split:' + (KEEP_SPLIT_INTO - 1) + ' coinage:3 mine:true',
+                why: b.coins + ' coin holding ' + b.sendable + ', ' + half + ' split off (two takes cannot share one coin)' };
+        }
         return null;
     }
     function isHexTok(t) { return /^0x[0-9a-fA-F]+$/.test(String(t || '')); }
+    /** Does the node own `addr` RIGHT NOW? cb(null) when proven, cb(reason) otherwise. Proven = `scripts address:`
+     *  answers a simple (single-key) row for exactly that address AND its public key is in a COMPLETE key list
+     *  (htlc.loadKeys: every key the node reports came back well-formed). A failed or incomplete read is not proof. */
+    function proveOwned(addr, cb) {
+        AX.mds.cmdR('scripts address:' + addr, function (err, row) {
+            if (err || !row || typeof row !== 'object') return cb('the node has no script for ' + addr + (err ? ' (' + err.message + ')' : ''));
+            var a = String(addr).toUpperCase();
+            if (String(row.miniaddress || '').toUpperCase() !== a && String(row.address || '').toUpperCase() !== a)
+                return cb('the node answered a different address for ' + addr);
+            if (!(row.simple === true || String(row.simple) === 'true') || !row.publickey)
+                return cb(addr + ' is not a simple single-key address of this node');
+            H.loadKeys(function (eK, keys) {
+                if (eK || !keys || !keys.complete) return cb('key list read failed or incomplete' + (eK ? ' (' + eK.message + ')' : ''));
+                if (keys.indexOf(H.normKey(row.publickey)) < 0) return cb('public key ' + row.publickey + ' of ' + addr + ' is not in the node\'s key list (' + keys.length + ' keys)');
+                cb(null);
+            });
+        });
+    }
     /** Runs at most one merge/split, never while a counter-leg lock holds coins; never waits for it (next() now). */
     function keepWallet(next) {
         if (keepBusy || Object.keys(cpInFlight).length || _now() - keepLast < KEEP_GAP_MS) return next();
         var tok = TR.active().tokenId;
         H.tokenBalance(tok, function (e, b) {
             var plan = e ? null : keepPlan(b, tok, C && C.myMinimaAddr);
-            if (!plan || keepBusy || Object.keys(cpInFlight).length) return next();
-            keepBusy = true; keepLast = _now();
+            if (!plan || keepBusy || Object.keys(cpInFlight).length || _now() - keepLastOf[plan.kind] < keepGap(plan.kind)) return next();
+            keepBusy = true; keepLast = keepLastOf[plan.kind] = _now();
             var label = TR.active().coinLabel, title = plan.kind === 'merge' ? 'Merging ' + label + ' coins' : 'Splitting ' + label + ' coins';
-            log('[AtomiX] wallet keeper: ' + plan.kind + ' — ' + plan.why + ' — ' + plan.cmd);
-            AX.mds.cmdR(plan.cmd, function (err, resp) {
-                keepBusy = false; keepLast = _now();
-                var id = resp && (resp.txpowid || (resp.txpow && resp.txpow.txpowid)) || '';
-                if (err) { log('[AtomiX] wallet keeper ' + plan.kind + ' failed: ' + err.message); notify(title + ' failed', err.message); }
-                else { log('[AtomiX] wallet keeper ' + plan.kind + ' posted ' + id); notify(title, plan.why + '. Coins stay in your wallet.' + (id ? ' txpow ' + id : '')); }
-            });
+            function failed(why) {
+                keepBusy = false; keepLast = keepLastOf[plan.kind] = _now(); keepFails[plan.kind]++;
+                log('[AtomiX] wallet keeper ' + plan.kind + ' failed (next try in ' + Math.round(keepGap(plan.kind) / 60000) + ' min): ' + why);
+            }
+            function run() {
+                log('[AtomiX] wallet keeper: ' + plan.kind + ' — ' + plan.why + ' — ' + plan.cmd);
+                AX.mds.cmdR(plan.cmd, function (err, resp) {
+                    var id = resp && (resp.txpowid || (resp.txpow && resp.txpow.txpowid)) || '';
+                    if (err) return failed(err.message);
+                    keepBusy = false; keepLast = keepLastOf[plan.kind] = _now(); keepFails[plan.kind] = 0;
+                    log('[AtomiX] wallet keeper ' + plan.kind + ' posted ' + id); notify(title, plan.why + '. Coins stay in your wallet.' + (id ? ' txpow ' + id : ''));
+                });
+            }
+            if (!plan.addr) run();
+            else proveOwned(plan.addr, function (why) { if (why) failed('not sent — ' + why); else run(); });
             next();
         });
     }
@@ -538,7 +581,7 @@
         _takerOf: function () { return takerOf; },
         _reset: function () { cpInFlight = {}; incoming = {}; takerOf = {}; noticesSent = {}; htlc13 = {}; EO._resetApprovals(); },
         _htlc13: function () { return htlc13; }, _setNow: function (fn) { _now = fn; EO._setNow(fn); },
-        _selectCoins: selectCoins, keepPlan: keepPlan, keepWallet: keepWallet, _resetKeeper: function () { keepBusy = false; keepLast = 0; }, _incoming: function () { return incoming; }, pruneIncoming: pruneIncoming,
+        _selectCoins: selectCoins, keepPlan: keepPlan, keepWallet: keepWallet, _resetKeeper: function () { keepBusy = false; keepLast = 0; keepFails = { merge: 0, split: 0 }; keepLastOf = { merge: 0, split: 0 }; }, proveOwned: proveOwned, _incoming: function () { return incoming; }, pruneIncoming: pruneIncoming,
         CP_LOCK_BURST: CP_LOCK_BURST, INCOMING_TTL_MS: INCOMING_TTL_MS, INCOMING_MAX: INCOMING_MAX
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

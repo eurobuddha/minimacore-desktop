@@ -157,7 +157,12 @@
         return el('div', {}, [
             el('div', { class: 'hdr' }, [
                 el('div', { class: 'brand', text: 'AtomiX' }),
-                el('button', { class: 'pill accent', text: ccy(), onclick: switchCurrency }),
+                // 'ccy', not just 'pill accent': that is the SAME class the Mainnet status pill below
+                // carries, so the switch was dressed as a badge and people did not try it. The ⇄ and the
+                // border are what mark it as a control; the glow is a bonus and is dropped entirely under
+                // prefers-reduced-motion, which is why neither of them moves. (native 0.1.65)
+                el('button', { class: 'pill accent ccy', text: ccy(), onclick: switchCurrency,
+                               'aria-label': 'Trading ' + ccy() + '. Tap to switch to ' + TR.other().coinLabel + '.' }),
                 el('button', { class: 'pill', text: AX.ui.dark ? '☾' : '☀', onclick: toggleTheme }),
                 el('button', { class: 'pill', text: '?', onclick: welcomeDialog }),
                 el('span', { class: 'pill accent' }, [el('span', { class: 'dot' }), document.createTextNode('Mainnet')])
@@ -359,6 +364,7 @@
             editRow('Auto-price (peg to ' + pegSrc + ')', toggle(peg, function () { c.pegEnable = !peg; render(); }))
         ]);
         if (peg) box.appendChild(genRow([genField('mk_bias', c.bias != null ? c.bias : '', 'skew ±%'), genField('mk_reprice', c.reprice != null ? c.reprice : '1', 'reprice ≥ %')]));
+        if (peg) box.appendChild(genRow([genField('mk_spread', c.spread != null && Number(c.spread) > 0 ? c.spread : '', 'spread % (best bid to best offer)'), genField('mk_rand', c.rand != null && Number(c.rand) > 0 ? c.rand : '', 'randomise sizes ±%')]));
         box.appendChild(el('div', { class: 'label', style: 'text-transform:none;margin-top:8px', text: 'Auto-fill: mid · step % · levels, then ask/bid size (seeds the rungs)' }));
         box.appendChild(genRow([genField('mk_mid', '', 'mid'), genField('mk_step', c.step != null ? c.step : '', 'step %'), genField('mk_levels', c.levels != null ? c.levels : '1', 'levels')]));
         box.appendChild(genRow([genField('mk_asksize', c.askSize != null ? c.askSize : (c.size != null ? c.size : ''), 'ask size'), genField('mk_bidsize', c.bidSize != null ? c.bidSize : (c.size != null ? c.size : ''), 'bid size')]));
@@ -405,7 +411,7 @@
         }
         var askSize = gv('mk_asksize'), bidSize = gv('mk_bidsize'), step = gv('mk_step');
         var cfg = { pegEnable: peg && step > 0 && (askSize > 0 || bidSize > 0), min: gv('mk_min'),
-            step: step, bias: gv('mk_bias'), reprice: gv('mk_reprice') || 1,
+            step: step, bias: gv('mk_bias'), reprice: gv('mk_reprice') || 1, spread: Math.max(0, Math.min(40, gv('mk_spread') || 0)), rand: Math.max(0, Math.min(90, gv('mk_rand') || 0)), randSeed: c.randSeed != null ? c.randSeed : 1,
             levels: Math.max(1, Math.min(O.MAX_LEVELS, Math.floor(gv('mk_levels')) || 1)),
             size: Math.max(askSize, bidSize), askSize: askSize, bidSize: bidSize };
         S.makerCfg = cfg; S.makerManual = manual; S.editing = false;
@@ -416,11 +422,15 @@
             if (!row) return el('div', { class: 'half' + (isBid ? ' bid' : '') }, [el('span', { class: 'sz', text: '—' })]);
             var cap = B.levelCap(row.maker, row.level, isBid);
             var mine = B.isMine(row.maker, myId());
+            // the two halves mirror each other round the divider: size, price │ price, size (the bid used to read price, size,
+            // which put its size against the divider instead of its price)
+            var px = el('span', { class: 'mono px ' + (isBid ? 'bidpx' : 'askpx'), text: AX.fmt.px(row.level.p) });
+            var sz = el('span', { class: 'sz', text: AX.fmt.abbrev(row.level.a) });
             return el('div', { class: 'half' + (isBid ? ' bid' : ''), onclick: function () { if (!mine && cap > 0) AX.ui.onTake && AX.ui.onTake(row.maker, isBid); } }, [
-                el('span', { class: 'mono px ' + (isBid ? 'bidpx' : 'askpx'), text: AX.fmt.px(row.level.p) }),
+                isBid ? sz : px,
                 document.createTextNode(' '),
-                el('span', { class: 'sz', text: AX.fmt.abbrev(row.level.a) }),
-                el('div', { class: 'tag' + (mine ? ' you' : ''), text: mine ? 'you' : AX.fmt.shorten(row.maker.signerPk) })
+                isBid ? px : sz,
+                el('div', { class: 'tag' + (mine ? ' you' : ''), style: 'word-break:break-all', text: mine ? 'you' : row.maker.signerPk })
             ]);
         }
         return el('div', { class: 'depth' + (best ? ' best' : '') }, [half(bid, true), el('span', { class: 'divider', text: '│' }), half(ask, false)]);
@@ -535,7 +545,7 @@
             walletCard('Minima · available to swap', S.bals.minima + ' ' + ccy(), 'var(--accent)', minimaBreakdown(),
                 function () { AX.ui.onCoinDump && AX.ui.onCoinDump(); }, pulse.minima),
             walletCard('Ethereum · Ethereum', S.bals.eth + ' ETH', 'var(--text)',
-                addr ? AX.wallet.shortAddr(addr) : 'deriving from node seed…', addr ? receiveDialog : null, pulse.eth),
+                addr || 'deriving from node seed…', addr ? receiveDialog : null, pulse.eth),
             walletCard('USDT · Ethereum', S.bals.usdt + ' USDT', 'var(--text)', null, null, pulse.usdt),
             el('div', { style: 'display:flex;gap:8px;margin-top:12px;flex-wrap:wrap' }, [
                 el('button', { class: 'pill', text: '↻  Refresh', onclick: function () { AX.ui.onRefreshBal && AX.ui.onRefreshBal(); } }),
@@ -552,7 +562,7 @@
             el('div', { class: 'label', style: 'text-transform:none;letter-spacing:0', text: title }),
             el('div', { class: 'bigval' + (pulse ? ' pulse' : ''), style: 'color:' + color + ';margin-top:4px', text: val })
         ];
-        if (sub) kids.push(el('div', { class: 'dim mono', style: 'font-size:11.5px;margin-top:4px;color:var(--dim)', text: sub }));
+        if (sub) kids.push(el('div', { class: 'dim mono', style: 'font-size:11.5px;margin-top:4px;color:var(--dim);word-break:break-all', text: sub }));
         var attrs = { class: 'card tight', style: 'border-radius:16px' + (onclick ? ';cursor:pointer' : '') };
         if (onclick) attrs.onclick = onclick;
         return el('div', attrs, kids);
@@ -663,7 +673,7 @@
         dialog({
             title: 'Your ' + ccy() + ' coins',
             lines: rows.length ? rows.map(function (c) {
-                return { node: el('div', { class: 'dlgline mono', style: 'font-size:12px', text: c.amount + '  ·  ' + AX.wallet.shortAddr(c.coinid) }) };
+                return { node: el('div', { class: 'dlgline mono', style: 'font-size:12px;word-break:break-all;user-select:all', text: c.amount + '  ·  ' + c.coinid }) };
             }) : [{ text: 'No sendable coins right now.', cls: 'dim' }],
             cancelText: 'Close'
         });
@@ -671,12 +681,17 @@
 
     // ---- ACTIVITY ----
     function activityTab() {
-        var list = S.swaps || [];
+        // History for the SELECTED market only (plus any still-actionable swap in the other one — TR.visibleIn).
+        // Unscoped this listed both currencies at once, so switching to MINIMA still showed the dollar history:
+        // the rows carry their market in selltoken/buytoken, the list just never read it.
+        var all = S.swaps || [], list = [], now = Date.now(), tip = Number(AX.ui.block) || 0;
+        for (var vi = 0; vi < all.length; vi++) if (TR.visibleIn(all[vi], TR.active(), tip, now)) list.push(all[vi]);
         var hdrKids = [el('div', { class: 'brand', style: 'font-size:16px;flex:1', text: 'Your swaps' })];
-        if (list.length) hdrKids.push(el('button', { class: 'pill', text: '⬇ Export CSV',
+        // Export stays ALL currencies (it is an accounting export), so it is offered whenever any swap exists.
+        if (all.length) hdrKids.push(el('button', { class: 'pill', text: '⬇ Export CSV',
             onclick: function () { AX.ui.onExportCsv && AX.ui.onExportCsv(); } }));
         var wrap = el('div', {}, [el('div', { class: 'hdr', style: 'display:flex;align-items:center;gap:8px' }, hdrKids)]);
-        if (!list.length) { wrap.appendChild(el('div', { class: 'empty', text: 'No swaps yet — your completed and refunded swaps will appear here.' })); return wrap; }
+        if (!list.length) { wrap.appendChild(el('div', { class: 'empty', text: 'No ' + ccy() + ' swaps yet — your completed and refunded swaps will appear here.' })); return wrap; }
         list.forEach(function (sw) {
             wrap.appendChild(el('div', { class: 'card tight', style: 'cursor:pointer',
                 onclick: function () { AX.ui.onSwapDetail && AX.ui.onSwapDetail(sw.hash); } }, [
@@ -684,11 +699,44 @@
                     el('div', { class: 'mono', style: 'flex:1;font-size:14px', text: sw.sellamount + ' ' + tok(sw.selltoken) + ' → ' + sw.buyamount + ' ' + tok(sw.buytoken) }),
                     el('span', { class: 'status ' + sw.status.toLowerCase(), text: statusLabel(sw.status) })
                 ]),
-                el('div', { class: 'statusline', text: AX.inspect.statusDetail(sw) }),
+                el('div', { class: 'statusline', text: AX.inspect.statusDetail(sw) })
+            ].concat(visLines(sw), [
                 el('div', { class: 'statusline dim', style: 'font-size:11px', text: 'Tap to inspect both legs live' })
-            ]));
+            ])));
         });
         return wrap;
+    }
+    /** Swap-status visibility for a swap I started (0.1.39, native 0.1.84): steps done, the maker's deadline, its
+     *  latest notice, when the refund opens, a "Refund now" button, and the refund tx IN FULL. sw.vis comes from
+     *  settle.visibility (app.refreshSwaps). Countdowns re-read on each render (the 90s refresh). */
+    function visLines(sw) {
+        var v = sw.vis, out = [];
+        if (!v) return out;
+        var now = Math.floor(Date.now() / 1000), tip = Number(AX.ui.block) || 0, waiting = sw.status === 'STARTED';
+        var cur = v.blocks ? tip : now;
+        function when(t) { return v.blocks ? 'block ' + t : new Date(t * 1000).toLocaleString(); }
+        function left(t) {
+            var d = t - cur + 1;
+            if (v.blocks) return tip ? d + (d === 1 ? ' block' : ' blocks') : 'a few blocks';
+            return d >= 3600 ? Math.floor(d / 3600) + 'h ' + Math.ceil((d % 3600) / 60) + 'm' : Math.ceil(d / 60) + ' min';
+        }
+        function line(text, cls, style) { return el('div', { class: 'statusline' + (cls ? ' ' + cls : ''), style: style || '', text: text }); }
+        if (v.steps.length) out.push(line('✓ ' + v.steps.join('  ·  ✓ ')));
+        if (waiting && !v.timedOut && cur < v.respondBy) out.push(line('Maker must respond by ' + when(v.respondBy)));
+        if (v.notice) out.push(line((v.notice.state === 'declined' ? 'Maker declined: ' : 'Maker is retrying: ') + v.notice.reason, v.notice.state === 'declined' ? '' : 'dim'));
+        if ((waiting || sw.status === 'ERROR') && (v.timedOut || cur >= v.respondBy) && !v.refundSent)
+            out.push(line('Refund opens ' + when(v.refundAt + (v.blocks ? 1 : 0)) + ' — automatic, app open or not'));
+        if (v.refundSent) out.push(line('Refund sent: ' + v.refundSent, 'mono', 'word-break:break-all;user-select:all'));
+        if (v.refunded) out.push(line('Refunded', 'ok'));
+        if (waiting || sw.status === 'ERROR') {
+            var open = cur > v.refundAt;
+            var btn = { class: 'pill' + (open ? ' accent' : ''), style: 'margin-top:8px' + (open ? '' : ';opacity:.55'),
+                text: open ? 'Refund now' : 'Refund now (opens in ' + left(v.refundAt) + ')',
+                onclick: function (e) { e.stopPropagation(); if (open && AX.ui.onRefundNow) AX.ui.onRefundNow(sw.hash); } };
+            if (!open) btn.disabled = 'disabled';
+            out.push(el('button', btn));
+        }
+        return out;
     }
     function statusLabel(s) { return { STARTED: 'waiting', LOCKED: 'locked', CLAIMING: 'claiming', COMPLETE: 'complete', REFUNDED: 'refunded', ERROR: 'error' }[s] || s.toLowerCase(); }
 
@@ -737,7 +785,7 @@
         if (lp.buySize > 0) lines.push('buys up to ' + AX.fmt.abbrev(lp.buySize) + ' ' + ccy());
         return el('div', { class: 'card tight' }, [
             el('div', { style: 'display:flex;align-items:center;gap:8px' }, [
-                el('div', { class: 'mono', style: 'flex:1;font-size:13px', text: AX.fmt.shorten(lp.commsPublicId || lp.signerPk) }),
+                el('div', { class: 'mono', style: 'flex:1;font-size:13px;word-break:break-all;user-select:all', text: lp.commsPublicId || lp.signerPk }),
                 el('button', { class: 'pill accent', text: 'Trade', onclick: function () { S.otcProposing = lp; S.otcCountering = null; render(); } })
             ]),
             el('div', { class: 'statusline', text: lines.join('  ·  ') || 'no liquidity' })
@@ -763,7 +811,7 @@
     function proposePanel(lp) {
         var side = S._otcSide || (lp.sellSize > 0 ? 'SELL' : 'BUY');
         return el('div', { class: 'card' }, [
-            el('div', { class: 'label', text: 'PROPOSE TO ' + AX.fmt.shorten(lp.commsPublicId || lp.signerPk) }),
+            el('div', { class: 'label', style: 'word-break:break-all', text: 'PROPOSE TO ' + (lp.commsPublicId || lp.signerPk) }),
             el('div', { class: 'seg' }, [
                 el('button', { class: 'segbtn' + (side === 'SELL' ? ' on' : '') + (lp.sellSize > 0 ? '' : ' off'), text: 'Buy ' + ccy() + ' (LP sells)', onclick: function () { if (lp.sellSize > 0) { S._otcSide = 'SELL'; render(); } } }),
                 el('button', { class: 'segbtn' + (side === 'BUY' ? ' on' : '') + (lp.buySize > 0 ? '' : ' off'), text: 'Sell ' + ccy() + ' (LP buys)', onclick: function () { if (lp.buySize > 0) { S._otcSide = 'BUY'; render(); } } })

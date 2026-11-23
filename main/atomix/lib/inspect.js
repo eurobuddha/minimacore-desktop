@@ -25,7 +25,7 @@
             default: return '';
         }
     }
-    function tok(t) { return (typeof t === 'string' && t.indexOf('0x') === 0 && AX.trading) ? AX.trading.labelForToken(t) : t; }
+    function tok(t) { return (typeof t === 'string' && t && AX.trading) ? AX.trading.labelForToken(t) : t; }
 
     /**
      * Compose the report lines. facts = {
@@ -50,7 +50,9 @@
     }
 
     function buildReport(f) {
-        var s = f.swap, L = [];
+        var s = {}, L = [], k;
+        for (k in f.swap) s[k] = f.swap[k];
+        s.sellToken = tok(s.sellToken); s.buyToken = tok(s.buyToken);   // rows on disk may say the legacy "mxUSDT"
         var sell = !!s.myLegIsMinima;
         L.push((sell ? 'Sell ' : 'Buy ') + s.sellAmount + ' ' + s.sellToken + ' → ' + s.buyAmount + ' ' + s.buyToken
             + '  ·  ' + String(s.status).toLowerCase());

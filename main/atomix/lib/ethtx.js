@@ -19,6 +19,13 @@
     var FALLBACK_GAS_PRICE = 1000000000n;   // 1 gwei (only used when eth_gasPrice returns ≤0)
     var PRIORITY_TIP_WEI = 200000000n;      // 0.2 gwei tip on the base-fee floor
     var STALE_MS = 120000;
+    // Hard fee ceiling, checked AFTER the headroom and the base-fee floor, BEFORE signing: eth_gasPrice and the base fee
+    // come from an RPC endpoint, and an absurd quote (hostile or broken) would otherwise be signed as is: gasLimit x
+    // gasPrice can be the whole ETH balance. 8000 gwei sits just above the highest price the desktop host itself can
+    // produce (its ETH_MAX_GAS_PRICE anchor cap of 5000 gwei x High tier 170% / 1.2 x 9/8 = 7968.749999999 gwei) and
+    // ~5x the native app's 1500 gwei cap, so no real fee spike blocks a claim or refund near its deadline; above it the
+    // send is refused with ETH_FEE_REFUSED (nothing signed, nonce untouched) and the caller's retry/notice path shows it.
+    var MAX_GAS_PRICE_WEI = 8000000000000n;   // 8000 gwei
 
     // address → { st:{next,syncAtMs}, q:[jobs], busy:bool }. next=-1 means cold (read "pending").
     var ADDR = {};
@@ -75,39 +82,82 @@
             } else {                                          // pending just lagging our broadcast → keep counting
                 alloc = st.next; newNext = st.next + 1; newSync = st.syncAtMs;
             }
-            rpc.gasPrice(function (e2, gp) {
+            rpc.gasPrice(function (e2, gp0) {
                 if (e2) return done(e2);
-                if (gp <= 0n) gp = FALLBACK_GAS_PRICE;
-                gp = (gp * 9n) / 8n;                          // +12.5% headroom (was +20%)
                 rpc.baseFeePerGasOrZero(function (_e3, baseFee) {
-                    // 0.1.40: floor at base+12.5%+tip (was 2×base). The old 2× floor with a fixed 500k gas limit
-                    // forced a near-empty node-derived wallet to pre-hold ~0.0005 ETH for a ~0.00005 ETH op, so
-                    // new users' swaps silently mutual-refunded.
-                    if (baseFee > 0n) { var floor = (baseFee * 9n) / 8n + PRIORITY_TIP_WEI; if (gp < floor) gp = floor; }
-                    var raw;
-                    try {
-                        raw = AX.eth.signLegacyTx(
-                            { nonce: alloc, gasPriceWei: gp, gasLimit: job.gasLimit, to: job.to, value: job.value, data: job.data },
-                            job.privHex, job.chainId);
-                    } catch (e) { return done(e); }
-                    // Cross-instance lock (if wired): serialise the actual broadcast with the OTHER instance so the
-                    // UI + service never clash a nonce on the shared wallet. On contention → a BUSY error (the caller
-                    // retries next cycle, no worse than F1). The lock is released regardless of the broadcast outcome.
-                    acquire(function (won) {
-                        if (!won) return done(busyErr());
-                        rpc.sendRawTransaction(raw, function (e4, txHash) {
-                            release(function () {
-                                if (e4) return done(e4);
-                                if (!txHash || String(txHash).indexOf('0x') !== 0) return done(new Error('send failed: ' + txHash));
-                                st.next = newNext; st.syncAtMs = newSync;    // commit ONLY after a successful broadcast
-                                done(null, txHash);
-                            });
-                        });
+                    var gp = priced(gp0, baseFee);
+                    if (gp <= MAX_GAS_PRICE_WEI) return sign(gp);
+                    // One endpoint's word is not enough to refuse a claim/refund near its deadline, nor to sign an
+                    // absurd fee: ask two OTHER endpoints of the fallback list and take the median of the three.
+                    requote(rpc, gp, function (median, quotes) {
+                        if (median !== null && median <= MAX_GAS_PRICE_WEI) return sign(median);
+                        var fe = new Error('ETH_FEE_REFUSED: the Ethereum RPC quoted a gas price of ' + gp.toString() + ' wei'
+                            + (quotes ? ' (median with two other endpoints ' + median.toString() + ' wei; quotes ' + quotes + ')' : ' and no two other endpoints answered a re-quote')
+                            + ', above the ' + MAX_GAS_PRICE_WEI.toString() + ' wei (8000 gwei) safety ceiling. Nothing was signed or sent. '
+                            + 'No real network prices this high: check or change the ETH RPC endpoint.');
+                        fe.feeRefused = true;
+                        done(fe);
                     });
                 });
             });
+            function sign(gp) {
+                var raw;
+                try {
+                    raw = AX.eth.signLegacyTx(
+                        { nonce: alloc, gasPriceWei: gp, gasLimit: job.gasLimit, to: job.to, value: job.value, data: job.data },
+                        job.privHex, job.chainId);
+                } catch (e) { return done(e); }
+                // Cross-instance lock (if wired): serialise the actual broadcast with the OTHER instance so the
+                // UI + service never clash a nonce on the shared wallet. On contention → a BUSY error (the caller
+                // retries next cycle, no worse than F1). The lock is released regardless of the broadcast outcome.
+                acquire(function (won) {
+                    if (!won) return done(busyErr());
+                    rpc.sendRawTransaction(raw, function (e4, txHash) {
+                        release(function () {
+                            if (e4) return done(e4);
+                            if (!txHash || String(txHash).indexOf('0x') !== 0) return done(new Error('send failed: ' + txHash));
+                            st.next = newNext; st.syncAtMs = newSync;    // commit ONLY after a successful broadcast
+                            done(null, txHash);
+                        });
+                    });
+                });
+            }
         });
     }
 
-    AX.ethtx = { send: send, resetAll: resetAll, useLock: useLock, _setNow: function (fn) { _now = fn; }, STALE_MS: STALE_MS };
+    /** The price a send signs: +12.5% headroom on the quote, floored at base fee +12.5% + tip (F5). 0.1.40: was 2× base
+     *  — the old floor with a fixed 500k gas limit forced a near-empty node-derived wallet to pre-hold ~0.0005 ETH for a
+     *  ~0.00005 ETH op, so new users' swaps silently mutual-refunded. */
+    function priced(gp, baseFee) {
+        if (!(gp > 0n)) gp = FALLBACK_GAS_PRICE;
+        gp = (gp * 9n) / 8n;
+        if (baseFee > 0n) { var floor = (baseFee * 9n) / 8n + PRIORITY_TIP_WEI; if (gp < floor) gp = floor; }
+        return gp;
+    }
+    /** Re-quote an over-ceiling price on two OTHER endpoints of the existing fallback list (in list order, skipping the
+     *  one that quoted; the list itself is shared with three other copies and never changed here), each priced exactly
+     *  as doSend prices. cb(median of the three as BigInt, 'a, b, c' wei) — or cb(null) when fewer than two answered. */
+    function requote(rpc, first, cb) {
+        if (!rpc || typeof rpc.callOn !== 'function' || !AX.ethrpc) return cb(null, '');
+        var eps = AX.ethrpc.FALLBACKS.filter(function (u) { return u !== rpc.url; }), got = [first], i = 0;
+        (function next() {
+            if (got.length === 3) {
+                var sorted = got.slice().sort(function (a, b) { return a < b ? -1 : a > b ? 1 : 0; });
+                return cb(sorted[1], got.join(', '));
+            }
+            if (i >= eps.length) return cb(null, '');
+            var ep = eps[i++];
+            rpc.callOn(ep, 'eth_gasPrice', [], function (e, r) {
+                var q; try { q = e || r == null || r === '' ? null : AX.ethrpc.hexToBig(r); } catch (x) { q = null; }
+                if (q === null) return next();
+                rpc.callOn(ep, 'eth_getBlockByNumber', ['latest', false], function (e2, blk) {
+                    var bf = 0n;
+                    try { if (!e2 && blk && typeof blk === 'object' && blk.baseFeePerGas) bf = AX.ethrpc.hexToBig(blk.baseFeePerGas); } catch (x2) { bf = 0n; }
+                    got.push(priced(q, bf)); next();
+                });
+            });
+        })();
+    }
+
+    AX.ethtx = { send: send, priced: priced, resetAll: resetAll, useLock: useLock, _setNow: function (fn) { _now = fn; }, STALE_MS: STALE_MS, MAX_GAS_PRICE_WEI: MAX_GAS_PRICE_WEI };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

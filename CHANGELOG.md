@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.328] — AtomiX engine 0.1.71 re-vendored
+
+- main/atomix/{service.js, lib/trading,mdsw,ethtx,htlc,boot,settle,peg,responder,maker,wallet,inspect,ui}.js copied byte-for-byte from atomix-mds 0.1.71 (git `fa5efa7e55fa679b066e231e5a451ad9d59d423c`, branch security/2026-11-07, clean tree); scripts/atomix-parity-check.sh passes (40 engine files identical to the donor; it failed on mdsw, htlc, peg and maker at 0.18.327). lib/ui.js is not loaded here and not in the parity list; copied so it no longer calls the removed `wallet.shortAddr`. Nothing in this app's glue calls `wallet.shortAddr` (its `shortAddr` fields already carry the full address).
+- What it brings: 0.1.49-0.1.61 (spread and randomised sizes on the market editor, the order-book layout, security logging of refused commands, untrimmed HTLC validators); 0.1.62 the wallet keeper's split asks for coinage:3 and backs off, 0.1.68 and only to an address the node is proven to own, checked right before the send; 0.1.63 a password-locked plain node is said as locked; 0.1.64 and 0.1.69 a balance it could not read is never published as 0 and does not switch off the dead-feed safety; 0.1.65 identifiers shown whole; 0.1.66 the Minima dollar token is MxUSD everywhere (the stored key stays "mxusdt"); 0.1.67 and 0.1.70 an ETH gas price above 8000 gwei is refused before signing, decided on three quotes (this app's highest tier price is the 5000 gwei ceiling, 0.18.323).
+- The engine's Ethereum RPC endpoint lists (lib/ethrpc.js FALLBACKS, lib/ethhtlc.js NET.rpcs) did not change, so main/atomix.js NET_HOSTS is unchanged.
+- Test: scripts/engine-inject.test.cjs — the 8000 gwei signing ceiling sits above every tier this app offers, MxUSD, no 0 balance published, the keeper's coinage:3 split with its ownership proof; fails on 0.18.327.
+
 ## [0.18.327] — Chat: a peer's inbox sender or id, a recipient and a media ref reach a keets command only when plain
 
 - main/chat.js: `keets action:ack id:` and `keets action:send to:` pasted the inbox entry's `id` and `from` as the node gave them; an entry whose sender is not 64 hex digits (with or without 0x) or whose id is not plain characters (`[A-Za-z0-9_.-]`, at most 128) is now skipped and logged, never put in a command. Every typed send (payments, photos, voice) checks its recipient (`sendTyped`), and a read receipt is sent only to a plain key.

@@ -22,17 +22,23 @@
     function init(cb) {
         var ctx = { identities: {}, eth: {}, htlc: null };
         F.waterfall([
-            // TRUST PREFLIGHT: `checkmode` (a read command made for exactly this) reports this MiniDapp's own
-            // READ/WRITE mode + whether the vault is password-locked — fail fast with a SPECIFIC error the UI
-            // can turn into instructions, instead of dying later on a silently-pending vault read.
+            // TRUST PREFLIGHT: `checkmode` (answered by the MDS host) reports this MiniDapp's own READ/WRITE mode +
+            // whether the vault is password-locked — fail fast with a SPECIFIC error the UI can turn into
+            // instructions, instead of dying later on a silently-pending vault read. A host without it (a plain node
+            // answers "Command not found") still shows the lock: `status` carries `locked` (wallet base seed
+            // unavailable) — without this a locked node died on seedrandom's bare "DB locked!".
             function (next) {
                 M.cmd('checkmode', function (r) {
+                    var resp = r && r.response;
                     try {
-                        var resp = r && r.response;
                         if (resp && resp.writemode === false) return next(permErr());
                         if (resp && resp.dblocked === true) return next(lockedErr());
+                        if (r && r.status === true && typeof resp.dblocked === 'boolean') return next();
                     } catch (e) { }
-                    next();   // checkmode unavailable / odd shape → the per-step pending belt below still catches it
+                    M.cmd('status', function (st) {
+                        try { if (st && st.status === true && st.response && st.response.locked === true) return next(lockedErr()); } catch (e) { }
+                        next();   // unknown → the per-step pending / locked belts below still catch it
+                    });
                 });
             },
             function (next) { P.init(function (err) { next(err); }); },
@@ -61,7 +67,7 @@
             function (next) {
                 M.cmdR('seedrandom modifier:ethbridge', function (err, r, full) {
                     try {
-                        if (err) return next(err);
+                        if (err) return next(/DB locked/i.test(err.message) ? lockedErr() : err);   // seedrandom.java's own words
                         if (full && full.pending === true) return next(permErr());   // belt: READ trust queued the command
                         var sr = (r && r.seedrandom);   // node returns exactly `seedrandom`; no wrong-field fallback
                         if (!sr) return next(new Error('no seedrandom for ethbridge (node pending/locked?)'));

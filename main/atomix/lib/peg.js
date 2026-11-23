@@ -50,6 +50,9 @@
     /** R3-2 (review 7 Nov): the applied peg was priced off a mid more than JUMP_FRACTION from the current price (a
      *  confirmed move not yet republished) — takes are declined until it is. */
     function pegOutdated() { return appliedMid > 0 && price > 0 && Math.abs(appliedMid - price) / price > JUMP_FRACTION; }
+    /** No usable price at all — never fetched, or older than the hard ceiling: applyPeg would answer PEG_STALE. Pure
+     *  (applyPeg itself records appliedMid, which only a real publish may move). */
+    function noUsablePrice() { return !(price > 0) || ageMs() > HARD_STALE_MS; }
     function source() { return TR.active().pricingParity ? 'Parity' : 'MEXC'; }
     function state() { return { price: price, bid: bid, ask: ask, ageMs: ageMs(), fresh: fresh(), error: lastError }; }
 
@@ -65,7 +68,15 @@
      * Regenerate the order's ladder around the current oracle mid per cfg. Returns { result, mid, wide }:
      * PEG_OFF (untouched), PEG_APPLIED (fresh/tight), PEG_WIDE (stale but priced with a widened defensive spread),
      * PEG_STALE (NO usable price / feed past the hard ceiling → caller MUST NOT publish). cfg = {enable, step, size,
-     * bias, levels}. Mutates order.pairs[SYM] (bids/asks, buy=sell=0).
+     * bias, levels, spread}. Mutates order.pairs[SYM] (bids/asks, buy=sell=0).
+     * spread (owner, 18 Nov 2026: "the spread around the mid before we start the gap between each leg"): the gap in %
+     * between the best bid and the best offer. With a spread, the first rung of each side sits spread/2 from the mid and
+     * every further rung adds one step: offset(i) = spread/2 + (i-1) x step. With no spread (0 / absent — every config
+     * saved before this) the ladder is exactly as it always was: offset(i) = i x step.
+     * rand / randSeed (owner, 18 Nov 2026: "I also want the randomize size feature on AtomiX"): each rung's size is
+     * varied by up to +-rand % (a whole number, never below 1). The variation is a fixed function of randSeed and the
+     * rung, so the same settings always give the same ladder (a keep-alive republish changes nothing); a new seed
+     * (Shuffle) gives a new set. rand 0 / absent: every rung is exactly the configured size, as before.
      */
     function applyPeg(order, cfg) {
         if (!cfg || !cfg.enable) return { result: PEG_OFF };
@@ -74,6 +85,13 @@
         var step = num(cfg.step, 0), size = num(cfg.size, 0);
         var askSize = num(cfg.askSize, size), bidSize = num(cfg.bidSize, size);   // independent per-side sizes (fallback to legacy `size`); a side with size 0 is not published → single-sided market
         var bias = Math.max(-20, Math.min(20, num(cfg.bias, 0)));
+        var spread = Math.max(0, Math.min(40, num(cfg.spread, 0)));
+        var rand = Math.max(0, Math.min(90, num(cfg.rand, 0))), seed = Math.floor(num(cfg.randSeed, 1));
+        var vary = function (base, i, side) {
+            if (!(rand > 0)) return base;
+            var x = Math.sin((seed + 1) * 12.9898 + (i * 2 + side) * 78.233) * 43758.5453; x = x - Math.floor(x);   // 0..1, fixed for (seed, rung, side)
+            return Math.max(1, Math.round(base * (1 + (x - 0.5) * 2 * rand / 100)));
+        };
         if (!(step > 0) || !(askSize > 0 || bidSize > 0)) return { result: PEG_OFF };   // need a step + at least ONE side sized
         var m = price, age = ageMs();
         if (!(m > 0)) return { result: PEG_STALE };                   // never fetched / none persisted → don't publish
@@ -84,9 +102,11 @@
         var levels = Math.floor(num(cfg.levels, 1));
         if (levels < 1) levels = 1; else if (levels > O.MAX_LEVELS) levels = O.MAX_LEVELS;
         p.bids = []; p.asks = [];
+        var widen = wideningFactor(age);   // a stale feed widens the spread exactly as it widens the step
         for (var i = 1; i <= levels; i++) {
-            if (askSize > 0) p.asks.push(O.level(quoted * (1 + i * effStep / 100.0), askSize));
-            if (bidSize > 0) p.bids.push(O.level(quoted * (1 - i * effStep / 100.0), bidSize));
+            var off = spread > 0 ? (spread / 2 * widen + (i - 1) * effStep) : i * effStep;
+            if (askSize > 0) p.asks.push(O.level(quoted * (1 + off / 100.0), vary(askSize, i, 0)));
+            if (bidSize > 0) p.bids.push(O.level(quoted * (1 - off / 100.0), vary(bidSize, i, 1)));
         }
         p.buy = 0; p.sell = 0;                                        // re-derived from the fresh levels
         O.sanitizePair(p);                                           // drops any bid a huge step pushed ≤ 0
@@ -178,7 +198,7 @@
     AX.peg = {
         PEG_OFF: PEG_OFF, PEG_APPLIED: PEG_APPLIED, PEG_STALE: PEG_STALE, PEG_WIDE: PEG_WIDE,
         FRESH_MS: FRESH_MS, HARD_STALE_MS: HARD_STALE_MS, MAX_WIDEN: MAX_WIDEN,
-        jumpPending: jumpPending, pegOutdated: pegOutdated, init: init, resetForSwitch: resetForSwitch, source: source, state: state, fresh: fresh, appliedMid: function () { return appliedMid; },
+        jumpPending: jumpPending, pegOutdated: pegOutdated, noUsablePrice: noUsablePrice, init: init, resetForSwitch: resetForSwitch, source: source, state: state, fresh: fresh, appliedMid: function () { return appliedMid; },
         applyPeg: applyPeg, shouldReprice: shouldReprice, armSafe: armSafe, wideningFactor: wideningFactor, fetch: fetch,
         _setNow: function (fn) { _now = fn; }, _setPrice: function (p, age) { price = p; goodAtMs = p > 0 ? (_now() - (age || 0)) : 0; },
         _reset: function () { resetForSwitch(); lastTryMs = 0; },

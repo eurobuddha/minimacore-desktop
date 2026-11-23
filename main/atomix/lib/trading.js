@@ -24,7 +24,7 @@
             onAccentDark: '#0B0D12', onAccentLight: '#201400'
         },
         MXUSDT: {
-            key: 'mxusdt', coinLabel: 'mxUSDT', tokenId: USDT_TOKENID, pricingParity: true,
+            key: 'mxusdt', coinLabel: 'MxUSD', tokenId: USDT_TOKENID, pricingParity: true,   // the token is MxUSD; 'mxusdt' stays the stored key
             hkdfContext: 'usdtswap',
             orderBookAddr: '0x5553445453574150',                // "USDTSWAP"
             otcBoardAddr:  '0x55534454535741504F544342',        // "USDTSWAPOTCB"
@@ -42,11 +42,15 @@
     function byKey(k) { return k === 'minima' ? CTX.MINIMA : CTX.MXUSDT; }
     function setActive(ctx) { _active = ctx; return _active; }
     function loadKey(k) { _active = byKey(k); return _active; }
+    /** The label to SHOW for a token id or a stored row label. A Minima-side label (incl. the legacy "mxUSDT" rows on
+     *  disk say) shows as its market's label; any other label — "USDT", the Ethereum leg — shows as written (it used to
+     *  become the ACTIVE coin's label, so a USDT leg read "mxUSDT" or "MINIMA" on screen and in the CSV). */
     function labelForToken(tokenid) {
         if (tokenid) {
             var t = String(tokenid).toLowerCase();
             if (t === MINIMA_TOKENID) return CTX.MINIMA.coinLabel;
             if (t === USDT_TOKENID.toLowerCase()) return CTX.MXUSDT.coinLabel;
+            if (t.indexOf('0x') !== 0) { var m = forCoinLabel(tokenid); return m ? m.coinLabel : String(tokenid); }
         }
         return _active.coinLabel;
     }
