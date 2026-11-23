@@ -12,6 +12,9 @@ var PoolInputClaims = (function(){
             var quoted=ids.map(function(id){return "'"+id.toLowerCase()+"'";}).join(',');
             MDS.sql('SELECT coinid,handle FROM pp_posted_inputs WHERE coinid IN ('+quoted+')',function(r){
                 if(!r||r.status!==true||!Array.isArray(r.rows)){cb(false);return;}
+                // The table is the truth for these ids: a claim another context released (the service's sweep after an
+                // uncertain post, a refused post) must not stay held in this context's memory until a reload.
+                for(var j=0;j<ids.length;j++){var k=ids[j].toLowerCase();delete held[k];delete owner[k];}
                 for(var i=0;i<r.rows.length;i++){var id=r.rows[i].COINID||r.rows[i].coinid;if(!valid(id)){cb(false);return;}
                     id=id.toLowerCase();held[id]=true;owner[id]=String(r.rows[i].HANDLE||r.rows[i].handle||'');}
                 cb(!blocked(ids));

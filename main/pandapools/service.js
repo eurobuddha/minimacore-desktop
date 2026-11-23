@@ -431,12 +431,11 @@ function fund(pools) {
 function labelOf(token, tid) {
     if (typeof token === "string") return token;
     if (token && typeof token === "object" && token.name) {
-        if (typeof token.name === "object") return token.name.ticker || token.name.name || short(tid);
+        if (typeof token.name === "object") return token.name.ticker || token.name.name || tid || "";
         if (typeof token.name === "string") return token.name;
     }
-    return short(tid);
+    return tid || "";   // RULE 1: an unnamed token is named by its WHOLE id (no shortening helper: it once cut 8 hex + …)
 }
-function short(s) { return s || ""; }   // RULE 1: an unnamed token is named by its WHOLE id (was the first 8 hex + …)
 function isFunded(p) { return p.reserveM && p.reserveT && decCmp(p.reserveM, "0") > 0 && decCmp(p.reserveT, "0") > 0; }
 
 function done(pools) {
@@ -457,7 +456,9 @@ function done(pools) {
     // page-side loop gave up after 8 tries 20 s apart and died with the tab, against coins that are not even
     // spendable until 3 blocks after the close confirms. Success is the address being EMPTY, read back — never
     // a forward reporting that it posted. See PoolMgr.collectDecide.
-    if (PoolMgr && PoolMgr.collectSweep) PoolMgr.collectSweep(function () {});
+    // PoolMgr (poolmgr.js) and Store (store.js) exist where the host loads the whole engine (desktop); the MDS service
+    // bundle (build.sh) holds neither, and the bare name threw a ReferenceError that ended every headless scan here.
+    if (typeof PoolMgr !== "undefined" && PoolMgr && PoolMgr.collectSweep) PoolMgr.collectSweep(function () {});
 }
 
 // ---------------------------------------------------------------- Layer 5: background faded-beacon re-announce
@@ -598,7 +599,10 @@ function checkPostSvc(txid, cmds, cb) {
                                 if(rp&&rp.status===false&&!rp.pending){PoolInputClaims.release(ids,txid,function(){finishSignSvc(cb,false,owner,heartbeat);});return;}
                                 // review 7 Nov (D-1, native 0.9.83): keep-fresh recreated the reserves — the saved hints follow them
                                 if(ok){ReserveRecovery.rememberPosted(rp,function(){finishSignSvc(cb,true,owner,heartbeat);});return;}
-                                finishSignSvc(cb,ok,owner,heartbeat);});
+                                // No answer or pending: it may have been broadcast. The inputs stay claimed until chain reads
+                                // settle it (PoolInputClaims.sweepUnposted on later blocks); this pass ends without retrying.
+                                MDS.log("PandaPools "+txid+": posted, outcome unknown: check Activity before retrying"+(rp&&rp.error?" ("+rp.error+")":""));
+                                finishSignSvc(cb,false,owner,heartbeat);});
                         });
                 });
             });
@@ -690,6 +694,9 @@ function fillReservesSvc(pool,j){
  *  the background service, not a screen. A quarantined pool is told to Withdraw, not Re-publish: keep-fresh
  *  refuses to sign for it, so Re-publish is a button that cannot work. */
 function strandWatchSvc(p, age, held) {
+    // Needs PoolMgr + Store (see done()); without them the old bare call threw inside the keep-fresh read, so on MDS no
+    // reserve was ever refreshed headlessly. The stranding notice itself stays desktop-only (as it always was in fact).
+    if (typeof PoolMgr === "undefined" || !PoolMgr || typeof Store === "undefined" || !Store) return;
     var level = PoolMgr.strandLevel(age);
     if (!level) return;                                   // healthy, or age unknown — never escalate on unknown
     var k = "strand_" + p.address.toLowerCase();
@@ -816,7 +823,7 @@ function ingestFeed(pools) {
             var addr = p.address.toLowerCase();
             seen[addr] = true; seenCount++;
             var prevEnc = snap[addr];
-            var label = p.tokLabel || short(p.tok);
+            var label = p.tokLabel || p.tok || "";
             var firstSeen = !SESSION_SEEN[addr];
             SESSION_SEEN[addr] = true;
             snap[addr] = encSnap(p.reserveM, p.reserveT, label, 0);   // fresh reading, miss reset

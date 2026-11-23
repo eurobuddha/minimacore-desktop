@@ -97,3 +97,13 @@ test('every control character and DEL is refused like ";", through one regex the
   for (const ok of ['status', 'send amount:1 address:0xFF tokenid:0x00 state:{"0":"0x01"}', 'txnstate id:a port:1 value:"[a b]"']) assert.equal(V.refuse('t', ok), '');
   for (const f of ['main/pandapools.js', 'main/atomix.js']) assert.doesNotMatch(fs.readFileSync(path.join(desktop, f), 'utf8'), /\/\[;\\r\\n\\u0000\]\//, f + ' keeps no regex of its own');
 });
+
+// 0.18.325: PandaPools engine 0.6.51 re-vendored: its own command wrapper refuses with the same one regex as main/cmdverb.js (0.6.47, a TAB
+// included), an all-zero pool token of any length is skipped (0.6.48), and an unanswered txnpost keeps its inputs claimed (0.6.50)
+test('the vendored PandaPools engine is 0.6.51 and refuses with the desktop\'s one regex', () => {
+  const V = require('../main/cmdverb'), guard = fs.readFileSync(path.join(desktop, 'main/pandapools/runtime-guard.js'), 'utf8');
+  const m = /var UNSAFE_RE = (\/[^\n]+\/);/.exec(guard); assert(m, 'runtime-guard has one UNSAFE_RE');
+  assert.equal(m[1], String(V.UNSAFE_RE));
+  assert(guard.includes("!/^0x0+$/.test(tok)"), 'an all-zero token of any length is not a pool');
+  assert.equal(require('./pandapools-parity.manifest.json').donor.mdsVersion, '0.6.51');
+});

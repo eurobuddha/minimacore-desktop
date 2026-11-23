@@ -28,21 +28,28 @@ var PoolRuntimeGuard = (function () {
             });
         });
     }
-    // The node splits EVERY command on ";" (even inside quotes) and runs each piece; no command this engine builds holds
-    // ";", CR, LF or NUL. Such text can only come from outside (a coin's state, a backup file): refused, nothing sent.
-    var UNSAFE = 'UNSAFE_COMMAND: refused a node command holding ";", a line break or NUL (the node would run what follows as another command). Nothing was sent.';
-    function unsafe(q) { return typeof q !== 'string' || /[;\r\n\u0000]/.test(q); }
+    // The node splits EVERY command on ";" (even inside quotes) and runs each piece, and its parameter splitter breaks on
+    // any white space incl. TAB (a tab starts a new parameter). No command this engine builds holds ";" or a control
+    // character; such text can only come from outside (a coin's state, a backup file): refused, nothing sent.
+    var UNSAFE_RE = /[;\x00-\x1f\x7f]/;
+    var UNSAFE = 'UNSAFE_COMMAND: refused a node command holding ";" or a control character (tab, line break, NUL...: the node would read what follows as another command or parameter). Nothing was sent.';
+    function unsafe(q) { return typeof q !== 'string' || UNSAFE_RE.test(q); }
     // A pool beacon's (or tracked covenant's) four literals, before ANY use: public key, payout address and tokenid are
-    // 0x + 64 hex (32 bytes), never 0x00 for the token; KMIN a plain positive decimal. Anything else: the pool is skipped.
-    var HEX32 = /^0x[0-9A-Fa-f]{64}$/;
+    // 0x + 64 hex (32 bytes), never an all-zero token (MINIMA, whatever its length); KMIN a plain positive decimal below
+    // 2^64-1, the bound ReserveRecovery.validRecipe and Covenant.sizeOk apply. Anything else: the pool is skipped.
+    var HEX32 = /^0x[0-9A-Fa-f]{64}$/, MAX_KMIN = '18446744073709551615';   // 2^64-1 (Covenant.MININUMBER_MAX)
+    function belowMax(kmin) {   // kmin already a plain decimal: compare its whole part with 2^64-1, no number parsing
+        var whole = kmin.split('.')[0].replace(/^0+/, '');
+        return whole.length < MAX_KMIN.length || (whole.length === MAX_KMIN.length && whole < MAX_KMIN);
+    }
     function poolParams(opk, oadr, tok, kmin) {
         return typeof opk === 'string' && HEX32.test(opk) && typeof oadr === 'string' && HEX32.test(oadr)
-            && typeof tok === 'string' && HEX32.test(tok) && typeof kmin === 'string' && kmin.length <= 80
-            && /^[0-9]+(?:\.[0-9]+)?$/.test(kmin) && /[1-9]/.test(kmin);
+            && typeof tok === 'string' && HEX32.test(tok) && !/^0x0+$/.test(tok) && typeof kmin === 'string' && kmin.length <= 80
+            && /^[0-9]+(?:\.[0-9]+)?$/.test(kmin) && /[1-9]/.test(kmin) && belowMax(kmin);
     }
     // Explicit read-only forms only. Mixed/unknown commands must pass the write gate.
     function readOnly(q) {
-        if (typeof q !== 'string' || /[;\r\n]/.test(q)) return false;
+        if (unsafe(q)) return false;
         return /^(?:status|balance|coins|scripts|block|history|txpow|txnlist|txncheck|coincheck|coinexport|runscript|tokenvalidate|tokens|checkmode)(?:\s|$)/.test(q)
             || q === 'keys' || /^keys action:list(?:\s|$)/.test(q) || q === PROBE;
     }

@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.325] — PandaPools engine 0.6.51 re-vendored
+
+- main/pandapools/{poolmgr,service,input-claims,runtime-guard}.js copied byte-for-byte from pandapools-mds 0.6.51 (git `349034920fb93210d02e77f7d3f5257995ccfe23`, branch security/2026-11-07); the other 15 engine files were already identical. scripts/pandapools-parity.manifest.json updated with `--update`; scripts/pandapools-parity-check.cjs passes against the donor.
+- What it brings: the engine's command wrapper refuses ";" and every control character with the one regex `[;\x00-\x1f\x7f]` (0.6.47, as main/cmdverb.js); an all-zero pool token of any length is refused and KMIN must be below 2^64-1 (0.6.48); the headless service scan runs to its end (0.6.49); an unanswered txnpost keeps its inputs claimed (0.6.50, with this app's 0.18.324 shim); an unnamed token is labelled by its whole id (0.6.51).
+- Test: scripts/engine-inject.test.cjs — the engine's UNSAFE_RE equals main/cmdverb.js's, the all-zero token check, donor 0.6.51 in the manifest; with the manifest, fails on 0.18.324.
+
 ## [0.18.324] — PandaPools: a txnpost the node did not answer keeps its inputs held
 
 - The PandaPools shim (main/pandapools.js) answered every failed command `{status:false}`. For `txnpost` that is the engine's "the node refused it; nothing was broadcast", so poolmgr freed the posted inputs (PoolInputClaims.release) for a transaction that may be in the mempool, and the next swap could build on them. A `txnpost` whose request was sent but got no answer (a timeout, a reset, a cut or unreadable reply) now answers `{status:false, pending:true, error:"the node did not answer txnpost, so the transaction may have been posted: …"}`, which the engine keeps held. A post that never reached the node (main/rpc.js `notSent`: refused before sending, ECONNREFUSED, a wrong RPC password) and every other command stay a plain failure.

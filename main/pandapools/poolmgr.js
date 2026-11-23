@@ -47,6 +47,7 @@ var PoolMgr = (function () {
         var e = res.error || "";
         return e ? " : " + e : "";
     }
+    var POST_UNKNOWN = "posted, outcome unknown: check Activity before retrying";
     function isPending(res) {
         if (!res) return false;
         if (res.pending === true) return true;
@@ -244,7 +245,10 @@ var PoolMgr = (function () {
                     else { MDS.cmd("txndelete id:" + txid);
                         /* status:false and not pending = the node refused it; nothing was broadcast, so free the inputs. */
                         if (rp && rp.status === false && !isPending(rp)) PoolInputClaims.release(inputs, txid, function () { done.fail("post rejected" + errOf(rp)); });
-                        else done.fail("post rejected" + errOf(rp)); }
+                        /* No answer, or pending (a host that timed out or lost the connection after sending says pending:true):
+                         * it may have been broadcast. The inputs stay claimed; chain reads settle it on later blocks
+                         * (PoolInputClaims.sweepUnposted frees a claim whose coin is still unspent and out of the mempool). */
+                        else done.fail(POST_UNKNOWN + errOf(rp)); }
                 });
                 }); }
                 if(done.beforePost) done.beforePost(txid,broadcast,done.fail); else broadcast();
@@ -1235,7 +1239,7 @@ var PoolMgr = (function () {
         forwardOwnerFunds: forwardOwnerFunds,
         sweepOwnerFunds: sweepOwnerFunds,
         ensureOwnerKeys: ensureOwnerKeys, rememberKidx: rememberKidx,
-        collectDecide: collectDecide, collectSweep: collectSweep,
+        collectDecide: collectDecide, collectSweep: collectSweep, POST_UNKNOWN: POST_UNKNOWN,
         strandLevel: strandLevel, strandShouldNotify: strandShouldNotify,
         STRAND_NOTICE_AT: STRAND_NOTICE_AT, STRAND_WARN_AT: STRAND_WARN_AT, STRAND_URGENT_AT: STRAND_URGENT_AT, CASCADE_BLOCKS: CASCADE_BLOCKS,
         readKeyUses: readKeyUses

@@ -2,8 +2,8 @@
   "_comment": "Digests of the PandaPools engine files copied verbatim from the MDS MiniDapp. Regenerate ONLY with `node scripts/pandapools-parity-manifest.cjs --update` beside a deliberate engine re-copy. Desktop-only runtime differences belong in loader.js / sqlshim.js / main/pandapools.js, never here.",
   "donor": {
     "root": "../../mds/pandapools-mds",
-    "mdsVersion": "0.6.46",
-    "gitSha": "5144017361908eeee4d2f9bf6f19f7677fef0c35"
+    "mdsVersion": "0.6.51",
+    "gitSha": "349034920fb93210d02e77f7d3f5257995ccfe23"
   },
   "files": {
     "decimal.js": {
@@ -51,16 +51,16 @@
       "bytes": 19119
     },
     "poolmgr.js": {
-      "sha256": "c0c023d4b6b7643c7a43bb51c15b344a95f3ceb63619417ee7716ef76af8e915",
-      "bytes": 79388
+      "sha256": "85072dd822fdad89daa5ba3d6231144643309cc43ca007bf03d3c17dbc1f3024",
+      "bytes": 79870
     },
     "reserve-recovery.js": {
       "sha256": "830c9c83e9b5995d80ee1d5e237a53d1e17d09f3f45aa7571e3d825d883b7572",
       "bytes": 38038
     },
     "service.js": {
-      "sha256": "c3d14b2def2b2c4dfbe6b67289b1ea2cb13636d84d2ae1bf7df57fc869796ea5",
-      "bytes": 56277
+      "sha256": "6a0c6a12ada69bf87b69fc6b36134a127ca4cc6ee9c2ded0b2e1c4efbcde5367",
+      "bytes": 57286
     },
     "combined-backup.js": {
       "sha256": "a26de27739c77716db2d99ace88b54944c82ca82d46639c8a9972ff9cceb8561",
@@ -71,12 +71,12 @@
       "bytes": 3472
     },
     "input-claims.js": {
-      "sha256": "1555df26f13eac9d95dbb60709b19d3f3ef7d1468c5f04290f10432ce84512f7",
-      "bytes": 5897
+      "sha256": "2f8fe7fc20ddbee5be40e4ad687ecfe069ad6b8c1687dc90561b4ffe0051ae83",
+      "bytes": 6234
     },
     "runtime-guard.js": {
-      "sha256": "11f32f1c157bfad8eaa020c85c825a52b53c7f7ad212912d147b2350c0876e73",
-      "bytes": 5580
+      "sha256": "9e19efabded1f67e3425a9dbf62ad4b9f54b962d0df2243f2983af03dc0c119c",
+      "bytes": 6249
     },
     "rescue-flow.js": {
       "sha256": "2b2106e0b5de14c31b1baa231aa1255af75ebf2e2fe4b656aed8c27e31a66efe",
