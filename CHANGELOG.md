@@ -7,6 +7,15 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.317] — SECURITY: a stranger's coin state can no longer become a node command
+
+- The node splits every command text on ";" (even inside quotes) and runs each piece. The released app's PandaPools engine read state ports 2-5 of any coin at the public sentinel unchecked into its discovery `runscript` (one payload in the tokenid ran four `send`s), and P2P Chance copied a taker's state 8-12 into `txnstate` / `hash` / `txnoutput` during auto-reveal and auto-resolve, all on the node's admin RPC.
+- main/cmdverb.js `refuse(source, text)`: a command holding ";", CR, LF or NUL is refused, nothing is sent; under every caller in main/rpc.js `rpcCall`, and first in the PandaPools, AtomiX and P2P Chance shims, which a notification names (main/main.js). The Terminal refuses a chain before any gate: "send the commands one at a time".
+- Re-vendored PandaPools engine 0.6.46 (beacon fields strict hex / number where read; its command wrapper refuses and logs) and P2P Chance service.js 2.9.4 (state read only as hex / number; txnbasics and txnpost as two commands). main/casino/engine.js: the same clean state reads, checks and split chains; the send pin reads the verb as the node does.
+- PandaPools on the plain `minima` node kind: `checkmode` (an MDS command that jar answers "Command not found", which refused every pool write) is answered from `status` (WRITE, and the wallet lock).
+- scripts/assert-jars.sh, run by `npm run dist:mac:signed` and scripts/release-desktop.sh: the bundled node jars must equal package.json `parlonsNodeSha256` / `minimaJarSha256` (new) — a stale gitignored resources/parlons-node.jar (0.2.152 here) can no longer be packaged.
+- Tests: scripts/engine-inject.test.cjs (in test:inject) with scripts/node-standin.cjs (a stand-in node that splits commands like the real one); fails on 0.18.316. cmdgate-test's chain case expects the refusal; the casino fixtures use hex keys.
+
 ## [0.18.316] — PandaPools: swaps, deposits, new pools and migrations are no longer refused with "Could not identify the input signing key."
 
 - Every PandaPools action the node signs for you (a swap, a deposit, creating a pool, migrating a pool, and the background keep-fresh and re-announce) stopped before signing with "Could not identify the input signing key." Nothing was signed or sent. The engine's signing check (`ReserveRecovery.checkSignature`, since 0.16.54) asked the node `scripts address:` with each coin's address in lower case; the node looks scripts up by the exact text and stores them in upper case, so it never found one. Closing a pool was not affected (it signs with the pool's owner key, not "auto"). Fixed at the source, PandaPools MiniDapp 0.6.45 (2c99fbb07c7d493e5ace025fe5284295b8e9cbc5): the address goes to the node exactly as the coin carries it, and the answer is still compared ignoring case. `main/pandapools/reserve-recovery.js` re-copied (the only engine file that changed), `scripts/pandapools-parity.manifest.json` re-pinned with `--update`. Same fix as Pandamonium Desktop 0.19.381.

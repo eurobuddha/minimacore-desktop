@@ -34,7 +34,9 @@ const MXUSD_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193
 const CASINO_SCRIPT = 'LET hpk=PREVSTATE(0) LET ha=PREVSTATE(1) LET hc=PREVSTATE(2) LET rng=PREVSTATE(3) LET po=PREVSTATE(4) LET bt=PREVSTATE(5) LET ph=PREVSTATE(6) LET to=PREVSTATE(7) IF ph EQ 0 AND SIGNEDBY(hpk) THEN RETURN TRUE ENDIF IF ph EQ 0 THEN ASSERT SAMESTATE(0 5) ASSERT STATE(6) EQ 1 ASSERT STATE(7) EQ to ASSERT STATE(11) GTE 0 AND STATE(11) LT rng ASSERT VERIFYOUT(@INPUT @ADDRESS @AMOUNT+bt @TOKENID TRUE) RETURN TRUE ENDIF LET qk=PREVSTATE(8) LET pk=PREVSTATE(11) IF ph EQ 1 AND SIGNEDBY(hpk) THEN ASSERT SAMESTATE(0 5) ASSERT STATE(6) EQ 2 ASSERT SAMESTATE(7 11) LET hs=STATE(12) ASSERT SHA3(hs) EQ hc ASSERT VERIFYOUT(@INPUT @ADDRESS @AMOUNT @TOKENID TRUE) RETURN TRUE ENDIF IF ph EQ 1 AND @COINAGE GT to AND SIGNEDBY(qk) THEN RETURN TRUE ENDIF IF ph EQ 2 AND SIGNEDBY(qk) THEN LET ps=STATE(13) ASSERT SHA3(ps) EQ PREVSTATE(10) LET hs=PREVSTATE(12) LET h=SHA3(CONCAT(hs ps)) LET r=NUMBER(SUBSET(0 4 h))%rng IF r EQ pk THEN LET w=bt*po ASSERT VERIFYOUT(@INPUT PREVSTATE(9) w @TOKENID FALSE) IF @AMOUNT GT w THEN ASSERT VERIFYOUT(@INPUT+1 ha @AMOUNT-w @TOKENID FALSE) ENDIF ELSE ASSERT VERIFYOUT(@INPUT ha @AMOUNT @TOKENID FALSE) ENDIF RETURN TRUE ENDIF IF ph EQ 2 AND @COINAGE GT to AND SIGNEDBY(hpk) THEN RETURN TRUE ENDIF RETURN FALSE';
 
 const SCAN_EVERY_MS = 12000;
-const CASINO_SEND = /^send\s/;   // the only bare send in the casino is the house-create MINIMA stake
+// the only bare send in the casino is the house-create MINIMA stake; the verb is read as the node reads it (any case,
+// quoted, padded: main/cmdverb.js, 0.18.317), so a SEND in capitals is pinned like any other
+const CASINO_SEND = { test: (c) => require("./cmdverb").beginsAs(c, "send") };
 
 let ctx = null;
 let serviceHandler = null;    // captured by MDS.init (service.js) — WE fire the events
@@ -79,6 +81,7 @@ function buildMds() {
       // the donor calls cmd WITHOUT a callback in places (newscript, txndelete) — valid in the browser shim, so no-op.
       const done = typeof cb === "function" ? cb : () => {};
       let c = String(command);
+      if (/[;\r\n\u0000]/.test(c)) { done(toVm({ status: false, error: require("./cmdverb").refuse("P2P Chance", c) })); return; }   // one command (0.18.317)
       if (/^checkmode\b/.test(c)) { done(toVm({ status: true, response: { mode: "WRITE" } })); return; }  // admin RPC is always WRITE
       // Normalise every donor newscript to trackall:false: the row is needed for txnbasics ScriptProofs
       // (track-flag-blind), but trackall:true adopts every stranger's bet into the balance forever — and a

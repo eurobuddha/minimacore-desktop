@@ -15,6 +15,9 @@ const owns = k => k === 'house' || k === 'player';
 function coin(id, phase = 1, tokenid = '0x00', age = 11) {
   return {coinid: id, tokenid, age, amount: '0.00000001', tokenamount: tokenid === '0x00' ? undefined : '2.123456789', state: [{port:0,data:'house'}, {port:2,data:'commit'}, {port:3,data:'2'}, {port:5,data:'1'}, {port:6,data:String(phase)}, {port:7,data:'10'}, {port:8,data:'player'}]};
 }
+// 0.18.317 (donor 2.9.4): the engine and service.js read a state value only as 0x hex or a number, so the tests that run them
+// give the fixture's keys in hex (the policy tests above and below keep the role names, as the Java parity vectors do)
+const hexKeys=c=>{c.state.forEach(s=>{s.data={house:'0xA0',player:'0xB0',commit:'0xC0'}[s.data]||s.data;});return c;};
 test('both currencies: strict boundary, beneficiary, self-play, no claim on phase 0/unknown/unknown age', () => {
   for (const tok of ['0x00', USD]) for (const phase of [0,1,2,3]) for (const age of [undefined, null, '', -1, 0, 9, 10, 11]) for (const key of ['house', 'player', 'stranger', 'both']) {
     const c = coin('0x01', phase, tok); c.age = age;
@@ -67,13 +70,13 @@ test('MDS My Bets shows both currencies under either toggle, role-specific claim
 });
 test('desktop actual VM read model and claim handler match roles, currencies, and strict deadline', async () => {
   const {createContext}=require(path.join(desktop,'main/casino/loader.js'));
-  let coins=[coin('0x01'),coin('0x02',2,USD)],ok=true;const sent=[];
+  let coins=[coin('0x01'),coin('0x02',2,USD)].map(hexKeys),ok=true;const sent=[];
   const c=createContext({init(){},log(){},notify(){},notifycancel(){},keypair:{get:(k,cb)=>cb({}),set:(k,v,cb)=>cb&&cb({status:true})},cmd:(cmd,cb)=>{sent.push(cmd);if(cb)cb({status:ok,response:coins});}});
-  c.READY=true;c.MY_KEYS.player=true;c.MY_KEYS.house=true;
+  c.READY=true;c.MY_KEYS['0xB0']=true;c.MY_KEYS['0xA0']=true;
   const mybets=()=>new Promise((resolve,reject)=>c.CASINO.myBets((e,v)=>e?reject(Error(e)):resolve(v)));
   for (const tok of ['0x00',USD]) {c.CASINO.setCurrency(tok);const rows=await mybets();assert.equal(rows.length,2);assert.equal(rows[1].amount,'2.123456789');assert.equal(rows.filter(b=>b.canClaimTimeout).length,2);}
-  delete c.MY_KEYS.player;let rows=await mybets();assert.equal(rows.filter(b=>b.canClaimTimeout).length,1);
-  coins=[coin('0x01',0),coin('0x02',2,USD,10),coin('0x03',1)];sent.length=0;
+  delete c.MY_KEYS['0xB0'];let rows=await mybets();assert.equal(rows.filter(b=>b.canClaimTimeout).length,1);
+  coins=[coin('0x01',0),coin('0x02',2,USD,10),coin('0x03',1)].map(hexKeys);sent.length=0;
   for (const b of coins) await new Promise(resolve=>c.CASINO.claimTimeout(b.coinid,e=>{assert.ok(e);resolve();}));
   assert.ok(sent.every(s=>s.startsWith('coins address:')));
   ok=false;await assert.rejects(mybets,/scan unavailable/);
@@ -114,10 +117,10 @@ test('desktop interactive identity accepts the node bare-array keys shape', () =
   c.loadWalletKeys(()=>{});assert.equal(c.MY_KEYS['older-key'],true);
 });
 test('the background service still processes both currencies automatically in WRITE mode', () => {
-  const coins=[coin('0x01',1),coin('0x02',2,USD)],processed=[];
+  const coins=[hexKeys(coin('0x01',1)),hexKeys(coin('0x02',2,USD))],processed=[];
   const c=vm.createContext({Date,MDS:{init(){},load(){},keypair:{get:(k,cb)=>cb({})},cmd:(cmd,cb)=>cb({status:true,response:coins})},CasinoTimeouts:T});
   vm.runInContext(read(path.join(donor,'service.js')),c);
-  c.MY_KEYS.house=true;c.MY_KEYS.player=true;c.SCRIPT_OK=true;c.WRITE_MODE=true;
+  c.MY_KEYS['0xA0']=true;c.MY_KEYS['0xB0']=true;c.SCRIPT_OK=true;c.WRITE_MODE=true;
   c.updateTimeoutReminder=()=>{};c.doReveal=b=>processed.push(b.coinid);c.doResolve=b=>processed.push(b.coinid);
   c.processCoins();assert.deepEqual(processed,['0x01','0x02']);
 });

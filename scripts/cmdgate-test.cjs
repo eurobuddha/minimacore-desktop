@@ -428,7 +428,7 @@ test("rpc enable / password / adduser / removeuser, slavenode enable, webhooks a
   const sent = [], h = mcdCmd((c) => { sent.push(c); return { status: true }; });
   for (const c of ["rpc enable:true", "rpc enable:true password:x", "rpc enable:false", "rpc action:adduser username:u password:p mode:write", "rpc action:removeuser username:u", "rpc ssl:true", "rpc action:listusers enable:true",
     "slavenode enable:true host:10.0.0.1:9001", "slavenode enable:false", "webhooks action:add hook:http://x.example/h", "mds action:install file:x.mds.zip", "mds action:publicmds enable:true", "mds action:permission uid:0x01 trust:write", "status;rpc enable:true"])
-    await assert.rejects(h(null, c), /open this node to someone else/, c);
+    await assert.rejects(h(null, c), c.includes(";") ? /send the commands one at a time/ : /open this node to someone else/, c);   // a chain: refused first (0.18.317)
   assert.deepEqual(sent, []);
   for (const c of ["rpc", "rpc action:listusers", "mds", "slavenode", "webhooks", "webhooks action:list", "webhooks action:clear", "network action:list"]) { sent.length = 0; await h(null, c); assert.deepEqual(sent, [c], c); }   // the gate stands in as passed (take: true)
   await assert.rejects(G.checkCommand("mds action:pending", { take: () => true, running: () => true }), /open this node to someone else/, "CHANGED on purpose (0.18.228): mds runs only as its gated listing");

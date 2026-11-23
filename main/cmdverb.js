@@ -199,4 +199,20 @@ function builtProblem(part) {
   return "";
 }
 
-module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, smuggled, builtProblem };
+/*
+ * 0.18.317: EVERY command to the node is ONE command. The node splits a text on every ";" (StringTokenizer, quotes or not) and
+ * runs each piece; a stranger's coin state pasted into an engine's runscript ran `send` (PandaPools beacon, P2P Chance state).
+ * A CR, LF or NUL is no part of any command either. refuse(source, text) is called by main/rpc.js rpcCall (under every caller)
+ * and by each engine shim before it: "" = fine; else the reason, nothing is sent, and the listener main/main.js set (a
+ * notification naming the source) is told. The Terminal too: send the commands one at a time.
+ */
+const UNSAFE = "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.";
+let refusedListener = () => {};
+function refuse(source, command) {
+  if (!/[;\r\n\u0000]/.test(String(command))) return "";
+  try { console.error("[security] refused a node command from " + (source || "the wallet or Terminal") + " holding \";\", a line break or NUL: " + JSON.stringify(String(command))); } catch (e) {}
+  try { refusedListener(source || "", String(command)); } catch (e) {}
+  return UNSAFE;
+}
+function onRefused(fn) { refusedListener = typeof fn === "function" ? fn : () => {}; }
+module.exports = { jtrim, fold, parts, read, verbs, is, beginsAs, paramNames, repeated, paramValue, unclear, smuggled, builtProblem, refuse, onRefused, UNSAFE };

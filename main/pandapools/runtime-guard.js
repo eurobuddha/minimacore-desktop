@@ -28,6 +28,18 @@ var PoolRuntimeGuard = (function () {
             });
         });
     }
+    // The node splits EVERY command on ";" (even inside quotes) and runs each piece; no command this engine builds holds
+    // ";", CR, LF or NUL. Such text can only come from outside (a coin's state, a backup file): refused, nothing sent.
+    var UNSAFE = 'UNSAFE_COMMAND: refused a node command holding ";", a line break or NUL (the node would run what follows as another command). Nothing was sent.';
+    function unsafe(q) { return typeof q !== 'string' || /[;\r\n\u0000]/.test(q); }
+    // A pool beacon's (or tracked covenant's) four literals, before ANY use: public key, payout address and tokenid are
+    // 0x + 64 hex (32 bytes), never 0x00 for the token; KMIN a plain positive decimal. Anything else: the pool is skipped.
+    var HEX32 = /^0x[0-9A-Fa-f]{64}$/;
+    function poolParams(opk, oadr, tok, kmin) {
+        return typeof opk === 'string' && HEX32.test(opk) && typeof oadr === 'string' && HEX32.test(oadr)
+            && typeof tok === 'string' && HEX32.test(tok) && typeof kmin === 'string' && kmin.length <= 80
+            && /^[0-9]+(?:\.[0-9]+)?$/.test(kmin) && /[1-9]/.test(kmin);
+    }
     // Explicit read-only forms only. Mixed/unknown commands must pass the write gate.
     function readOnly(q) {
         if (typeof q !== 'string' || /[;\r\n]/.test(q)) return false;
@@ -39,6 +51,10 @@ var PoolRuntimeGuard = (function () {
         raw = function (q, cb) { return original.call(MDS, q, cb); };
         var original = MDS.cmd;
         MDS.cmd = function (q, cb) {
+            if (unsafe(q)) {
+                try { MDS.log('SECURITY ' + UNSAFE + ' ' + JSON.stringify(String(q))); } catch (e) {}
+                listener(UNSAFE); if (cb) cb({status:false,pending:false,error:UNSAFE}); return;
+            }
             if (readOnly(q)) return raw(q, cb);
             check(function (error) {
                 if (error) { listener(error); if (cb) cb({status:false,pending:false,error:error}); return; }
@@ -46,5 +62,5 @@ var PoolRuntimeGuard = (function () {
             });
         };
     }
-    return {install:install,check:check,onBlocked:function (fn) { listener = fn; },notice:NOTICE,probe:PROBE};
+    return {install:install,check:check,unsafe:unsafe,poolParams:poolParams,onBlocked:function (fn) { listener = fn; },notice:NOTICE,probe:PROBE};
 })();

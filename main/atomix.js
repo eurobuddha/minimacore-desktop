@@ -157,6 +157,7 @@ function buildMds() {
       // undefined". That threw away the only clue (auth/timeout/bad-reply) and made a publish failure
       // undiagnosable from the UI. Carry the reason through as `error` instead.
       const failed = (e) => cb(toVm({ status: false, error: (e && e.message) ? e.message : String(e) }));
+      if (/[;\r\n\u0000]/.test(c)) return failed(new Error(require("./cmdverb").refuse("AtomiX", c)));   // one command (0.18.317)
       if (AX_PUBLISH_SEND.test(c)) { publishSendWithRetry(c).then(r => cb(toVm(normReply(r))), failed); return; }
       runner(c).then(r => cb(toVm(normReply(r))), failed);
     },

@@ -346,7 +346,7 @@ function scan() {
                 var sc = arr[i] ? (arr[i].script || "") : "";
                 if (sc.indexOf("VERIFYOUT(@INPUT @ADDRESS") < 0 || sc.indexOf("GTE MAX(x*y") < 0) continue;
                 var opk = grp(P_OPK, sc), oadr = grp(P_OADR, sc), tok = grp(P_TOK, sc), kmin = grp(P_KMIN, sc);
-                if (!opk || !oadr || !tok || !kmin) continue;
+                if (!PoolRuntimeGuard.poolParams(opk, oadr, tok, kmin)) continue;   // strict hex / number before any use
                 var k = opk + "|" + tok + "|" + kmin;
                 if (!params[k]) params[k] = { opk: opk, oadr: oadr, tok: tok, kmin: kmin, script: sc };
             }
@@ -361,7 +361,9 @@ function scan() {
             for (var j = 0; j < coins.length; j++) {
                 var c = coins[j];
                 var t = readState(c, 2), o = readState(c, 3), pk = readState(c, 4), km = readState(c, 5);
-                if (!t || !o || !pk || !km) continue;
+                // a stranger's coin at the public sentinel: strict hex / number or skipped, before runscript, the
+                // re-announce's txnstate or anything else (the node runs what follows a ";" as another command)
+                if (!PoolRuntimeGuard.poolParams(pk, o, t, km)) continue;
                 var abk = annKeySvc(pk, o, t, km);
                 var cr = parseInt(c.created) || 0;
                 if (!PRESENT_BEACONS[abk] || cr > PRESENT_BEACONS[abk]) PRESENT_BEACONS[abk] = cr;   // newest beacon block

@@ -37,6 +37,7 @@ function timeoutFor(command) {   // the verb read as the node reads it, in every
 /** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
 function rpcCall(port, secret, command) {
   return new Promise((resolve, reject) => {
+    { const unsafe = V.refuse("", command); if (unsafe) { reject(new Error(unsafe)); return; } }   // 0.18.317: one command, under every caller (main/cmdverb.js refuse)
     const auth = "Basic " + Buffer.from("minima:" + secret).toString("base64");
     const ascii = ASCII.test(command), path = "/" + encodeURIComponent(command);
     const usePost = ascii && command.length > GET_MAX;

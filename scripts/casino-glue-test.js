@@ -16,6 +16,8 @@ cfg.setSecret = (val, acct) => { if (!secretWritesOk) return false; mem[acct] = 
 cfg.deleteSecret = (acct) => { delete mem[acct]; };
 const casino = require(path.join(__dirname, "..", "main/casino.js"));
 
+// 0.18.317 (donor 2.9.4): the engine reads a coin's state only as 0x hex or a number, so the fixture's keys, addresses and
+// commits are hex (0x0A11 = this wallet's key; they were 0xMYPK-style names)
 const CONTRACT = "0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F";
 const sent = [];   // every command the engine issued through the shim → runner
 
@@ -25,7 +27,7 @@ const BEACON_ADDR = "0x50414E4441504F4F4C53";          // "PANDAPOOLS" — short
 const OPEN_BET = {   // someone else's phase-0 Coin Flip open bet at the contract
   coinid: "0xBET1", amount: "1", age: 3,
   state: [
-    { port: 0, data: "0xHOUSEPK" }, { port: 1, data: "0xHOUSEADDR" }, { port: 2, data: "0xCOMMIT" },
+    { port: 0, data: "0x0D44" }, { port: 1, data: "0x0E55" }, { port: 2, data: "0x0F66" },
     { port: 3, data: "2" }, { port: 4, data: "2" }, { port: 5, data: "1" }, { port: 6, data: "0" }, { port: 7, data: "1500" }
   ]
 };
@@ -34,8 +36,8 @@ casino._setRunner(async (cmd) => {
   sent.push(cmd);
   if (/^block\b/.test(cmd)) return { status: true, response: { block: 100 } };
   if (/^newscript\b/.test(cmd)) return { status: true, response: { address: CONTRACT } };
-  if (/^keys\b/.test(cmd)) return { status: true, response: { keys: [{ publickey: "0xMYPK" }] } };   // real core shape
-  if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: "0xMYPK", address: WALLET_ADDR, miniaddress: "MxWALLET" } };
+  if (/^keys\b/.test(cmd)) return { status: true, response: { keys: [{ publickey: "0x0A11" }] } };   // real core shape
+  if (/^getaddress\b/.test(cmd)) return { status: true, response: { publickey: "0x0A11", address: WALLET_ADDR, miniaddress: "MxWALLET" } };
   if (/^balance\b/.test(cmd)) return { status: true, response: [{ sendable: "500" }] };
   if (/^coins relevant:true tokenid:0x00\b/.test(cmd)) return { status: true, response: [{ amount: "500", address: WALLET_ADDR, coinid: "0xFUND1" }] };
   // The shared pin now asks for checkmempool:true between sendable and tokenid (the AtomiX publish fix);
@@ -47,9 +49,9 @@ casino._setRunner(async (cmd) => {
   if (/^checkaddress\b/.test(cmd)) return { status: true, response: { simple: /address:0x[0-9A-Fa-f]{64}\b/.test(cmd) } };
   if (/^scripts\b/.test(cmd)) return { status: true, response: [{ address: WALLET_ADDR, simple: true }] };
   if (/^coins relevant:true address:0xD65ADBBB/.test(cmd)) return { status: true, response: [
-    { coinid: "0xSTRANGERBET", state: [{ port: 0, data: "0xNOTMYPK" }, { port: 1, data: "0xNOTMYADDR" }] },  // foreign → untrack
-    { coinid: "0xMINEBYKEY", state: [{ port: 0, data: "0xMYPK" }] },                                        // my key → spare
-    { coinid: "0xMINEBYADDR", state: [{ port: 0, data: "0xNOTMYPK" }, { port: 9, data: WALLET_ADDR }] }     // my addr → spare
+    { coinid: "0xSTRANGERBET", state: [{ port: 0, data: "0x0B22" }, { port: 1, data: "0x0C33" }] },  // foreign → untrack
+    { coinid: "0xMINEBYKEY", state: [{ port: 0, data: "0x0A11" }] },                                        // my key → spare
+    { coinid: "0xMINEBYADDR", state: [{ port: 0, data: "0x0B22" }, { port: 9, data: WALLET_ADDR }] }     // my addr → spare
   ] };
   if (/^cointrack\b/.test(cmd)) return { status: true };
   if (/^coins address:/.test(cmd)) return { status: true, response: [OPEN_BET] };
@@ -97,7 +99,7 @@ const has = (re) => sent.some(c => re.test(c));
   const send = sent.find(c => /^send /.test(c));
   assert(!!send, "createBet emitted a send");
   assert(/amount:10 address:0xD65ADBBB/.test(send), "send stakes 10 to the contract");
-  assert(/state:\{"0":"0xMYPK","1":"0x[A-F]{64}","2":"0x2222.*","3":"2","4":"2","5":"10","6":"0","7":"1500"\}/.test(send), "send carries state ports 0..7 phase 0");
+  assert(/state:\{"0":"0x0A11","1":"0x[A-F]{64}","2":"0x2222.*","3":"2","4":"2","5":"10","6":"0","7":"1500"\}/.test(send), "send carries state ports 0..7 phase 0");
   assert(/fromaddress:0x[0-9A-Fa-f]{64}/.test(send), "house-send pinned to a signable coin (beacon dust excluded)");
 
   // PLAYER take — the txn sequence
@@ -109,7 +111,7 @@ const has = (re) => sent.some(c => re.test(c));
   assert(has(/^txnoutput id:take_.* amount:2 address:0xD65ADBBB.* storestate:true/), "take pot output = amount+bet back to contract, storestate:true");
   assert(has(/^txnoutput id:take_.* amount:18\.84626467552 address:0xAB.* storestate:false/), "take change is EXACT (18.84626467552), NOT rounded up to 18.84626468 → balances, node accepts");
   assert(has(/^txnstate id:take_.* port:6 value:1/), "take sets phase → 1");
-  assert(has(/^txnstate id:take_.* port:8 value:0xMYPK/), "take writes player pubkey (port 8)");
+  assert(has(/^txnstate id:take_.* port:8 value:0x0A11/), "take writes player pubkey (port 8)");
   assert(has(/^txnstate id:take_.* port:11 value:1/), "take writes pick (port 11)");
   assert(has(/^txnsign id:take_.* publickey:auto/), "take signs publickey:auto");
 

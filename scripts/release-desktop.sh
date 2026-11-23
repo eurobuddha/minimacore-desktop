@@ -13,6 +13,7 @@ VER="${1:?version, e.g. 0.16.35}"; NOTES="${2:-minimaCore Desktop $VER}"
 REPO="eurobuddha/minimacore-desktop"
 DMG="dist/minimaCore-$VER-arm64.dmg"
 [ -f "$DMG" ] || { echo "no $DMG - build it first: npm run dist:mac:signed"; exit 1; }
+scripts/assert-jars.sh || { echo "the node jars in resources/ are not the pinned ones - refusing to release"; exit 1; }   # 0.18.317
 # The FULL gate, not just "is a ticket attached": stapled proves notarization, it does not prove a Developer
 # ID signature, the hardened runtime, or that Gatekeeper actually accepts the app and the DMG. verify-mac.sh
 # checks all of those and that the .app matches this version, and a DMG that fails it is not releasable.
