@@ -1311,6 +1311,18 @@ test("0.19.407 (gate review MAJOR-1): a fill record is every key the engine's LI
   assert.deepEqual(JSON.parse(JSON.stringify(b.ctx.__out)), { changed: 0, remaining: "60" });
 });
 
+test("0.19.408: engine 0.0.156 (1993840dd774dda5734ac19f3e22d94f418a8a6f) — the refresh ignores a maker record with no positive plain fill or a junk `verified`, whoever wrote it; a good one still applies once", async () => {
+  const b = await boot(), ORDER = "0x" + "2".repeat(32), now = Math.floor(Date.now() / 1000), T = (c) => "0x" + c.repeat(64);
+  await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([{ orderId: ORDER, side: "sell", price: "0.0123", amount: "100", remaining: "60", coins: ["0x" + "C1".repeat(32)], scripts: [], address: b.node.ADDRESS, seq: now, expiry: now + 3600, status: "live", fillsFrom: now - 100, fills: [] }]) + "')");
+  const rec = (t, filled, extra) => sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('fill_" + t + "', '" + JSON.stringify(Object.assign({ role: "maker", orderId: ORDER, filled, txpowid: t, ts: now, status: "settling" }, extra || {})) + "')");
+  await rec(T("1"), "-50"); await rec(T("2"), "0"); await rec(T("3"), "1e1"); await rec(T("4"), "5", { verified: "-1" }); await rec(T("5"), "5", { verified: "junk" });
+  const reconcile = async () => { b.ctx.__out = null; vm.runInContext("AX.maker.load(AX.mds, function (e, l) { AX.maker.reconcileFills(AX.mds, l, function (ch) { __out = { changed: ch.length, remaining: AX.maker.find(l, '" + ORDER + "').remaining }; }); });", b.ctx); await M.until(() => b.ctx.__out); return JSON.parse(JSON.stringify(b.ctx.__out)); };
+  assert.deepEqual(await reconcile(), { changed: 0, remaining: "60" }, "no junk record moves the order (0.0.153 put 50 back: 110)");
+  await rec(T("6"), "10", { verified: "60" });
+  assert.deepEqual(await reconcile(), { changed: 1, remaining: "50" }, "a good record is applied");
+  assert.equal(require("../main/dexicon.js").ENGINE_VERSION, "0.0.156");
+});
+
 test("0.19.406: the service answers a coin proof request with coinexport only (no attestation signed: kv attest_sign is '0'), loads lib/proofs.js and mirrors the resting coin locks; it adds no MegaMMR walk of its own", async () => {
   const H = (c) => "0x" + c.repeat(32), BACK = H("C1"), ADDR = H("A1"), proof = "0x00000020" + BACK.slice(2) + "00000020" + ADDR.slice(2);
   const b = await boot({ node: { on: (c) => (c === "coinexport coinid:" + BACK ? { status: true, pending: false, response: { data: proof } } : null) } });

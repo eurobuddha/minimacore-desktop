@@ -177,7 +177,10 @@
                 if (!c) { if (!b) out.push(o); return; }                        // new here → added; gone from the store → stays gone
                 if (b && JSON.stringify(b) === JSON.stringify(o)) return;      // not changed by this caller: the stored copy stands
                 if (JSON.stringify(c) === JSON.stringify(o)) return;            // already stored exactly so (a repeated save)
-                var moved = !b || c.status !== b.status || c.seq !== b.seq;
+                // gate review 23 Nov (a): a stored `remaining` or `fills` that changed since load moved too (a refresh that
+                // reconciled a fill but could not publish saved it at the same seq: merged field by field, a background
+                // afterFill that loaded before it dropped that fill — 80 left where 40 was right)
+                var moved = !b || c.status !== b.status || c.seq !== b.seq || c.remaining !== b.remaining || JSON.stringify(c.fills || []) !== JSON.stringify(b.fills || []);
                 if (c.status !== 'live' && o.status === 'live') win = c;       // filled / cancelled: never live again
                 else if (!moved) {
                     for (k in c) if (c.hasOwnProperty(k) && JSON.stringify(c[k]) !== JSON.stringify(b[k]) && JSON.stringify(o[k]) === JSON.stringify(b[k])) o[k] = c[k];
@@ -523,13 +526,38 @@
                 var st = find(list, orderId);   // review 23 Nov (M4): it filled while the cancel was on its way
                 if (e2) return cb(e2, o);
                 if (lost.indexOf(orderId) >= 0) return cb(st && st.status === 'filled' ? new Error('this order filled before the cancel landed — nothing to cancel') : null, st);
-                publish(mds, relay, me, o, function (e1) {
-                    // 'stale seq' = the relay already holds this order at the same or a newer seq — a cancel sent twice in one second.
-                    if (e1 && /stale seq$/.test(String(e1.message || e1))) e1 = null;
-                    cb(e1, o);   // a relay that refused is re-sent by syncRelays (the store says cancelled)
-                });
+                publish(mds, relay, me, o, function (e1, results) { overStale(mds, relay, me, list, o, results, e1, cb); });   // a refusal: syncRelays re-sends it
             });
         });
+    }
+
+    /** The highest seq of a LIVE copy of MY order `orderId` among relay envelopes `has` (-1: none). */
+    function liveSeqOn(has, mySignPk, orderId) {
+        var top = -1;
+        (has || []).forEach(function (e) { if (e && e.orderId === orderId && String(e.signPk).toLowerCase() === String(mySignPk).toLowerCase() && !E.isCancelAmount(String(e.amount)) && Number(e.seq) > top) top = Number(e.seq); });
+        return top;
+    }
+    /** Gate review 23 Nov (b): 'stale seq' = a relay holds this order at the same or a newer seq. That used to be taken as
+     *  "the cancel is there already" — but the copy it holds may be a LIVE re-sign signed after the cancel's seq was taken,
+     *  and the order then stayed live on that relay. Each relay that said so is asked for its book: a live copy at a seq ≥
+     *  the cancel's raises the stored seq above it, saved (mine), and the cancel is sent again; 'stale seq' is no error only
+     *  after that bump, or when the relay holds no live copy (the cancel sent twice). A relay whose book cannot be read
+     *  keeps the publish's error (syncRelays re-sends it). cb(err, o). */
+    function overStale(mds, relay, me, list, o, results, e1, cb) {
+        var urls = (results || []).filter(function (r) { return r && r.error === 'stale seq'; }).map(function (r) { return r.url; }), top = -1, unread = false, i = 0;
+        if (!urls.length) return cb(e1, o);
+        if (typeof relay.snapshot !== 'function') return cb(e1, o);
+        (function next() {
+            if (i < urls.length) return relay.snapshot(urls[i++], function (err, has) { if (err) unread = true; else top = Math.max(top, liveSeqOn(has, '0x' + AX.hex.to(me.signPk), o.orderId)); next(); });
+            if (top < o.seq) return cb(unread ? e1 : null, o);
+            o.seq = Math.max(top + 1, nextSeq(o)); o.expiry = now() + 600;
+            commit(mds, relay, me, list, true, function (e2, lost) {
+                var st = find(list, o.orderId);
+                if (e2) return cb(e2, o);
+                if (lost.indexOf(o.orderId) >= 0) return cb(st && st.status === 'filled' ? new Error('this order filled before the cancel landed — nothing to cancel') : null, st);
+                publish(mds, relay, me, o, function (e3) { cb(e3 && /stale seq$/.test(String(e3.message || e3)) ? null : e3, o); });
+            });
+        })();
     }
 
     /** Review 22 Nov (MINOR 1): is a relock of `o`'s coins still on its way, judged from the coins themselves? Yes when one
@@ -633,13 +661,16 @@
                 o.fills = (o.fills || []).concat([txpowid]);   // 0.0.147: never cut here; reconcileFills compacts it
                 o.seq = nextSeq(o);
                 if (o.status === 'filled') { o.expiry = now() + 600; }
-                publish(mds, relay, me, o, function (e1) { commit(mds, relay, me, list, false, function (e2, lost) {
-                    if (!e2 && lost.indexOf(orderId) >= 0) {
+                // gate review 23 Nov (b): SAVED first, then published only if the save kept it (as cancel): it used to publish
+                // before the merge, so a round that lost still put its envelope on the relays
+                commit(mds, relay, me, list, false, function (e2, lost) {
+                    if (e2) return cb(e2, find(list, orderId));
+                    if (lost.indexOf(orderId) >= 0) {
                         if (r < 2) return round(r + 1);
                         return cb(new Error('the fill of ' + filled + ' MINIMA (txpow ' + txpowid + ') was NOT applied to order ' + orderId + ': another writer changed it three times; the next refresh deducts it from the fill record'), find(list, orderId));
                     }
-                    cb(e2 || e1, find(list, orderId));
-                }); });
+                    publish(mds, relay, me, o, function (e1) { cb(e1, find(list, orderId)); });   // a refusal: syncRelays re-sends it
+                });
             });
         })(0);
     }
@@ -649,7 +680,7 @@
      *  source of truth): the ids of fills recorded more than FILLS_SETTLED_S ago — by then written, and applied by
      *  afterFill or by this pass — leave the list and `fillsFrom` (the high-water mark: records before it are never
      *  looked at again) moves past them. */
-    var FILLS_SETTLED_S = 600;
+    var FILLS_SETTLED_S = 600, PLAIN = /^[0-9]+(\.[0-9]+)?$/;
     function sizeOf(v) { var n = Number(v); return n > 0 ? n : 0; }   // sort key only
     /** MINOR-3: deduct every maker fill (kv fill_<txpowid>, role maker, written by service.js handleTake before afterFill)
      *  of a live order that its `fills` does not list yet, once; tracking starts at o.fillsFrom (set at create, or at the
@@ -669,7 +700,11 @@
             ((r && r.status && r.rows) || []).forEach(function (row) {
                 var f; try { f = JSON.parse(row.V || row.v); } catch (e) { return; }
                 if (!f || f.role !== 'maker' || f.status === 'lost' || !/^0x[0-9A-Fa-f]{64}$/.test(String(f.txpowid))) return;
-                try { F.d(f.filled); } catch (e) { return; }   // a record that cannot be applied is never waited for
+                // gate review 23 Nov (c): only a plain decimal fill > 0, and a `verified` (when the record has one) that is a
+                // plain non-negative decimal: a negative fill ADDED to the order, and junk `verified` fell back to the
+                // stored size. A record that cannot be applied is never waited for
+                if (!PLAIN.test(String(f.filled)) || !F.d(String(f.filled)).gt(0)) return;
+                if (f.verified !== undefined && f.verified !== null && !PLAIN.test(String(f.verified))) return;
                 todo.push(f);
             });
             // review 23 Nov (0.0.145): in the order they were taken (time, then the larger checked size first: a later take
@@ -681,7 +716,7 @@
                 // review 23 Nov (0.0.145, the 0.0.139 rule afterFill keeps): the fill counts against the size its take was
                 // checked against (`verified`, kept on the record by service.js), not against an edit saved after the check:
                 // remaining = min(stored, verified) − filled. A record without it (before 0.0.145): stored − filled.
-                try { cur = F.d(o.remaining); v = /^[0-9]+(\.[0-9]+)?$/.test(String(f.verified)) ? F.d(f.verified) : cur; rem = (v.lt(cur) ? v : cur).minus(F.d(f.filled)); } catch (e) { return; }
+                try { cur = F.d(o.remaining); v = PLAIN.test(String(f.verified)) ? F.d(String(f.verified)) : cur; rem = (v.lt(cur) ? v : cur).minus(F.d(f.filled)); } catch (e) { return; }
                 o.remaining = rem.gt(0) ? F.plain(rem) : '0';
                 if (rem.lte(0) || dust(rem, o.amount)) { o.status = 'filled'; o.expiry = now() + 600; }
                 o.fills = (o.fills || []).concat([f.txpowid]);
@@ -784,8 +819,15 @@
                         }
                         if (!needRepub) return step();
                         o.seq = nextSeq(o); o.expiry = now() + EXPIRY_SECONDS;
-                        // review 7 Nov (M2): only a re-sign some relay accepted is kept; a rejected one stays due for the next pass
-                        publish(mds, relay, me, o, function (pe) { if (!pe) n++; else { o.seq = oldSeq; o.expiry = oldExp; o.coins = oldCoins; o.scripts = oldScripts; if (oldRl) o.relocking = oldRl; if (oldRe) o.relockError = oldRe; } step(); });
+                        // review 7 Nov (M2): only a re-sign some relay accepted is kept; a rejected one stays due for the next pass.
+                        // Gate review 23 Nov (a): EXCEPT the seq and expiry of an order this pass just reconciled a fill into: its
+                        // remaining dropped, so it is saved at the raised seq — syncRelays sees every relay hold a lower one and
+                        // re-sends the deducted version (restored, the relays kept the old size at an equal seq, never re-sent)
+                        publish(mds, relay, me, o, function (pe) {
+                            if (!pe) n++;
+                            else { if (reconciled.indexOf(o) < 0) { o.seq = oldSeq; o.expiry = oldExp; } o.coins = oldCoins; o.scripts = oldScripts; if (oldRl) o.relocking = oldRl; if (oldRe) o.relockError = oldRe; }
+                            step();
+                        });
                     }
                     step();
                     }
@@ -912,11 +954,14 @@
                     var fix = stale(has, mySignPk, list);
                     (function nextFix() {
                         if (!fix.length) return nextRelay();
-                        var o = fix.shift(), raw;
+                        var o = fix.shift(), raw, over = o.status !== 'live' ? liveSeqOn(has, mySignPk, o.orderId) : -1;
+                        // gate review 23 Nov (b): the relay shows a LIVE copy at a seq ≥ the stored cancel's: a re-send at the
+                        // stored seq is refused 'stale seq' and the order stays live there — raise the stored seq above it
+                        if (over >= o.seq) { o.seq = over + 1; touched = true; } else over = -1;
                         if (o.status !== 'live' && o.expiry <= now() + 60) { o.expiry = now() + 600; touched = true; }   // a cancel must still be valid to land
                         try { raw = envelopeFor(me, o); } catch (e) { rep.failed++; return nextFix(); }
                         relay.publishTo(url, raw, function (r) {
-                            if (r.ok || r.error === 'stale seq') { rep.fixed++; rep.lines.push('relay ' + url + ' still showed ' + o.orderId + ' — re-sent (' + o.status + ')'); }
+                            if (r.ok || (r.error === 'stale seq' && over < 0)) { rep.fixed++; rep.lines.push('relay ' + url + ' still showed ' + o.orderId + ' — re-sent (' + o.status + ')'); }
                             else { rep.failed++; rep.lines.push('relay ' + url + ' still shows ' + o.orderId + ' and refused the fix: ' + r.error); }
                             nextFix();
                         });

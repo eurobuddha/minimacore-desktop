@@ -1,8 +1,8 @@
 {
   "_comment": "Digests of the Dexicon page files copied verbatim from the MiniDapp, at the same commit as the engine (scripts/dexicon-parity.manifest.json). Regenerate ONLY with `node scripts/dexicon-page-manifest.cjs --update` beside a deliberate re-copy. This app's differences belong in renderer/dexicon/mds.js, never in a page file.",
   "donor": {
-    "mdsVersion": "0.0.153",
-    "gitSha": "cefb6caf9fc6ac15e87ef39bb8597096d39d556f"
+    "mdsVersion": "0.0.156",
+    "gitSha": "1993840dd774dda5734ac19f3e22d94f418a8a6f"
   },
   "files": {
     "doors/sha3.js": {

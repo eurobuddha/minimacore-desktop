@@ -2,12 +2,12 @@
   "_comment": "Digests of the Dexicon engine files copied verbatim from the MiniDapp. Regenerate ONLY with `node scripts/dexicon-parity-manifest.cjs --update` beside a deliberate re-copy. Desktop-only differences belong in main/dexicon/loader.js, main/dexicon/service.desktop.js or main/dexicon.js, never in an engine file.",
   "donor": {
     "root": "../../mds/dexicon",
-    "mdsVersion": "0.0.153",
-    "branch": "(detached worktree of mds/dexicon at its 0.0.153 commit)",
-    "gitSha": "cefb6caf9fc6ac15e87ef39bb8597096d39d556f",
+    "mdsVersion": "0.0.156",
+    "branch": "(detached worktree of mds/dexicon at its 0.0.156 commit)",
+    "gitSha": "1993840dd774dda5734ac19f3e22d94f418a8a6f",
     "serviceJsSha256": "d0ca9bc53fc6f5ef037497c3d848d1e74bad508c2d682e32450c0c22db8253b1"
   },
-  "digest": "eeff259f003fc415434468790fb6676eb6a3be68ee79c2f9a0ecca7781e11dec",
+  "digest": "f50869e16a4f1686c417c8ce810619099d75e3ed74cb26a6522e13c05c1af339",
   "files": {
     "lib/rhino_shim.js": {
       "sha256": "3c836294a244afb5198002dcdce2c569eb166300553cb1ba60fb5b56209a487b",
@@ -70,8 +70,8 @@
       "bytes": 27449
     },
     "lib/maker.js": {
-      "sha256": "42fa9a8c458edcf61b852f1f83d202c4d9123b832467a01b0a3d9647de348454",
-      "bytes": 75110
+      "sha256": "a212385d42aaf8caaf75f1ae4821e7f34da60e7f1eed7755f1184bb6be73db6b",
+      "bytes": 79393
     },
     "lib/proofs.js": {
       "sha256": "5aa3eaeb1fd783fb66b833be06104b31a5a1be6acba11f1b12f9f91c6aedb03b",

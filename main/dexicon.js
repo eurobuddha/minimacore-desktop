@@ -90,7 +90,7 @@ function makeLane(size, limitMs, onDrop) {
     active: () => active, waiting: () => waiting.length
   };
 }
-const ENGINE_VERSION = "0.0.153";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
+const ENGINE_VERSION = "0.0.156";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
 const PRICE_HOST = "api.mexc.com";   // resting/price.js DEPTH_URL / BOOK_URL
 const GECKO_HOST = "api.coingecko.com", GECKO_PATH = "/api/v3/coins/minima/tickers";   // lib/ladder.js GECKO_MEXC_URL: MEXC's ticker, when MEXC itself cannot be reached
 /** A GET of the engine's price source: MEXC, or that one CoinGecko path. x = a parsed https URL. */

@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.408] — Dexicon engine 0.0.156: a fill is never dropped by a racing save, a cancelled order cannot stay live on a relay, junk fill records are ignored
+
+- Vendored mds/dexicon 1993840dd774dda5734ac19f3e22d94f418a8a6f (0.0.156; was 0.0.153 cefb6caf9fc6ac15e87ef39bb8597096d39d556f) byte for byte via a detached worktree: only lib/maker.js changed. A stored `remaining` or `fills` that changed since a writer loaded the list counts as moved (a refresh's reconciled fill is no longer dropped by a background save); a refresh whose re-sign is refused keeps the raised seq of an order it just deducted a fill from, so the relays get the deducted size; afterFill saves before it publishes; a cancel or relay sync that meets a newer LIVE copy on a relay re-sends the cancel above it (no cancelled order left live there); the refresh ignores a fill record whose `filled` is not a plain decimal above 0 or whose `verified` is junk. The donor's service.js is unchanged (nothing to port); both manifests updated; the donor parity check passes (39 files).
+
 ## [0.19.407] — The page can no longer plant a maker fill record under a key the engine reads as one
 
 - main/dexicon.js dexSql: a fill record is every key the engine's `k LIKE 'fill_%'` reads — "fill" in any case, then any one character or more (`_` is any character, SQLite's LIKE ignores ASCII case). Through the page bridge `fillZ0x…` and `FILL_0x…` were written as maker records of -50 and the service's refresh raised a live order from 60 to 160. Now the page writes only taker records under any such key, and deletes none.

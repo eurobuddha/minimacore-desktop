@@ -2,7 +2,8 @@
  * service.desktop.js — the Dexicon background engine as this desktop runs it (DESKTOP-OWNED; the lib/ crypto/ vendor/
  * resting/ files beside it are BYTE-IDENTICAL copies of mds/dexicon, enforced by scripts/dexicon-parity-manifest.cjs).
  *
- * A hand mirror of mds/dexicon/service.js at cefb6caf9fc6ac15e87ef39bb8597096d39d556f (0.0.153; was 0.0.91 at
+ * A hand mirror of mds/dexicon/service.js at 1993840dd774dda5734ac19f3e22d94f418a8a6f (0.0.156, 0.19.408: service.js is
+ * unchanged since cefb6caf9fc6ac15e87ef39bb8597096d39d556f, 0.0.153; only lib/maker.js moved; was 0.0.91 at
  * 9a95eb114ad35d3e18692a60c248529762fd72d5; its sha256 is in the parity manifest, so a donor change is noticed). Ported from
  * 0.0.92-0.0.153 (0.19.406): lib/proofs.js and the coin proof requests answered after the takes (answerProofs), ONE maker
  * refresh at a time (runRefresh, its relock errors logged and said), the NEWBLOCK re-back of an order waiting coinless
