@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.399] — The real-node proof script follows the simplified marker (third review's cases)
+
+- scripts/megammr-import-private-chain.cjs (manual, not in the gate; same refusals as before): an older file with its RPC cut at 300 ms; a crash with the balance intact (cleared by itself, no banner); a crash after a payment newer than the file (banner "less", then My balance is correct); a crash with a payment arriving while the app is down (banner, then Resync node); a node cut off from G that mined its own fork, importing a newer file from G (allowed; the check says block N differs, Keep the imported chain releases); a file from another genesis. Payments are sent again when a -test chain drops one; L is put back on G's tip (Resync node) when it cannot catch up by itself.
+- Found on the run (2026-11-23): a file from ANOTHER chain whose last block is under 30 minutes old is released at once by the freshness rule, before any recorded height can be compared ("the node's tip is fresh (block 40, 1139 s old); none of its earlier blocks could be compared"). Not changed here: it is what the third review's direction asks for; left for the owner to decide (a one-line alternative: release only once the tip has reached the tip recorded before the import, so a recorded block is always compared; until then "catching up", with Keep after 10 minutes).
+- Found too: after importing a file whose last block G then orphaned, L stayed at that block ("Invalid TxPoW Super Parents" for every next block) until a Resync node; the freshness rule had already released it.
+
 ## [0.19.398] — Third review's minors: the Terminal waits too, Quit says what a quit leaves, refusals are said
 
 - While an import, a restore, a MegaMMR switch or a resync runs, the Terminal refuses megammr*, archive, backup and restore with the same plain reason (main/seedgate.js checkCommand asks main's busyRefusal).
