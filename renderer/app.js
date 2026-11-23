@@ -207,6 +207,9 @@ function onStatus(s) {
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
   if (s.megammrBroken && !megaBrokenSaid) { megaBrokenSaid = true; megammrBrokenNotice(); }
+  paintMegaBar(s);
+  // what the node is doing for a MegaMMR file import, from its log (main/megammrfile.js): on the import's own screen while it runs
+  if (s.megafileBusy === "import" && s.megafileStep && activeView === "backup" && BK_PAGE === "megafile") { const st = el("backupBody").querySelector("#bkStatus"); if (st) st.textContent = t("The node is working: {step}", { step: s.megafileStep }); }
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
     const sig = (s.parlons.ready ? "1" : "0") + "|" + (s.parlons.error || "") + "|" + s.state;
@@ -754,6 +757,23 @@ const MEGAMMR_OFF_WARNING = N_("The node restarts as a light node.\n\n• Its Me
  *  status, whether it stopped (without -mobile it stops at every start) or goes on. The Node tab keeps saying it, with the button. */
 const MEGAMMR_BROKEN_NOTE = N_("This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).");
 let megaBrokenSaid = false;
+/** An unfinished MegaMMR file import (main/megammrfile.js marker, carried by the node's status): said on every screen, with Resync node from
+ *  the MegaMMR node the app uses (config megammrHost), one press, never by itself. Not while the import itself or a resync runs. */
+const MEGA_UNFINISHED = N_("Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.");
+function paintMegaBar(s) {
+  const stage = (s && s.megammrImport) || "", show = !!stage && !s.megafileBusy && !s.resyncing && !!CFG.walletDone;
+  el("megaBar").hidden = !show; if (!show) return;
+  el("megaBarText").textContent = t(MEGA_UNFINISHED, { host: CFG.megammrHost || "" });
+  const b = el("megaBarResync"); b.textContent = t("Resync node now"); b.disabled = s.state !== "running";
+}
+async function megaResyncNow() {
+  const built = resyncCommand({ host: CFG.megammrHost });
+  if (built.error) { toast(built.error, "err"); BK_PAGE = "resync"; selectTab("backup"); return; }   // no usable host: the Resync node screen, to type one
+  const b = el("megaBarResync"); b.disabled = true; toast(t("Resyncing from {host}…", { host: CFG.megammrHost }));
+  try { await cmd(built.cmd); toast(t("{label} complete ✓ The node is restarting.", { label: t("Resync") }), "ok"); }
+  catch (e) { toast(ipcError(e), "err"); }
+  b.disabled = false;
+}
 function megammrBrokenNotice() {
   showActionSheet(t("This node's MegaMMR does not fit its chain"), [{ label: t("Turn MegaMMR off"), danger: true, onclick: megammrOffNow }], t(MEGAMMR_BROKEN_NOTE));
 }
@@ -960,6 +980,7 @@ function initShell() {
   el("walReceive").onclick = () => selectTab("receive");
   el("walHead").onclick = toggleWalBreakdown;
   el("stopStart").onclick = () => { toast(t("Starting the node…")); api.nodeStart(); };
+  el("megaBarResync").onclick = megaResyncNow;
   el("trayLang").onclick = () => { if (NARROW.matches) setTray(false); chooseLanguage(); };
 
   // tray

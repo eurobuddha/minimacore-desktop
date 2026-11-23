@@ -5694,3 +5694,18 @@
   "A MegaMMR import is running",
   "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.": "导入在节点的链被改动之前就停止了（{why}）。没有导入或重置任何内容。节点已重启。你的钱包和资金未受影响。",
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.": "导入在节点的链被改动之前就停止了（{why}）。没有导入或重置任何内容。节点已按之前的状态作为轻节点重启。你的钱包和资金未受影响。",
+  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.": "MegaMMR 导入未完成，余额不完整。你的资金是安全的。“重新同步节点”会从 {host} 重建链。",
+  "Resync node now": "立即重新同步节点",
+  "Resyncing from {host}…": "正在从 {host} 重新同步…",
+  "The node is working: {step}": "节点正在处理：{step}"
+}, { review: [
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.",
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.",
+  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.",
+  "Resync node now",
+  "Resyncing from {host}…",
+  "The node is working: {step}"
+] });

@@ -257,7 +257,8 @@ test("first run: decided from this launch's facts: a node first started on an em
   const snippet = main.slice(main.indexOf("let firstRunOpen = null;"), main.indexOf('ipcMain.handle("mcd:cmd"'));
   const make = (fresh, cfg) => { const h = {}, sent = [];
     const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, requireRunning() {}, restore: require("../main/restore.js"), config: { load: () => Object.assign({}, cfg), rpcSecret: () => "" },
-      node: { freshAtFirstStart: fresh, rpcPort: () => 0, runResync: async (c) => { sent.push(c); return { status: true }; } }, rpc: { rpcCall: async () => ({ status: true, response: { phrase: "THE NODE'S WORDS" } }) } };
+      node: { freshAtFirstStart: fresh, rpcPort: () => 0, runResync: async (c) => { sent.push(c); return { status: true }; } }, rpc: { rpcCall: async () => ({ status: true, response: { phrase: "THE NODE'S WORDS" } }) },
+      megafile: { resynced: async () => {} } };   // a Resync node that ended well clears an unfinished import (0.19.392)
     const api = new Function(...Object.keys(env), snippet + "; return { runResync };")(...Object.values(env)); return { h, api, sent }; };
   // 0.19.201: a wallet-replacing megammrsync closes it, whatever the config then says
   let x = make(true, { walletDone: false, walletMode: "restore" });

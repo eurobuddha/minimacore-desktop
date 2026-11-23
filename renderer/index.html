@@ -73,6 +73,8 @@
 
       <!-- Shown after a Shutdown (or if the node stops on its own): the window must not look alive. -->
       <div class="stopbar" id="stopBar" role="status" hidden><span>The node is stopped. Balances, swaps, pools, mail and chat are offline until it starts.</span><button class="btn btn--primary btn--sm" id="stopStart">Start node</button></div>
+      <!-- An unfinished MegaMMR file import (main/megammrfile.js): its words and button are set by renderer/app.js paintMegaBar. -->
+      <div class="stopbar" id="megaBar" role="alert" hidden><span id="megaBarText"></span><button class="btn btn--primary btn--sm" id="megaBarResync"></button></div>
 
       <main class="main" id="main">
       <section class="view view--active" id="view-balances">

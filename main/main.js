@@ -217,7 +217,8 @@ ipcMain.handle("mcd:revealSeed", (_e, typed) => { requireRunning(); return seedg
 let firstRunOpen = null;
 // Once a wallet-replacing megammrsync (phrase: or file:) has been sent in this launch, the first-run seed step is closed for
 // good (0.19.201): flipping walletMode from restore back to new would otherwise show the RESTORED wallet's seed, ungated.
-const runResync = (c) => { if (restore.replacesWalletFromPhrase(c) || restore.loadsBackupFile(c)) firstRunOpen = false; return node.runResync(c); };
+// A Resync node that ended well also ends what an unfinished MegaMMR file import owed (main/megammrfile.js resynced: its marker, the held engines).
+const runResync = async (c) => { if (restore.replacesWalletFromPhrase(c) || restore.loadsBackupFile(c)) firstRunOpen = false; const r = await node.runResync(c); if (r && r.status === true && restore.isResync(c)) await megafile.resynced(); return r; };
 // Decided from facts of THIS launch (0.19.220), not from config the window can write: the node first started on a data
 // folder with no node data (node.freshAtFirstStart), no wallet-replacing command has been sent since, and the wallet step
 // has not been finished (walletDone set true in this launch only closes it; setting it back opens nothing).
@@ -336,7 +337,8 @@ node.onEnginesHold = async () => { await Promise.all([dexicon.hold(), atomix.hol
 // Before the node is told to quit (node-manager stop(), 0.18.117): what the engines have at the node ends first, so a
 // posted action is recorded by the engine that posted it. Each wait is bounded (Dexicon: main/dexicon.js STOP DRAINS).
 node.onStopping = () => Promise.all([dexicon.stop(), atomix.quiet(10000), pandapools.quiet(10000)]);
-node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon")) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
+// ...and none while a MegaMMR file import has not finished (its marker, main/megammrfile.js): the node's balance is incomplete until Resync node
+node.onEnginesRelease = () => { if (freeze.isFrozen("dexicon") || config.load().megammrImport) return; atomix.release(); pandapools.release(); dexicon.release(); if (node.state === "running") dexicon.start(); };   // a frozen Dexicon stays held (main/freeze.js)
 // A file the node is told to read (main/importfile.js): only one the user chose in the system's open dialog, kept here, never copied.
 const importfile = require("./importfile");
 const imports = importfile.create({ platform: process.platform, t: (s) => (currentLang(), lang.t(s)), defaultPath: () => config.load().dataFolder || config.defaultDataFolder(),
@@ -1101,6 +1103,7 @@ app.whenReady().then(() => {
   const c = config.load();
   if (c.keyMode) config.recordKeyMode(c.keyMode);   // writes down the mode of an install from before the mode existed (classic), for good
   freeze.applyAtStartup();   // a frozen Dexicon's engines are held before the node is up; the other frozen apps are simply never started
+  if (c.megammrImport) { node.log("[app] a MegaMMR file import did not finish (" + String(c.megammrImport.stage) + ", " + String(c.megammrImport.at) + "): the trading engines stay stopped until Resync node has run"); node.onEnginesHold().catch(() => {}); }   // main/megammrfile.js
   if (c.setupDone && c.walletDone) node.start();
   if (c.openAtLogin) loginitem.apply(app, true);   // re-register every boot: survives a moved AppImage or a reinstall
   updater.start();   // does nothing for a flavour that does not update itself, and for a TEST copy (main/updater.js OFF)

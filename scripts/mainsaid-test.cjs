@@ -252,7 +252,7 @@ test("A file the node is told to read (main/importfile.js): every refusal, said 
     for (const m of [MF.BUSY, MF.STATUS_UNKNOWN]) check(m);
     check(F.say(MF.ENGINES, { error: "dexicon did not stop" }));
     check(F.say(MF.IMPORT_OPEN, { items: ["1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0xabc", "AtomiX could not be asked whether a swap is in flight. Wait a moment and try again."].join("\n• ") }));
-    for (const m of [MF.CHECK_FAILED, MF.CHECK_FAILED_BACK, MF.FAILED, MF.FAILED_BACK]) check(F.say(m, { why: "MegaMMR import failed : java.io.EOFException .. RESTART Minima before retrying" }));
+    for (const m of [MF.CHECK_FAILED, MF.CHECK_FAILED_BACK, MF.FAILED, MF.FAILED_BACK, MF.NOT_STARTED, MF.NOT_STARTED_BACK]) check(F.say(m, { why: "MegaMMR import failed : java.io.EOFException .. RESTART Minima before retrying" }));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   for (const c of MS.codes().filter(c => /^(IMPORT|MEGAFILE)_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js or main/megammrfile.js: " + c);
 });

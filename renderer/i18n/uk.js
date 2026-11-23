@@ -5707,3 +5707,18 @@
   "A MegaMMR import is running",
   "Quitting now leaves the chain half-replaced. Your funds are safe, but the balance will be incomplete until Resync node (Backup & Recovery) has run."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.": "Імпорт зупинився до того, як ланцюжок вузла було змінено ({why}). Нічого не імпортовано й не скинуто. Вузол перезапущено. Ваш гаманець і кошти не зачеплено.",
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.": "Імпорт зупинився до того, як ланцюжок вузла було змінено ({why}). Нічого не імпортовано й не скинуто. Вузол перезапущено як легкий вузол, як і було. Ваш гаманець і кошти не зачеплено.",
+  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.": "Баланс неповний після незавершеного імпорту MegaMMR. Ваші кошти в безпеці. «Синхронізація вузла» відновить ланцюжок з {host}.",
+  "Resync node now": "Синхронізувати вузол зараз",
+  "Resyncing from {host}…": "Синхронізація з {host}…",
+  "The node is working: {step}": "Вузол працює: {step}"
+}, { review: [
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.",
+  "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.",
+  "Balance incomplete after an unfinished MegaMMR import. Your funds are safe. Resync node rebuilds the chain from {host}.",
+  "Resync node now",
+  "Resyncing from {host}…",
+  "The node is working: {step}"
+] });

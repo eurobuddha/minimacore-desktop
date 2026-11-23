@@ -251,6 +251,14 @@ function setAtomixStoreMoveOwed(v) {
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
 }
+/** A MegaMMR file import that has not finished (main/megammrfile.js): written right before the node is given the import and cleared only
+ *  when it is known to have ended well (or to have stopped before the node reset anything). While it is there the trading engines stay
+ *  held and the window offers Resync node. Never from a patch (save() drops a key DEFAULTS does not name), only here. null clears it. */
+function setMegammrImport(v) {
+  const cur = load(); if (v && typeof v === "object") cur.megammrImport = JSON.parse(JSON.stringify(v)); else delete cur.megammrImport;
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
+}
 /** The grant for this wallet, { at, safe }, or null. */
 const fcGranted = (walletKey) => { const g = load().fcGrant, r = g && typeof g === "object" ? g[walletKey] : null; return r && typeof r === "object" && Number(r.at) > 0 && typeof r.safe === "string" && r.safe ? { at: Number(r.at), safe: r.safe } : null; };
 
@@ -316,4 +324,4 @@ function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(se
  *  and the window's own colours follow it. */
 function themeSource(v) { return v === "light" || v === "dark" ? v : "system"; }
 
-module.exports = { themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+module.exports = { themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, setMegammrImport, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
