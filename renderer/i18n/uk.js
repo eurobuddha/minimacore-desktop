@@ -5930,3 +5930,8 @@
   "Coin max age, in blocks",
   "SAVE"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent.": "Ще перевіряється, які FAST-ордери цей вузол може взяти: спробуйте трохи пізніше. Нічого не підписано й не надіслано."
+}, { review: [
+  "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent."
+] });

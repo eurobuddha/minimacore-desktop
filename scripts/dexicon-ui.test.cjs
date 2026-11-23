@@ -535,7 +535,7 @@ test("H2: the Trade button takes one click at a time, sends what was reviewed, a
   const shell = win.document.getElementById("shell"); shell.dataset.mode = "dex";
   win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
   win.DexUI.paint("dexicon"); win.DexUI.render(); await settle();
-  const frame = shell.children.find(c => c.tag === "iframe"), page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [] }, p) } });
+  const frame = shell.children.find(c => c.tag === "iframe"), page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [], view: { ready: true, rev: 1, asks: [], bids: [], hidden: "" } }, p) } });
   page({ fast: [{ side: "sell", price: "0.0031", minima: "250" }], amount: "", trading: false });
   els.dxPrice.value = "0.0032"; els.dxAmount.value = "100"; els.dxPrice.oninput();
   assert.match(els.dxReview.innerHTML, /BUY 100 MINIMA from 1 FAST ask/); assert.equal(els.dxCta.disabled, false);
@@ -1166,6 +1166,21 @@ test("0.19.410 (gate review MINOR-3): the SWEEP's FAST part is limited to the wo
   const d1 = u.drives()[0].drive;
   assert.deepEqual(JSON.parse(JSON.stringify(d1.args)), { buy: false, limit: "0.00441234", amount: "500" }, "the FAST run never sells below what was shown");
   u.answer(d1.id, { error: "stop here" }); await u.settle();   // ends the money action (the gate is shared)
+});
+
+test("0.19.412 (gate review MINOR-5): a FAST click is refused, said and nothing sent, while the page has not checked which FAST orders this node can take; it goes once the check is ready", async () => {
+  const book = { fast: [{ side: "sell", price: "0.0031", minima: "250", ours: false }], book: [], poolAsks: [], poolBids: [], pools: [] };
+  const u = await tradeUi({ book });
+  u.page({ view: pageView(book.fast, false) }); await u.settle();
+  u.els.dxPrice.value = "0.0032"; u.els.dxAmount.value = "100"; u.els.dxPrice.oninput(); await u.settle();
+  u.els.dxCta.onclick(); await u.settle();
+  assert.equal(u.drives().length, 0, "nothing placed: a crossing click never silently rests");
+  assert.ok(!u.cmds.some(c => c.op === "reviewed"), "no review recorded");
+  assert.match(u.els.dxLog.innerHTML, /Still checking which FAST orders this node can take: try again in a moment\. Nothing was signed or sent\./);
+  u.page({ view: pageView(book.fast) }); await u.settle();
+  u.els.dxCta.onclick(); await u.settle();
+  assert.equal(u.drives().length, 1); assert.equal(u.drives()[0].drive.args.expect, "take");
+  u.answer(u.drives()[0].drive.id, { error: "stop here" }); await u.settle();
 });
 
 test("0.19.406: SWEEP is refused, with the reason and nothing sent, while the on-chain engine or the page's takeable check is not ready", async () => {

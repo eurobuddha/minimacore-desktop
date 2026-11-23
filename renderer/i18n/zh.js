@@ -5917,3 +5917,8 @@
   "Coin max age, in blocks",
   "SAVE"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent.": "仍在检查此节点可以吃哪些 FAST 订单：请稍后再试。未签名或发送任何内容。"
+}, { review: [
+  "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent."
+] });

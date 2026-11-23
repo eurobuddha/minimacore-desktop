@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.412] — A FAST click waits for the page's check of the book, as SWEEP does
+
+- renderer/dexicon-ui.js submit(): while the page has not yet checked which FAST orders this node can take (its takeable view is not ready), a FAST click is refused with "Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent." Before, a crossing order missing from the unchecked view let the click rest as a FAST order instead of taking. In zh / ru / uk.
+
 ## [0.19.411] — SWEEP's on-chain part waits for the engine's answer to ITS order, not the next answer to anything
 
 - The page's take-only LIMIT carries a reference (renderer/dexicon/mds.js sweepChain); main/dexicon/service.desktop.js ACTION REF puts it on the first POSTED or ERROR told while that LIMIT is handled — at once, after the pool refresh, or from the callback of the transaction it started (the vendored engine's limitWithPools and PandaTxn fill / fillComposite / create are wrapped, not edited). The Trade screen takes only the packet with its own reference; another action's answer within the 180 s no longer stands in for it.

@@ -481,6 +481,9 @@ const DexUI = (() => {
       if (C.cmp(lim, C.dec(price)) !== 0) gridNote = I18N.t("On-chain prices have 6 decimals: your limit {typed} is sent as {sent}. The same on-chain orders qualify; a pool may fill very slightly less, never at a worse price.", { typed: price, sent: C.fmtPrice(lim) }) + "\n\n";
     }
     if (layer === "fast") {
+      // 0.19.412: while the page has not checked which FAST orders this node can take, a crossing order may be missing
+      // from the plan, and the click would rest where it should take: refused, as SWEEP is
+      if (!Page.stub && (!Page.state.view || !Page.state.view.ready)) return say(I18N.t("Still checking which FAST orders this node can take: try again in a moment. Nothing was signed or sent."), "note");
       // H1: the click carries what the review on screen said; the page signs only if its own book still says so
       const pl = C.plan(book(), X.buy, price, amount, fundsNow());
       if (!pl.ok || pl.stuck) return say(pl.why || I18N.t("Nothing can be taken in this amount. Nothing was signed."), "note");
