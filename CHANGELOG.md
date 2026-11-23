@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.410] — SWEEP: the FAST part never fills past the worst price its confirmation showed
+
+- renderer/dexicon-ui.js sweep(): the FAST part's limit (sent to the page's take run and to the signing check) is the worst FAST price the confirmation named, not the typed price. With a typed limit looser than the FAST orders in the plan, the run could have taken a FAST order that appeared in between at a price the dialog never showed. What the FAST part cannot take at that price falls to the on-chain part, inside the typed limit as before.
+
 ## [0.19.409] — A FAST order is never backed by a coin a posted on-chain trade is spending
 
 - main/dexicon.js: the page may read exactly `SELECT coinid FROM pp_posted_inputs` (lib/maker.js pageHolds, on every FAST create and edit: the resting engine's durable input claims). It was refused, so the page's coin choice ignored them and could name a coin an on-chain trade had just spent.

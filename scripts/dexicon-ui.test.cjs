@@ -1149,6 +1149,19 @@ test("0.19.406: SWEEP sends: one confirmation with both parts and the worst pric
   assert.ok(log.includes("On-chain: Blended trade submitted") && log.includes("On-chain transaction " + CHAINTX), "every id whole");
 });
 
+test("0.19.410 (gate review MINOR-3): the SWEEP's FAST part is limited to the worst FAST price the confirmation showed, not the looser typed price", async () => {
+  const u = await tradeUi({ book: OWNER_BOOK, quote: OWNER_QUOTE });
+  const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));
+  u.els.dxBids.onclick({ target: { closest: () => ({ dataset: rows[1] }) } }); await u.settle(); await u.settle();
+  u.els.dxPrice.value = "0.0044"; u.els.dxPrice.oninput(); await u.settle(); await u.settle();   // a SELL typed below the FAST bid of 0.00441234
+  assert.equal(u.els.dxCtaSweep.hidden, false); u.els.dxCtaSweep.onclick(); await u.settle();
+  assert.match(u.dialogs[0].innerHTML, /1\. FAST, now: up to 500 MINIMA from the fast book, at 0\.00441234 at worst\./);
+  assert.deepEqual(JSON.parse(JSON.stringify(u.cmds.find(c => c.op === "reviewed"))), { op: "reviewed", buy: false, price: "0.00441234", amount: "500" }, "the signing check's limit is the shown worst");
+  const d1 = u.drives()[0].drive;
+  assert.deepEqual(JSON.parse(JSON.stringify(d1.args)), { buy: false, limit: "0.00441234", amount: "500" }, "the FAST run never sells below what was shown");
+  u.answer(d1.id, { error: "stop here" }); await u.settle();   // ends the money action (the gate is shared)
+});
+
 test("0.19.406: SWEEP is refused, with the reason and nothing sent, while the on-chain engine or the page's takeable check is not ready", async () => {
   let u = await tradeUi({ book: OWNER_BOOK, quote: OWNER_QUOTE });
   const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));

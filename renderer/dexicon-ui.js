@@ -427,15 +427,19 @@ const DexUI = (() => {
     if (!Page.state.ready || !Page.state.view || !Page.state.view.ready) return say(I18N.t("The FAST book is still being checked for orders this node can take. Nothing was signed or sent."), "note");
     if (!sw) return say(I18N.t("There is no sweep for this ticket now: the book changed. Nothing was signed or sent."), "note");
     const lim = C.chainLimit(buy, price), fastPl = C.plan(book(), buy, price, C.str(sw.fastQ), fundsNow());
-    if (!lim || !fastPl.ok || fastPl.stuck || !fastPl.fast) return say(I18N.t("The FAST book changed: review the sweep again. Nothing was signed or sent."), "note");
-    const fastWorst = C.dec(C.expectOf(fastPl).worst), worst = !fastWorst ? lim : (buy ? (C.cmp(fastWorst, lim) > 0 ? fastWorst : lim) : (C.cmp(fastWorst, lim) < 0 ? fastWorst : lim));
+    const fastWorst = fastPl.ok && fastPl.fast ? num(C.expectOf(fastPl).worst) : null;
+    if (!lim || !fastPl.ok || fastPl.stuck || !fastPl.fast || !fastWorst) return say(I18N.t("The FAST book changed: review the sweep again. Nothing was signed or sent."), "note");
+    const worst = !fastWorst ? lim : (buy ? (C.cmp(fastWorst, lim) > 0 ? fastWorst : lim) : (C.cmp(fastWorst, lim) < 0 ? fastWorst : lim));
     const ok = await dialog(I18N.t("Sweep {side} {total} MINIMA?", { side, total: C.fmt(C.dec(amount)) }),
       I18N.t("1. FAST, now: up to {fast} MINIMA from the fast book, at {fastWorst} at worst.\n2. Then on-chain (BOOK / POOL): what is left of your {total} MINIMA, at your limit {limit} at worst (on-chain prices have 6 decimals). Final when a block confirms it (about 3 minutes).\n\nWorst price of either part: {worst} MxUSD per MINIMA.\nBoth parts only take: what does not cross is not traded, and nothing is left resting.",
         { fast: C.fmt(sw.fastQ), fastWorst: fastWorst ? C.fmtPrice(fastWorst) : "—", total: C.fmt(C.dec(amount)), limit: C.fmtPrice(lim), worst: C.fmtPrice(worst) }), I18N.t("Sign and send"));
     if (!ok) return say(I18N.t("Nothing was signed or sent."), "note");
-    // part 1: the FAST take, signed only inside what was just confirmed (main/dexicon-signgate.js)
-    try { await api.dxCommand({ op: "reviewed", buy, price, amount: C.str(sw.fastQ) }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
-    const t0 = Date.now(), r1 = await drive("sweepFast", { buy, limit: price, amount: C.str(sw.fastQ) });
+    // part 1: the FAST take, signed only inside what was just confirmed (main/dexicon-signgate.js). 0.19.410: its limit is
+    // the worst FAST price the confirmation showed, not the typed one, so the FAST part never fills past what was shown;
+    // what it cannot take there falls to the on-chain part
+    const fastLimit = C.str(fastWorst);
+    try { await api.dxCommand({ op: "reviewed", buy, price: fastLimit, amount: C.str(sw.fastQ) }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
+    const t0 = Date.now(), r1 = await drive("sweepFast", { buy, limit: fastLimit, amount: C.str(sw.fastQ) });
     if (r1.error) return say(r1.error);
     const f = r1.value || {}, got = C.dec(f.got) || C.zero, unanswered = C.dec(f.unanswered) || C.zero;
     await load();
