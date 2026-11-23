@@ -5,11 +5,14 @@
 # while package.json pinned 0.2.162. A signed build packaged whatever sat there. Now it refuses: each jar's sha256 must
 # equal package.json "parlonsNodeSha256" / "minimaJarSha256". Fix a mismatch with scripts/fetch-parlons-node-jar.sh
 # (or by copying the pinned minima.jar), never by editing the pin.
+# 0.18.321: an optional directory to check instead of resources/: scripts/verify-mac.sh passes the built app's
+# Contents/Resources, so what is checked is what ships. Every dist:* script runs it first; CI runs it after the fetch.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+DIR="${1:-resources}"
 sha_of() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; else sha256sum "$1" | cut -d' ' -f1; fi; }
 fail=0
-for pair in "resources/parlons-node.jar:parlonsNodeSha256" "resources/minima.jar:minimaJarSha256"; do
+for pair in "$DIR/parlons-node.jar:parlonsNodeSha256" "$DIR/minima.jar:minimaJarSha256"; do
   jar="${pair%%:*}"; key="${pair##*:}"
   want="$(node -p "require('./package.json').$key || ''")"
   [ -n "$want" ] || { echo "FAIL package.json has no $key"; fail=1; continue; }

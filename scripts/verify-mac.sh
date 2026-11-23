@@ -23,6 +23,8 @@ APPVER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/C
   exit 1; }
 
 echo "== app: $APP"
+# the node jars INSIDE the app are the pinned ones (0.18.321): a stale gitignored jar must not ship under a valid signature
+bash scripts/assert-jars.sh "$APP/Contents/Resources" || { echo "FAIL: the node jars inside $APP are not the pinned ones"; exit 1; }
 INFO=$(codesign -dv --verbose=2 "$APP" 2>&1 || true)
 echo "$INFO" | grep -E 'Authority=Developer ID Application|TeamIdentifier|Timestamp|flags=' || true
 echo "$INFO" | grep -q 'Authority=Developer ID Application' || { echo "FAIL: not signed with a Developer ID Application certificate"; exit 1; }

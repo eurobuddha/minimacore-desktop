@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.321] — the node-jar pin is checked on every build path and inside the built Mac app
+
+- scripts/assert-jars.sh takes an optional directory (default resources/). scripts/verify-mac.sh runs it on the built app's `Contents/Resources`, so the jars checked are the jars that ship under the signature.
+- `dist`, `dist:mac`, `dist:win` and `dist:linux` run it before electron-builder (`dist:mac:signed` and scripts/release-desktop.sh already did); CI runs it as one step after fetching parlons-node.jar, before the build.
+- Test: scripts/assert-jars-test.cjs (`npm run test:jars`, in CI) — a stale jar in resources/ or in a built app is refused, the pinned ones pass, and each build path runs the check; fails on 0.18.320.
+
 ## [0.18.320] — miniMall: a payment coin seen before its order is read is kept at sight, so a spend first no longer loses it
 
 - `coins` lists only unspent coins, and the vendor's wallet may spend a payment once it is 3 blocks old. A payment coin whose order message had not been read yet was left to be judged on a later pass, and if the wallet spent it first it was never counted (main/shop.js judgeOne, the two "not marked seen" returns).

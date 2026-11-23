@@ -156,12 +156,21 @@ jobs:
       - name: Verify terminal autocomplete
         run: npm run test:termcomplete
 
+      # scripts/assert-jars.sh refuses a jar that is not the pin, in resources/ or in a built app (0.18.321)
+      - name: Verify the jar pin check
+        run: npm run test:jars
+
       # The Parlons Node jar is never in git: the newest node-v* release of eurobuddha/maxima, checksum-verified.
       - name: Fetch parlons-node.jar
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/fetch-parlons-node-jar.sh
+
+      # The installer bundles exactly the pinned node jars (package.json parlonsNodeSha256 / minimaJarSha256).
+      - name: Verify the node jars are the pinned ones
+        shell: bash
+        run: bash scripts/assert-jars.sh
 
       # The keets sidecar's node_modules are never in git: exact-pinned install from the committed lockfile.
       - name: Install keets sidecar deps
