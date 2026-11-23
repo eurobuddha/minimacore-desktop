@@ -1476,6 +1476,35 @@ test("0.19.411 (gate review MINOR-4): the service's POSTED / ERROR for a page LI
   d = await answer(5); assert.match(d.message, /not one of your active orders/); assert.equal(d.ref, undefined);
 });
 
+test("0.19.414 (gate review MINOR-6): an unanswered fill whose save never landed survives a restart (found again by its record's `applied` id, then applied once), and a later 'lost' puts back only what was taken off", async () => {
+  const b = await boot(), X = "0x" + "3".repeat(32), Y = "0x" + "4".repeat(32), now = Math.floor(Date.now() / 1000);
+  const UX = "0x" + "0".repeat(48) + "0000019a00000001", UY = "0x" + "0".repeat(48) + "0000019a00000002";
+  const order = (id, coin) => ({ orderId: id, side: "sell", price: "0.0123", amount: "100", remaining: "100", coins: [coin], scripts: [], address: b.node.ADDRESS, seq: now - 10, expiry: now + 3600, status: "live", fillsFrom: now - 100, fills: [] });
+  const rec = (id, ux, ts) => ({ role: "maker", orderId: id, side: "sell", price: "0.0123", filled: "30", txpowid: "", applied: ux, coins: ["0x" + "E9".repeat(32)], spent: [], taker: "0xab", ts, status: "unknown", verified: "100" });
+  const kv = (k, v) => sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + JSON.stringify(v) + "')");
+  const stored = async (id) => JSON.parse((await sql(b.host, "SELECT v FROM ax_kv WHERE k='myorders'"))[0].V).find(o => o.orderId === id);
+  // the state a crash leaves: the record of an unanswered fill of 30 on disk, its afterFill never saved (X still 100)
+  await M.until(() => vm.runInContext("typeof unknownScanned === 'undefined' || unknownScanned", b.ctx));   // this engine has looked already: only the next one can find it
+  await kv("myorders", [order(X, "0x" + "C3".repeat(32)), order(Y, "0x" + "C4".repeat(32))]);
+  await kv("fill_unanswered_1_" + X, rec(X, UX, now));
+  await new Promise(r => setTimeout(r, 300)); assert.equal((await stored(X)).remaining, "100", "nothing else applies a record with no txpowid");
+  await b.host.stop(); await b.host.start(); await M.until(() => b.host.status().ready);   // a restart: FILL_PENDING is gone
+  const again = { ctx: b.host._ctx() };
+  await M.until(async () => (await stored(X)).remaining === "70", 8000);
+  const x = await stored(X); assert.ok(x.fills.includes(UX), "applied under its own id"); assert.equal(x.status, "live");
+  assert.equal(vm.runInContext("Object.keys(FILL_PENDING).length", again.ctx), 0, "no longer pending: its order takes takes again");
+  // applied once: more ticks change nothing
+  await new Promise(r => setTimeout(r, 300)); assert.equal((await stored(X)).remaining, "70");
+  // the chain says it was never posted: the 30 that WAS taken off is put back, once
+  const settle = (key, f) => new Promise((res) => { again.ctx.__done = res; again.ctx.__f = f; vm.runInContext("settleUnknown(" + JSON.stringify(key) + ", __f, function () { __done(); });", again.ctx); });
+  await settle("fill_unanswered_1_" + X, Object.assign(rec(X, UX, now - 3 * 3600)));
+  assert.equal((await stored(X)).remaining, "100");
+  // a 'lost' fill that was never applied (Y lists no UY) puts nothing back: no 130
+  await kv("fill_unanswered_2_" + Y, rec(Y, UY, now - 3 * 3600));
+  await settle("fill_unanswered_2_" + Y, rec(Y, UY, now - 3 * 3600));
+  assert.equal((await stored(Y)).remaining, "100", "never added twice");
+});
+
 test("0.19.406: the FAST backing-coin settings: read and written by the app's own Settings (only what is given), never by the page", async () => {
   const b = await boot();
   assert.deepEqual(b.host.fastCoins(), { legacyFresh: true, coinMaxAge: "", maxAgeLimit: 900 }, "unset: refresh ON, 900 blocks");

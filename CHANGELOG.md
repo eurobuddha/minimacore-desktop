@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.414] — An unanswered fill not yet applied survives a restart; a "lost" one never adds back what was never taken off
+
+- main/dexicon/service.desktop.js: a fill whose txnpost the node never answered, and whose afterFill did not save, was pending only in memory: after a restart its order stood at full size and took takes against it (its record has no txpowid, so no refresh deducts it). Once per engine, before the first take, every fill_unanswered_ record of a live order that does not list its `applied` id (status unknown or done) is pending again: the order refuses takes and the retry applies it once. An unanswered fill counts as applied only by that id (never by fillsFrom's time). When the chain says it was never posted, the amount goes back on the order only if it was taken off; before, a fill that was never applied was added on top (100 became 130).
+
 ## [0.19.413] — The FAST ladder never says "checking…" for ever
 
 - renderer/dexicon-ui.js: when the page's check of the FAST book is still not ready after 60 seconds, the ticker line says why instead of "checking…": the page's own error ("the FAST book could not be checked: …"), else "no relay has answered yet", else that it is still not checked and only your own FAST orders are shown. With no page view at all, your own FAST orders (from the service's book) stay on the ladder; a stranger's unchecked order never shows. In zh / ru / uk.

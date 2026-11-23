@@ -67,6 +67,9 @@
  *               tick, before the takes) or the refresh's reconcileFills has applied it; and every take is checked against
  *               the TRUE remaining (the stored one less every maker fill_ record not applied yet): a take of an order with
  *               an unapplied record is refused as busy until the refresh applies it. The records unreadable: refused.
+ *               (0.19.414) An UNANSWERED fill not applied yet survives a restart: its fill_unanswered_ record is the
+ *               persisted row, found again by its `applied` id (rescanUnknown); a later 'lost' puts back only what was
+ *               taken off (its `applied` id on the order), never an amount that was never deducted.
  *   SAID        (0.19.406) a save that did not land (the engine's store lock, a fill not applied, a relock that failed), a
  *               take refused for one of the reasons above: a packet to the screens ({type: save_failed | take_refused |
  *               relock_failed, message}), never only a log line (renderer/dexicon-ui.js shows it).
@@ -447,8 +450,12 @@ function settleUnknown(key, f, next) {
         f.status = 'lost'; f.reason = why;
         AX.mds.kvSet(key, JSON.stringify(f), function () {
             AX.maker.load(AX.mds, function (e, list) {   // the order was reduced as if the fill had happened: put the amount back
-                var o = e ? null : AX.maker.find(list, f.orderId);
+                var o = e ? null : AX.maker.find(list, f.orderId), p = FILL_PENDING[f.orderId];
+                if (p && p.txpowid === f.applied) fillDone(p);   // never applied, and now never to be: its order takes takes again
                 if (!o || o.status !== 'live') return next();   // filled, cancelled or gone meanwhile: left as it is
+                // 0.19.414: only an amount that was taken off is put back (its `applied` id on the order); one whose save never
+                // landed (or that a restart forgot) was never deducted, and adding it would sell it twice
+                if (!f.applied || (o.fills || []).indexOf(f.applied) < 0) { log('unanswered fill of ' + f.orderId + ' was never posted (' + why + ') and was never applied to the order: nothing to put back'); return next(); }
                 o.remaining = AX.fill.plain(AX.fill.d(o.remaining).plus(AX.fill.d(f.filled))); o.seq = Math.max(nowS(), Number(o.seq || 0) + 1);   // lib/maker.js nextSeq
                 AX.maker.save(AX.mds, list, function (e3) { if (e3) { log('unanswered fill of ' + f.orderId + ' was never posted (' + why + '), but putting ' + f.filled + ' MINIMA back on the order failed: ' + e3.message); saveFailed('fill', e3); return next(); } log('unanswered fill of ' + f.orderId + ' was never posted (' + why + '): ' + f.filled + ' MINIMA is back on the order'); notify({ type: 'fill', status: 'lost' }); next(); });
             });
@@ -481,11 +488,40 @@ function processTakes(takes, done) {
 }
 
 /* ---- FILL PENDING (header; DexiconPro 0.2.150 / 0.2.158 / 0.2.159) ---- */
-var FILL_PENDING = {};   // orderId -> { orderId, txpowid, filled, spent, verified, coins, ts }
-/** Applied already: the order lists its id, is no longer live, or the fill is older than what the order's fillsFrom counts. */
-function fillApplied(list, p) { var o = AX.maker.find(list, p.orderId); return !o || o.status !== 'live' || (o.fills || []).indexOf(p.txpowid) >= 0 || (p.ts > 0 && o.fillsFrom > 0 && p.ts < o.fillsFrom); }
+var FILL_PENDING = {};   // orderId -> { orderId, txpowid, filled, spent, verified, coins, ts, unknown }
+/** Applied already: the order lists its id, is no longer live, or the fill is older than what the order's fillsFrom counts.
+ *  An unanswered fill (p.unknown) by its id only: its id is never compacted out of `fills` (its record has no txpowid, so
+ *  reconcileFills never lists it), while fillsFrom may move past its time without it ever being applied. */
+function fillApplied(list, p) { var o = AX.maker.find(list, p.orderId); return !o || o.status !== 'live' || (o.fills || []).indexOf(p.txpowid) >= 0 || (!p.unknown && p.ts > 0 && o.fillsFrom > 0 && p.ts < o.fillsFrom); }
 function fillDone(p) { if (FILL_PENDING[p.orderId] === p) { delete FILL_PENDING[p.orderId]; unlockCoins(p.coins); log('fill ' + p.txpowid + ' on ' + p.orderId + ' is applied: its order takes takes again'); } }
-function retryFills(done) {
+/** PENDING ACROSS A RESTART (0.19.414): an unanswered fill whose afterFill did not save lived only in FILL_PENDING, so
+ *  after a restart its order stood at full size and took takes against it (its record has no txpowid: no refresh deducts
+ *  it). Its fill_unanswered_ record IS the persisted row: once per engine, before the first take, every such record of a
+ *  live order whose `fills` does not list its `applied` id (status unknown or done, never lost) is pending again: its
+ *  order refuses takes and the retry below applies it. */
+var unknownScanned = false, UNANSWERED_ID = /^0x0{48}[0-9a-f]{16}$/;
+function rescanUnknown(done) {
+    if (unknownScanned) return done();
+    AX.mds.sql("SELECT k, v FROM ax_kv WHERE k LIKE 'fill_unanswered_%'", function (r) {
+        if (!r || !r.status) return done();   // tried again next tick
+        AX.maker.load(AX.mds, function (e, list) {
+            if (e) return done();
+            unknownScanned = true;
+            (r.rows || []).forEach(function (row) {
+                var f; try { f = JSON.parse(row.V || row.v); } catch (x) { return; }
+                if (!f || f.role !== 'maker' || f.status === 'lost' || !UNANSWERED_ID.test(String(f.applied)) || FILL_PENDING[f.orderId]) return;
+                var o = AX.maker.find(list, f.orderId);
+                if (!o || o.status !== 'live' || (o.fills || []).indexOf(f.applied) >= 0) return;
+                FILL_PENDING[f.orderId] = { orderId: f.orderId, txpowid: f.applied, filled: String(f.filled), spent: f.spent || [], verified: f.verified, coins: (o.coins || []).slice(), ts: Number(f.ts) || 0, unknown: true };
+                for (var i = 0; i < (o.coins || []).length; i++) coinLocks[o.coins[i]] = Infinity;
+                log('unanswered fill ' + f.applied + ' of ' + f.orderId + ' (' + f.filled + ' MINIMA) was never applied to its order: applying it now; the order takes no take until it is');
+            });
+            done();
+        });
+    });
+}
+function retryFills(done) { rescanUnknown(function () { retryPending(done); }); }
+function retryPending(done) {
     var ids = Object.keys(FILL_PENDING); if (!ids.length) return done();
     AX.maker.load(AX.mds, function (e, list) {
         var i = 0;
@@ -567,12 +603,12 @@ function handleTake(take, next) {
         var recvMs = Date.now();   // ACTIVITY: "Co-signed for <taker> in X.Xs" (take received → posted)
         var spentByMe = [], outs = [];
         /** afterFill's end, either way: applied → the coins are free; not saved → FILL PENDING (header), said */
-        function applied(txid, filled, ts) {
+        function applied(txid, filled, ts, unknown) {
             return function (e2) {
                 if (!e2) unlockCoins(o.coins);
                 else {
                     log('afterFill: ' + e2.message); saveFailed('fill', e2);
-                    FILL_PENDING[o.orderId] = { orderId: o.orderId, txpowid: txid, filled: filled, spent: spentByMe, verified: rem, coins: o.coins.slice(), ts: ts };
+                    FILL_PENDING[o.orderId] = { orderId: o.orderId, txpowid: txid, filled: filled, spent: spentByMe, verified: rem, coins: o.coins.slice(), ts: ts, unknown: !!unknown };
                     for (var i = 0; i < o.coins.length; i++) coinLocks[o.coins[i]] = Infinity;
                 }
             };
@@ -589,7 +625,7 @@ function handleTake(take, next) {
                 log('take for ' + o.orderId + ': the node did not answer txnpost, so it is NOT KNOWN whether the fill was posted. Recorded as ' + key + '; the order is reduced by ' + verdict.filled + ' MINIMA until the chain says which');
                 return AX.mds.kvSet(key, JSON.stringify({ role: 'maker', orderId: o.orderId, side: o.side, price: o.price, filled: verdict.filled, received: verdict.received, paid: verdict.paid, txpowid: '', applied: ux, coins: outs, spent: spentByMe, taker: taker, ts: ts, recvMs: recvMs, status: 'unknown', verified: rem }), function () {
                     AX.maker.afterFill(AX.mds, RELAY, ME, o.orderId, verdict.filled, spentByMe, function (e2) {
-                        applied(ux, verdict.filled, ts)(e2);
+                        applied(ux, verdict.filled, ts, true)(e2);
                         notify({ type: 'fill', status: 'unknown' });
                         next();
                     }, ux, rem);
