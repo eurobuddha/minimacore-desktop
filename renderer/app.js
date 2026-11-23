@@ -152,14 +152,8 @@ async function boot() {
   api.onAtomix(onAtomixUpdate);
   api.onEthWallet(onEthWalletUpdate);
   api.onShop(onShopUpdate);
-  api.onCasino(onCasinoUpdate);
-  api.onCasinoClaims(() => { CasinoPanel.goToMyBets(); selectTab("casino"); });
-  api.onCasinoLog(casinoActivity);        // activity-board feed (main-side casino MDS.log lines)
   api.onVestr(onVestrUpdate);
   api.onWebWallet(onWebWalletUpdate);
-
-  // Casino is opt-in (18+). Reveal its tab only when enabled in Settings; otherwise it stays hidden.
-  const ctab = el("casinoTab"); if (ctab) ctab.hidden = !CFG.casinoEnabled;
 
   // KeetChat rides the keets transport, which both node kinds run (0.18.17+).
   const chtab = el("chatTab"); if (chtab) chtab.hidden = false;
@@ -184,7 +178,6 @@ function onStatus(s) {
   pill.textContent = label;
   if (s.health && s.health.block) {                                      // both APK-parity headers carry the tip
     PoolsPanel.setBlock(s.health.block);
-    CasinoPanel.setBlock(s.health.block);
     AtomixPanel.setBlock(s.health.block);
   }
 
@@ -490,7 +483,7 @@ async function postBootRestore() {
   try {
     await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
     RESTORE = null;   // clear the seed from memory
-    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState();   // seed changed → re-derive the mail identity
+    try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState();   // seed changed → re-derive the mail identity
     CFG = await api.saveConfig({ walletDone: true, megammrHost: host });
     hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
   } catch (e) {
@@ -530,7 +523,7 @@ function showRestoreOverlay() {
     el("orGo").disabled = true; el("orGo").textContent = "Restoring…";
     try {
       await cmd(`megammrsync action:resync host:${host} phrase:"${seed}" anyphrase:true keyuses:${keyuses}`);
-      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState();   // seed changed → re-derive the mail identity
+      try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState();   // seed changed → re-derive the mail identity
       CFG = await api.saveConfig({ megammrHost: host });
       hideSetup(); renderActive(); toast("Wallet restored ✓", "ok");
     } catch (e) { toast("Restore failed: " + e.message, "err"); el("orGo").disabled = false; el("orGo").textContent = "Restore + sync"; }
@@ -879,7 +872,6 @@ function renderActive() {
   else if (activeView === "atomix") renderAtomix();
   else if (activeView === "ethwallet") renderEthWallet();
   else if (activeView === "minimall") renderMiniMall();
-  else if (activeView === "casino") renderCasino();
   else if (activeView === "vestr") renderVestr();
   else if (activeView === "parlons") renderParlons();
   else if (activeView === "history") renderHistory();
@@ -2073,10 +2065,6 @@ async function renderSettings() {
     <div class="card"><div class="card__title">Open at login</div>
       <div class="view__desc">Start minimaCore — and so your node — when you log in to this computer. It opens to the tray on Mac. Uses the OS login items on Mac and Windows and the autostart folder on Linux.</div>
       <button class="btn btn--outline btn--full" id="setAutostart">${CFG.openAtLogin ? "Stop opening at login" : "Open at login"}</button>
-    </div>
-    <div class="card"><div class="card__title">P2P Chance <span class="casino-18">18+</span></div>
-      <div class="view__desc">Peer-to-peer games of chance (coin flip · dice · roulette), settled on-chain directly between two people — <b>no middleman, no house edge, true odds</b>. Real MINIMA is at stake. Hidden by default; enabling requires a one-time age self-certification.</div>
-      <button class="btn btn--outline btn--full" id="setCasino">${CFG.casinoEnabled ? "Disable P2P Chance" : "Enable P2P Chance (18+)"}</button>
     </div>`;
   el("setAddr").onclick = () => copy(fullAddr);
   el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
@@ -2147,7 +2135,7 @@ async function renderSettings() {
     if (!await showConfirm("Resync from " + rhost + "?", warn, resetsWallet ? "Reset and resync" : "Resync", resetsWallet)) return;
     const btn = el("setResync"); btn.disabled = true; btn.textContent = "Resyncing…";
     try { await cmd(cmdStr); CFG = await api.saveConfig({ megammrHost: rhost });
-      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); try { await api.casinoInvalidate(); } catch (e) {} resetCasinoState(); }   // seed reset → re-derive the mail identity
+      if (resetsWallet) { try { await api.mailInvalidate(); } catch (e) {} resetMailState(); try { await api.ppInvalidate(); } catch (e) {} resetPpState(); try { await api.axInvalidate(); } catch (e) {} resetAxState(); }   // seed reset → re-derive the mail identity
       toast("Resync complete ✓", "ok"); renderBalances(); }
     catch (e) { toast("Resync failed: " + e.message, "err"); }
     btn.disabled = false; btn.textContent = "Resync now";
@@ -2178,20 +2166,6 @@ async function renderSettings() {
     if (li.ok === false) toast((on ? "Saved, but not registered: " : "Saved, but could not unregister: ") + (li.note || "unknown error"), "warn");
     else toast(on ? "minimaCore will open when you log in ✓" : "minimaCore will no longer open at login", "ok");
     renderSettings();
-  };
-  el("setCasino").onclick = () => {
-    if (CFG.casinoEnabled) {   // turn OFF — hide tab, leave the background processor to stop on next boot
-      api.saveConfig({ casinoEnabled: false }).then(c => { CFG = c; });
-      const ct = el("casinoTab"); if (ct) ct.hidden = true;
-      if (activeView === "casino") selectTab("balances");
-      toast("P2P Chance disabled", "ok"); renderSettings();
-      return;
-    }
-    casinoAgeGate(async () => {   // turn ON — one-time 18+ self-cert (styled gate)
-      CFG = await api.saveConfig({ casinoEnabled: true, casinoAgeCertified: true });
-      const ct = el("casinoTab"); if (ct) ct.hidden = false;
-      toast("P2P Chance enabled ✓", "ok"); renderSettings();
-    });
   };
   // key-uses panel: copy an address on click, and run the deep audit ONLY on the button (0.18.157: opening Settings sent
   // every public key of this node to the audit service by itself).
@@ -3151,21 +3125,6 @@ function shopResizeImage(file) {
   });
 }
 
-// ---- P2P Chance — the panel lives in renderer/casino.js (APK parity, its own navy palette) ----------------
-// app.js keeps only the wiring. Every engine call, busy guard, confirm-on-chain state machine and the age
-// gate moved across verbatim; the canvas artwork is in renderer/casinoart.js and cannot change a result.
-CasinoPanel.init({
-  api, esc, el, toast, CasinoArt,
-  cfg: () => CFG,
-  setCfg: (c) => { if (c) CFG = c; },
-  activeView: () => activeView
-});
-function renderCasino() { CasinoPanel.render(); }
-function onCasinoUpdate() { CasinoPanel.onUpdate(); }
-function refreshCasinoBadge() { return CasinoPanel.badge(); }
-function casinoActivity(line, cls) { CasinoPanel.activity(line, cls); }
-function casinoAgeGate(onCertify) { CasinoPanel.ageGate(onCertify); }
-function resetCasinoState() { CasinoPanel.reset(); }
 
 // ============================ Vestr (token vesting — shared covenant 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE) ============================
 // Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,

@@ -24,7 +24,6 @@ const pandapools = require("./pandapools");
 const atomix = require("./atomix");
 const ethwallet = require("./ethwallet");
 const shop = require("./shop");
-const casino = require("./casino");
 const vestr = require("./vestr");
 const webwallet = require("./webwallet");
 const parlons = require("./parlons");
@@ -154,23 +153,14 @@ function requireRunning() {
 // Every node stop or restart goes through mayStop (main/stopguard.js, 0.18.223): with the node running and anything in flight or
 // not checkable, main asks first (this desktop shows no warning in the window), and a no refuses the stop with nothing changed.
 const stopguard = require("./stopguard");
-// The three reads run side by side, each with its own time limit (0.18.259: one after another under the guard's single 5-second race,
-// a slow casino read lost the AtomiX and pool answers too, and P2P Chance was not said); a read that fails or is late is null.
+// The reads run side by side, each with its own time limit (0.18.259: one after another under the guard's single 5-second race,
+// a slow read lost the other answers too); a read that fails or is late is null.
 const READ_MS = 4000;
 const readWithin = (fn) => { let t; return Promise.race([Promise.resolve().then(fn), new Promise(r => { t = setTimeout(() => r(null), READ_MS); })]).catch(() => null).finally(() => clearTimeout(t)); };
 const inFlightWork = async () => {
-  const [ax, pools, cas] = await Promise.all([readWithin(() => atomix.activeWork()), readWithin(() => pandapools.activeWork()), readWithin(() => casinoOpen())]);
-  return { atomix: ax, pools, casinoOn: !!config.load().casinoEnabled, casino: cas, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.18.225)
+  const [ax, pools] = await Promise.all([readWithin(() => atomix.activeWork()), readWithin(() => pandapools.activeWork())]);
+  return { atomix: ax, pools, shop: shop.sendingCount() };   // shop: miniMall payments at the node (0.18.225)
 };
-// This wallet's open P2P Chance offers and bets (0.18.249): every coin of it at the contract is unspent, so open; an offer is one it
-// made that nobody took yet (phase 0). Read only while the settle loop is switched on; a failed read is "could not be checked".
-async function casinoOpen() {
-  if (!config.load().casinoEnabled) return null;
-  const mine = await casino.myBets();
-  if (!Array.isArray(mine)) throw new Error("no list");
-  const offers = mine.filter(b => b && b.amHouse && Number(b.phase) === 0).length;
-  return { offers, bets: mine.length - offers };
-}
 const stopGuard = stopguard.stopGuard({ running: () => node.state === "running", gather: inFlightWork, log: (l) => node.log(l),
   ask: async (w) => {
     if (win && !win.isDestroyed()) { win.show(); win.focus(); }
@@ -195,10 +185,9 @@ async function stopping(fn, keepOnThrow) {
   try { const r = await fn(); if (r && r.status === false && node.state === "running") stopGuard.release(stamp); return r; }
   catch (e) { if (node.state === "running" && !keepOnThrow) stopGuard.release(stamp); throw e; }
 }
-/** A config patch from the window, with what Settings' save does after it (Casino loop, login item). */
+/** A config patch from the window, with what Settings' save does after it (login item). */
 function saveConfigPatch(patch) {
   const c = config.save(patch || {});
-  try { if (c.casinoEnabled) startCasinoIfEnabled(); } catch (e) {}
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
   return c;
 }
@@ -633,50 +622,6 @@ ipcMain.handle("mcd:ewExportKey", (_e, typed) => ethwallet.exportKeyGated(typed,
 ipcMain.handle("mcd:ewSetRpc", (_e, url) => ethwallet.setRpc(url));
 ethwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:ethwallet"); });
 
-// Casino (Zero Edge Casino — on-chain commit-reveal)
-ipcMain.handle("mcd:casinoStatus", () => casino.status());
-ipcMain.handle("mcd:casinoOpenBets", () => casino.openBets());
-ipcMain.handle("mcd:casinoMyBets", () => casino.myBets());
-ipcMain.handle("mcd:casinoHistory", () => casino.history());
-ipcMain.handle("mcd:casinoBalance", () => casino.balance());
-ipcMain.handle("mcd:casinoRawBets", () => casino.rawBets());
-ipcMain.handle("mcd:casinoWalletCoins", () => casino.walletCoins());
-ipcMain.handle("mcd:casinoStakeable", () => casino.stakeable());
-ipcMain.handle("mcd:casinoResolveOutcome", (_e, commit, role) => casino.resolveOutcome(commit, role));
-ipcMain.handle("mcd:casinoCreate", (_e, preset, bet) => casino.create(preset, bet));
-ipcMain.handle("mcd:casinoTake", (_e, coinid, pick) => casino.take(coinid, pick));
-ipcMain.handle("mcd:casinoCancel", (_e, coinid) => casino.cancel(coinid));
-ipcMain.handle("mcd:casinoResolve", (_e, coinid) => casino.resolve(coinid));
-ipcMain.handle("mcd:casinoReveal", (_e, coinid) => casino.reveal(coinid));
-ipcMain.handle("mcd:casinoClaimTimeout", (_e, coinid) => casino.claimTimeout(coinid));
-ipcMain.handle("mcd:casinoSetCurrency", (_e, tokenid) => casino.setCurrency(tokenid));
-ipcMain.handle("mcd:casinoNewCount", () => casino.newCount());
-ipcMain.handle("mcd:casinoSeen", () => casino.markSeen());
-ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true; });
-casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
-casino.emitter.on("log", (l) => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casinolog", l); });   // activity board feed
-let casinoClaimNotification = null;
-casino.emitter.on("notifycancel", () => { if (casinoClaimNotification) casinoClaimNotification.close(); casinoClaimNotification = null; });
-casino.emitter.on("notify", (msg) => {   // stable timeout reminder; click routes to My Bets
-  try {
-    if (casinoClaimNotification) casinoClaimNotification.close();
-    const n = new Notification({ title: "Casino timeout claims", body: String(msg), silent: !!(win && !win.isDestroyed() && win.isFocused()) });
-    casinoClaimNotification = n;
-    n.on("click", () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:casinoClaims"); } });
-    n.show();
-  } catch (e) { /* best-effort */ }
-});
-// Casino background auto-processor (reveal/resolve). GATED on config.casinoEnabled — not just the tab being
-// visible — so a hidden/disabled Casino never auto-reveals or resolves bets. Starts on node-running if already
-// enabled; startCasinoIfEnabled() is also called from the saveConfig handler so toggling it ON starts it live.
-let casinoStarted = false;
-function startCasinoIfEnabled() {
-  if (casinoStarted) return;
-  if (node.state !== "running") return;
-  if (!require("./config").load().casinoEnabled) return;
-  casinoStarted = true; casino.startLoop();
-}
-node.on("status", (s) => { if (s.state === "running") startCasinoIfEnabled(); });
 
 // Vestr (token vesting)
 ipcMain.handle("mcd:vestrStatus", () => vestr.status());
@@ -746,9 +691,30 @@ ipcMain.handle("mcd:shopImport", async () => {
 node.on("status", pushStatus);
 node.on("log", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:log", node.logs.slice(-1)[0]); });
 
+// P2P Chance was removed in 0.18.318 (a stranger's coin state could become a node command; pending an audit and a rebuild).
+// Said once to a wallet that ever switched it on (casinoEnabled / casinoAgeCertified stay in config.json, as do its keychain
+// secrets: nothing of it is deleted). Only what is certain from the covenant: nothing is settled for it any more.
+const CASINO_CONTRACT = "0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F";
+function casinoRemovedNotice(cfg) {
+  if (!cfg || cfg.casinoRemovedNoticeShown || !(cfg.casinoEnabled || cfg.casinoAgeCertified)) return null;
+  return { title: "minimaCore", message: "P2P Chance has been removed from minimaCore",
+    detail: "It was removed to fix a security problem. It may come back after an audit.\n\n" +
+      "Nothing was moved or deleted. Any offer or bet you have open stays on chain at the P2P Chance contract, and the secrets and history P2P Chance saved stay on this computer.\n\n" +
+      "This app no longer cancels, renews, reveals, settles or claims P2P Chance offers and bets:\n" +
+      "• An offer nobody has taken has no deadline, and until someone takes it only your key can cancel it. Another player can still take it in another P2P Chance app.\n" +
+      "• Once a bet is taken, each side has a limited number of blocks to do its part (1500 for an offer made in minimaCore). If your side does not, the other side can take the whole pot.\n\n" +
+      "Your coins at the contract are listed by this Terminal command:\ncoins relevant:true address:" + CASINO_CONTRACT };
+}
+function sayCasinoRemoved() {
+  const n = casinoRemovedNotice(config.load());
+  if (!n || !win || win.isDestroyed()) return;
+  dialog.showMessageBox(win, Object.assign({ type: "info", buttons: ["OK"], noLink: true }, n)).then(() => config.setCasinoRemovedNoticeShown()).catch(() => {});
+}
+
 app.whenReady().then(() => {
   setupPermissions();
   createWindow();
+  win.webContents.once("did-finish-load", sayCasinoRemoved);
   setupTray();
   // Only auto-boot for a FULLY onboarded user. If either the node wizard or the wallet step is unfinished
   // (incl. a stale pre-0.1.1 config with setupDone but no wallet step), the renderer runs onboarding and
@@ -772,7 +738,6 @@ let quitting = false;
 app.on("before-quit", async (e) => {
   try { pandapools.flush(); } catch (err) {}   // flush the debounced PandaPools store BEFORE any early-return path
   try { atomix.flush(); } catch (err) {}       // flush the debounced AtomiX swap DB (secrets are already sync-flushed)
-  try { casino.flush(); } catch (err) {}       // casino keychain writes are sync; no-op, kept for symmetry
   try { histDb.flush(); } catch (err) {}       // flush the debounced history DB too
   if (quitting) return;
   // Always go through node.stop(), even with no node process: it also releases the router port mapping,

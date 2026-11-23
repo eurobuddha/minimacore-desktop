@@ -102,8 +102,9 @@ test('every config key the renderer persists is declared in DEFAULTS', () => {
 
 test('the keys this regression was about are present', () => {
   const defaults = defaultsKeys();
-  // Named explicitly so a future tidy-up of DEFAULTS cannot quietly drop the one that broke.
-  for (const k of ['casinoDollar', 'casinoEnabled', 'casinoAgeCertified', 'theme', 'labels']) {
+  // Named explicitly so a future tidy-up of DEFAULTS cannot quietly drop one. (casinoDollar, the one that broke, and the other
+  // casino keys left DEFAULTS with P2P Chance in 0.18.318; nothing in the renderer writes them any more.)
+  for (const k of ['theme', 'labels', 'openAtLogin']) {
     assert.ok(defaults.has(k), 'DEFAULTS must declare ' + k);
   }
 });

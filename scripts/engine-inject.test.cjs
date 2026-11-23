@@ -1,7 +1,7 @@
 // 0.18.317 (as Pandamonium Desktop 0.19.418): a stranger's coin state can no longer become a node command through an engine. The node splits a command text on
 // every ";" (StringTokenizer, quotes or not) and runs each piece: a PandaPools beacon whose state port 2 was
 // `0x00;send … ;` made ONE runscript FOUR admin sends (the token appears 4 times in the covenant), and a P2P Chance taker's
-// state 9 `0;SEND …` ran through auto-reveal. These tests drive the REAL host shims (main/pandapools.js, main/casino.js)
+// state 9 `0;SEND …` ran through auto-reveal (P2P Chance was removed in 0.18.318). These tests drive the REAL host shim (main/pandapools.js)
 // over the REAL vendored engines against a stand-in node that splits commands exactly like the real one
 // (scripts/node-standin.cjs), and the lowest layer (main/rpc.js) and the Terminal directly.
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), os = require('node:os');
@@ -51,26 +51,6 @@ test('PandaPools: poisoned sentinel beacons through the real Book.scan and the r
   } finally { try { api.stopLoop(); } catch (e) {} for (const c of contexts) c.ActivityChain.stop(); for (const s of stores) { try { s.flush(); s._db.close(); } catch (e) {} } fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('P2P Chance: a taker\'s ";" in state 8-12 through the real desk shim and engine (auto-reveal, auto-resolve) sends nothing', async () => {
-  const ME = hex(1), secrets = new Map();
-  const coin = (phase, poison) => { const st = { 0: ME, 1: hex(2), 2: hex(3), 3: '2', 4: '2', 5: '1', 6: String(phase), 7: '256', 8: ME, 9: hex(4), 10: hex(5), 11: '0', 12: hex(6), ...poison };
-    return { coinid: hex(9), address: '0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F', amount: '2', tokenid: '0x00', state: Object.keys(st).map((p) => ({ port: Number(p), data: st[p] })) }; };
-  const n = standin((p, v) => v === 'hash' ? { status: true, response: { hash: hex(7) } } : v === 'keys' ? { status: true, response: [{ publickey: ME }] } : { status: true, response: {} });
-  const casino = load('main/casino.js', { electron: { app: { getPath: () => os.tmpdir(), getVersion: () => 'test' } }, './config': { rpcSecret: () => '', getSecret: (k) => secrets.get(k) || hex(8), setSecret: (v, k) => { secrets.set(k, v); return true; }, deleteSecret() {} },
-    './node-manager': { rpcPort: () => 0 } });
-  casino._setRunner(async (q) => new Promise((r) => n.cmd(q, r)));
-  await casino.init(); const ctx = casino._ctx(); vm.runInContext('MY_KEYS[' + JSON.stringify(ME) + ']=true', ctx);
-  for (const poison of [{ 9: '0;' + SEND }, { 9: '0;SEND amount:1000 address:' + ATTACKER + ' tokenid:0x00' }, { 8: ME + ';' + SEND }, { 10: hex(5) + ';' + SEND }, { 12: hex(6) + ';' + SEND }, { 9: hex(4) + ' amount:1000' }]) {
-    n.texts.length = 0; n.ran.length = 0;
-    ctx.doReveal(coin(1, poison)); ctx.doResolve(coin(2, poison));
-    await new Promise((r) => setTimeout(r, 30));
-    clean(n);
-  }
-  // a clean bet still settles, as two commands (no ";" chain): txnbasics, then txnpost
-  n.texts.length = 0; ctx.doReveal(coin(1, {})); await until(() => n.texts.some((t) => t.startsWith('txnpost id:')));
-  assert(n.texts.some((t) => /^txnbasics id:svc_reveal_\d+$/.test(t)) && n.texts.some((t) => /^txnpost id:svc_reveal_\d+$/.test(t)));
-});
-
 test('main/rpc.js: under every caller, ";", CR, LF and NUL are refused before any connection, and the source is told', async () => {
   const V = require('../main/cmdverb'), rpc = require('../main/rpc'), told = [];
   V.onRefused((source, command) => told.push([source, command]));
@@ -87,7 +67,7 @@ test('the Terminal refuses a chain before any question, and the app notifies the
   const src = fs.readFileSync(path.join(desktop, 'main/main.js'), 'utf8'), at = src.indexOf('ipcMain.handle("mcd:cmd"');
   assert(at > 0 && /^ipcMain\.handle\("mcd:cmd", async \(_e, command\) => \{\n  \{ const why = require\("\.\/cmdverb"\)\.refuse\("", command\); if \(why\) throw new Error\(why\); \}/.test(src.slice(at)), 'mcd:cmd refuses first');
   assert(src.includes('require("./cmdverb").onRefused((source) =>'), 'a refusal from an app or engine is said in a notification');
-  for (const f of ['main/pandapools.js', 'main/atomix.js', 'main/casino.js']) assert(/require\("\.\/cmdverb"\)\.refuse\("|V\.refuse\("P2P Chance"/.test(fs.readFileSync(path.join(desktop, f), 'utf8')), f + ' refuses in its shim');
+  for (const f of ['main/pandapools.js', 'main/atomix.js']) assert(/require\("\.\/cmdverb"\)\.refuse\("/.test(fs.readFileSync(path.join(desktop, f), 'utf8')), f + ' refuses in its shim');
 });
 
 test('checkmode on the plain minima node kind is answered from `status` (writemode, and the wallet lock): PandaPools can write there', async () => {

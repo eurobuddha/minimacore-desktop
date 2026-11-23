@@ -63,13 +63,9 @@ const DEFAULTS = {
   extraArgs: "",             // any additional raw args, appended verbatim
   labels: {},                // address → friendly name (shown in Receive / History / CSV)
   theme: "current",          // current | original-light | original-dark
-  casinoEnabled: false,      // Casino tab hidden until enabled in Settings (18+ self-cert); also gates the bg auto-processor
-  casinoAgeCertified: false, // user self-certified 18+ / legal gambling age
-  openAtLogin: false,        // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
-  casinoDollar: false        // Casino currency toggle: false = MINIMA, true = MxUSD. It MUST be declared here —
-                             // save() drops any key DEFAULTS does not name, and this one being absent is what
-                             // froze the toggle in 0.16.97 (it had lived in the renderer only since 0.16.37).
-                             // scripts/config-keys-test.cjs now fails the build if a renderer key goes missing.
+  openAtLogin: false         // "Open at login": register the app with the OS (mac/win) or ~/.config/autostart (linux)
+  // P2P Chance's casinoEnabled / casinoAgeCertified / casinoDollar left DEFAULTS with it (0.18.318). An install's saved values
+  // stay in config.json (load() keeps them, save() writes them back): they say who is told it was removed (main.js).
 };
 
 let rescueDropped = false;   // said once a run
@@ -233,7 +229,7 @@ function getSecret(account) {
   return readSecretFile(secretFileFor(account));
 }
 /** Store a named secret durably. Returns true iff it was written (Keychain, or the encrypted 0600 file fallback).
- *  Callers that gate fund-critical commitments on durability (e.g. casino commit preimages) MUST check the return. */
+ *  Callers that gate fund-critical commitments on durability (e.g. an HTLC preimage) MUST check the return. */
 function setSecret(value, account) {
   if (keychainSet(value, account)) return true;
   try { writeSecretFile(secretFileFor(account), value); return true; } catch (e) { return false; }
@@ -249,4 +245,11 @@ function setAtomixStoreMoveOwed(v) {
   fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
 }
 
-module.exports = { setAtomixStoreMoveOwed, load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+/** The P2P Chance removal notice was read (0.18.318). Main only, as above: the window cannot set or clear it. */
+function setCasinoRemovedNoticeShown() {
+  const cur = load(); cur.casinoRemovedNoticeShown = true;
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(configPath(), JSON.stringify(cur, null, 2));
+}
+
+module.exports = { setAtomixStoreMoveOwed, setCasinoRemovedNoticeShown, load, save, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

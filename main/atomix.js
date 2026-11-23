@@ -85,7 +85,7 @@ const AX_PUBLISH_MIN_COINAGE = 5;
  * Pin an order-book publish/tombstone send to a coin that can actually fund it.
  *
  * This used to be its own implementation and it DRIFTED. main/sendpin.js is the shared pin every other send
- * in the app goes through (mail, shop, vestr, webwallet, casino, the terminal), and it gained three fixes
+ * in the app goes through (mail, shop, vestr, webwallet, the terminal), and it gained three fixes
  * this copy never got: it asks the node for `sendable:true` coins, it compares 44-decimal amounts exactly
  * instead of as doubles, and it falls back to an address whose coins TOTAL cover the amount.
  *

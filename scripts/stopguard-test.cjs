@@ -8,7 +8,7 @@ const assert = require("node:assert");
 const fs = require("fs"), path = require("path");
 const S = require("../main/stopguard");
 const rd = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
-const IDLE = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [], casinoOn: false };
+const IDLE = { atomix: { ready: true, swaps: [], maker: false, otcOffer: false, otcDeals: 0 }, pools: [] };
 
 test("inFlight says what a stop would interrupt; an engine that could not be asked is said, never read as idle", () => {
   const now = new Date(2026, 10, 21, 12, 0).getTime();
@@ -18,7 +18,7 @@ test("inFlight says what a stop would interrupt; an engine that could not be ask
   assert.equal(w.busy.length, 4); assert.match(w.busy[0], /^2 AtomiX swaps are not finished\. .* can time out at about 13:00 \(the first of them\)\./);
   assert.equal(w.title, "Stop the node with work in flight?");
   for (const [work, re] of [[{ atomix: null, pools: [] }, /AtomiX could not be asked/], [{ atomix: { ready: false, hasStore: true }, pools: [] }, /AtomiX has not started/],
-    [{ atomix: IDLE.atomix, pools: null }, /PandaPools could not be asked/], [Object.assign({}, IDLE, { casinoOn: true }), /P2P Chance bets/]]) {
+    [{ atomix: IDLE.atomix, pools: null }, /PandaPools could not be asked/]]) {
     const u = S.inFlight(work, now); assert.equal(u.any, true); assert.match(u.message, re); assert.equal(u.title, "Stop the node without the check?");
   }
   const pools = [{ type: "Pool transaction", ts: now - 60000 }, { type: "Pool transaction", ts: now - 60000, confirmed: true }, { type: "Pool transaction", ts: now - 2 * 3600000 }, { type: "STATUS" }];
@@ -101,23 +101,6 @@ test("a miniMall payment being sent is in flight: the guard asks, and says to wa
   } finally { Module._load = real; fs.rmSync(DIR, { recursive: true, force: true }); }
 });
 
-// ---- 0.18.249: P2P Chance open bets are counted; "could not be checked" only when that read fails ----
-test("P2P Chance: open offers and bets are counted from this wallet's coins at the contract; none open asks nothing; a failed read is not checked", async () => {
-  const now = Date.now();
-  assert.equal(S.inFlight(Object.assign({}, IDLE, { casinoOn: true, casino: { offers: 0, bets: 0 } }), now).any, false, "none open: no question (it asked on every stop)");
-  const w = S.inFlight(Object.assign({}, IDLE, { casinoOn: true, casino: { offers: 1, bets: 2 } }), now);
-  assert.match(w.busy[0], /^P2P Chance: 2 bets and 1 offer still open\./); assert.equal(w.title, "Stop the node with work in flight?");
-  assert.match(S.inFlight(Object.assign({}, IDLE, { casinoOn: true, casino: null }), now).message, /Could not be checked: P2P Chance bets/);
-  assert.equal(S.inFlight(Object.assign({}, IDLE, { casinoOn: false, casino: null }), now).any, false, "the loop off: not asked about");
-  // main's count: every coin of this wallet at the contract is open; an offer is its own, untaken (phase 0)
-  const main = rd("main/main.js"), src = main.slice(main.indexOf("async function casinoOpen() {"), main.indexOf("\n}\n", main.indexOf("async function casinoOpen() {")) + 3);
-  const make = (enabled, bets) => new Function("config", "casino", src + "\nreturn casinoOpen;")({ load: () => ({ casinoEnabled: enabled }) }, { myBets: async () => { if (bets instanceof Error) throw bets; return bets; } });
-  assert.deepEqual(await make(true, [{ amHouse: true, phase: 0 }, { amHouse: true, phase: 1 }, { amPlayer: true, phase: 2 }])(), { offers: 1, bets: 2 });
-  await assert.rejects(make(true, new Error("P2PChance engine not ready yet"))(), /not ready/);
-  assert.equal(await make(false, [])(), null, "not read while the loop is off");
-  assert.ok(/readWithin\(\(\) => casinoOpen\(\)\)/.test(main), "a failed read is null: said as not checked (CHANGED on purpose, 0.18.259: read side by side)");
-});
-
 // ---- 0.18.250: a restart the guard refused from the setup screen keeps the user's edits on screen ----
 test("setup screen: the form stays until the node really stops; a refused restart keeps the edits and says so", () => {
   const app = rd("renderer/app.js"), i = app.indexOf("    if (running) {   // reconfigure = restart to apply"), branch = app.slice(i, app.indexOf("\n      return;\n    }", i));
@@ -181,18 +164,18 @@ test("setup screen: a failure after the restart began re-reads the config and do
   assert.deepEqual(r.toasts, ["node start failed"], "the form is gone: not said to be there"); assert.equal(r.env.CFG.contribute, true, "the config main saved is read again");
 });
 
-// ---- 0.18.259: the in-flight reads run side by side, each with its own limit: a slow casino read loses nothing else ----
-test("inFlightWork: AtomiX, pools and P2P Chance are read side by side; a late or failing one is null, the others are kept; casinoOn from the config", async () => {
+// ---- 0.18.259: the in-flight reads run side by side, each with its own limit: a slow read loses nothing else ----
+test("inFlightWork: AtomiX and pools are read side by side; a late or failing one is null, the other is kept", async () => {
   const main = rd("main/main.js"), a = main.indexOf("const READ_MS = 4000;"), src = main.slice(a, main.indexOf("\n};\n", a) + 3).replace("const READ_MS = 4000;", "const READ_MS = 60;");
-  const make = (o) => new Function("atomix", "pandapools", "casinoOpen", "config", "shop", src + "\nreturn inFlightWork;")(o.atomix, o.pandapools, o.casinoOpen, { load: () => ({ casinoEnabled: true }) }, { sendingCount: () => 0 });
+  const make = (o) => new Function("atomix", "pandapools", "config", "shop", src + "\nreturn inFlightWork;")(o.atomix, o.pandapools, { load: () => ({}) }, { sendingCount: () => 0 });
   const AX = { ready: true, swaps: ["0xAB"] }, never = () => new Promise(() => {});
   const t0 = Date.now();
-  let w = await make({ atomix: { activeWork: async () => AX }, pandapools: { activeWork: () => Promise.resolve([]) }, casinoOpen: never })();
-  assert.deepEqual(w.atomix, AX); assert.deepEqual(w.pools, []); assert.equal(w.casino, null); assert.equal(w.casinoOn, true, "from the config, so P2P Chance is said as not checked");
+  let w = await make({ atomix: { activeWork: async () => AX }, pandapools: { activeWork: never } })();
+  assert.deepEqual(w.atomix, AX); assert.equal(w.pools, null);
   assert.ok(Date.now() - t0 < 1000, "the late read does not hold the others");
-  w = await make({ atomix: { activeWork: never }, pandapools: { activeWork: () => { throw new Error("sync throw"); } }, casinoOpen: async () => ({ offers: 0, bets: 1 }) })();
-  assert.deepEqual([w.atomix, w.pools, w.casino], [null, null, { offers: 0, bets: 1 }]);
-  assert.match(S.inFlight(w, Date.now()).message, /P2P Chance: 1 bet[\s\S]*AtomiX could not be asked/);
+  w = await make({ atomix: { activeWork: never }, pandapools: { activeWork: () => { throw new Error("sync throw"); } } })();
+  assert.deepEqual([w.atomix, w.pools], [null, null]);
+  assert.match(S.inFlight(w, Date.now()).message, /AtomiX could not be asked[\s\S]*PandaPools could not be asked/);
 });
 
 // ---- 0.18.264 (as Pandamonium Desktop 0.19.319's held()): a status:false reply with the node still running ends the hold too ----

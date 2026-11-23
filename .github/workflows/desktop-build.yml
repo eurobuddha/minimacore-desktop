@@ -135,7 +135,7 @@ jobs:
       - name: Verify PandaPools engine parity + recovery
         run: npm run test:pandapools
 
-      # The donor-free halves of the other suites. The parity checks in test:atomix / test:casino diff against
+      # The donor-free halves of the other suites. The parity check in test:atomix diffs against
       # donor repos that CI does not check out, but the units and gates below need nothing external — and they
       # cover fund-safety surfaces (the ETH RPC SSRF allowlist is 136 of these checks). Leaving them out meant
       # a regression that reopened that allowlist could ship three installers with nothing going red.
@@ -149,8 +149,9 @@ jobs:
       - name: Verify AtomiX glue
         run: node scripts/atomix-unit.js
 
-      - name: Verify Casino glue
-        run: node scripts/casino-glue-test.js
+      # P2P Chance was removed in 0.18.318 (pending an audit and a rebuild): no tab, IPC channel or packaged file of it comes back.
+      - name: Verify P2P Chance is removed
+        run: npm run test:casino-removed
 
       - name: Verify terminal autocomplete
         run: npm run test:termcomplete

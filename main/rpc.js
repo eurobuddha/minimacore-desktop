@@ -88,7 +88,7 @@ function rpcCall(port, secret, command) {
  * quotes and JSON, so a ";" carried in by a pasted seed, a peer's media ref, a password or a coin's state on the chain
  * started a second command of the sender's choosing. Every builder outside the Terminal and the vendored engines (Mail,
  * miniMall, Chat, Vestr, Web Wallet) sends through this; it throws, and nothing is sent. The Terminal's own chains go
- * through mcd:cmd; the AtomiX, PandaPools and casino engines chain txnbasics;txnpost of their own making.
+ * through mcd:cmd; the AtomiX and PandaPools engines chain txnbasics;txnpost of their own making.
  */
 function oneCommand(command) {
   if (String(command).includes(";")) throw new Error("This command holds \";\", which would start a second command. Nothing was sent.");
