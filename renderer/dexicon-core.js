@@ -445,8 +445,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   const COUNT_WORDS = [N_("are"), N_("block"), N_("blocks"), N_("coin"), N_("coins"), N_("is"), N_("its"), N_("maker"), N_("makers"), N_("need"), N_("needs"), N_("part"), N_("parts"), N_("swap is"), N_("swaps are"), N_("their"), N_("time."), N_("times."),
     N_("it"), N_("them"), N_("key"), N_("keys"), N_("pool"), N_("saved pool"), N_("visible pool"), N_("owner key"), N_("transaction")];
 
-  // ---- what the screens may ask for: the page's thirteen actions (quote: read only, 0.19.375) (renderer/dexicon/mds.js ACTS) and four bridge ops ----
-  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview", "quote"];
+  // ---- what the screens may ask for: the page's fifteen actions (quote: read only, 0.19.375; the sweep's two parts, 0.19.406) (renderer/dexicon/mds.js ACTS) and four bridge ops ----
+  // 0.19.406: sweepFast / sweepChain, the SWEEP's two take-only parts (DexiconFast.take; a take-only LIMIT)
+  const ACTS = ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview", "quote", "sweepFast", "sweepChain"];
   const OPS = ["cmd", "sql", "comms", "net", "identity"];
   /** A request from the page's frame, or null when it is not one the shell forwards. */
   function bridgeCall(m) {

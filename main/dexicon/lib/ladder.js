@@ -246,7 +246,8 @@
                 byKey[r.key] = r;
                 var o = M.find(list || [], ids[r.key] || ''), price = F.plain(r.price), amount = F.plain(r.amount);
                 if (!o || o.status !== 'live' || o.side !== r.side) {
-                    if (o && o.status === 'live') M.cancel(ctx.mds, ctx.relay, ctx.me, o.orderId, function () { });
+                    // 0.0.153: a cancel that fails (its save refused: the store lock) is said, never swallowed
+                    if (o && o.status === 'live') M.cancel(ctx.mds, ctx.relay, ctx.me, o.orderId, function (err) { if (err) ctx.log('ladder cancel ' + r.key + ' (' + o.orderId + ') failed: ' + err.message + ' — that order stays live until a cancel works (PAUSE ALL cancels every live order)'); });
                     ops.push({ key: r.key, orderId: null, side: r.side, price: price, amount: amount });
                     return;
                 }
@@ -276,7 +277,8 @@
             (function cancelNext() {
                 if (drop.length) {
                     var key = drop.shift(), o = M.find(list, ids[key]); delete ids[key];
-                    if (o && o.status === 'live') return M.cancel(ctx.mds, ctx.relay, ctx.me, o.orderId, function () { cancelNext(); });
+                    // 0.0.153: a rung whose cancel failed stays in mm_ids (cancelled again next pass), and it is said
+                    if (o && o.status === 'live') return M.cancel(ctx.mds, ctx.relay, ctx.me, o.orderId, function (err) { if (err) { ids[key] = o.orderId; errors.push(key + ': cancel failed, retried next pass: ' + err.message); } cancelNext(); });
                     return cancelNext();
                 }
                 M.load(ctx.mds, function (e1, l2) {
@@ -318,14 +320,17 @@
     }
 
     /** ONE self-send: coins of tokenid → `parts` coins of `per` (+ change). Coins backing live orders are never
-     *  touched, except those of the orders in `own` (the ladder's rungs, re-backed next pass); every error path runs
-     *  txndelete. cb(err, txpowid). */
+     *  touched, except those of the orders in `own` (the ladder's rungs, re-backed next pass); never a coin any order is
+     *  relocking or one AX.maker.holds() holds (0.0.105); every error path runs txndelete. cb(err, txpowid). */
     function split(mds, tokenid, parts, per, own, cb) {
         M.load(mds, function (e0, list) {
             M.walletCoins(mds, tokenid, function (e1, coins) {
                 if (e1) return cb(e1);
+                M.holds(mds, function (unheld) {
                 var ex = {}, i, free = [], need = per.times(parts), pick, have = D(0);
-                for (i = 0; i < (list || []).length; i++) if (list[i].status === 'live' && !(own && own[list[i].orderId])) (list[i].coins || []).forEach(function (id) { ex[String(id).toLowerCase()] = true; });
+                // M2: never a coin backing another live order, one any order is relocking, or one held (takes, resting engine)
+                for (i = 0; i < (list || []).length; i++) if (list[i].status === 'live') ((own && own[list[i].orderId]) ? [] : (list[i].coins || [])).concat(list[i].relocking || []).forEach(function (id) { ex[String(id).toLowerCase()] = true; });
+                coins = unheld(coins);
                 for (i = 0; i < coins.length; i++) if (!ex[String(coins[i].coinid).toLowerCase()]) { free.push(coins[i]); have = have.plus(F.coinValue(coins[i])); }
                 pick = F.pick(free, need, 32);
                 if (!pick) return cb(new Error('only ' + F.plain(have) + ' free (not backing an order), the ladder needs ' + F.plain(need)));
@@ -345,6 +350,7 @@
                         mds.cmdR(c, function (e) { if (e) return mds.cmd('txndelete id:' + id, function () { cb(new Error(c.split(' ')[0] + ': ' + e.message)); }); step(); });
                     })();
                 });
+                });
             });
         });
     }
@@ -355,7 +361,8 @@
             (function next() {
                 if (!keys.length) return ctx.mds.kvSet('mm_ids', JSON.stringify(ids), function () { setStatus(ctx, status, cb); });
                 var k = keys.shift(), o = M.find(list || [], ids[k]); delete ids[k];
-                if (o && o.status === 'live') return M.cancel(ctx.mds, ctx.relay, ctx.me, o.orderId, function (err) { if (err) ctx.log('ladder cancel ' + k + ' failed: ' + err.message); next(); });
+                // 0.0.153: a rung whose cancel failed stays in mm_ids, so the next pass cancels it again (it was forgotten)
+                if (o && o.status === 'live') return M.cancel(ctx.mds, ctx.relay, ctx.me, o.orderId, function (err) { if (err) { ids[k] = o.orderId; status += '\n' + k + ': cancel failed, retried next pass: ' + err.message; ctx.log('ladder cancel ' + k + ' failed: ' + err.message); } next(); });
                 next();
             })();
         });

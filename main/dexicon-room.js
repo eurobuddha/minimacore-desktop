@@ -5,7 +5,8 @@
  *
  * Served: renderer/dexicon/ (the page: verbatim from mds/dexicon, pinned by scripts/dexicon-page.manifest.json, plus
  * this app's mds.js) and the engine files the page loads from main/dexicon/{lib,resting,crypto,vendor}/ (verbatim,
- * pinned by scripts/dexicon-parity.manifest.json). Nothing else. doors/ and lib/door.js are in neither place, so the
+ * pinned by scripts/dexicon-parity.manifest.json). Nothing else. Of doors/ only doors/sha3.js is there (0.19.406: the
+ * hash lib/takeable.js needs, pinned by the page manifest); the other doors and lib/door.js are in neither place, so the
  * page's AtomiX doors cannot load. The frame has NO network of its own (connect-src 'none'): relay traffic goes
  * through the bridge, where main/dexicon.js allows the engine's current relays only.
  */

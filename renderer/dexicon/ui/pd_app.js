@@ -165,6 +165,7 @@ function renderBookOnly() {
     bid && bid.price, bid && bid.size, ask && ask.price, ask && ask.size);
   el("spread").textContent = weighted === null ? "—" : fmtPrice(weighted);
   el("spread").setAttribute("aria-label", "Size-weighted price of the best displayed bid and offer, including pool and limit liquidity");
+  if(window.DexiconFast&&DexiconFast.paintHidden) DexiconFast.paintHidden();
 }
 function levelPrice(row) { var price=num(row&&row.price), tick=GROUPS[groupIdx], d, q; if(!price) return null; if(!tick) return price; d=dec(tick); q=sellSideFor(row)?price.div(d).ceil():price.div(d).floor(); return q.mul(d); }
 function sellSideFor(row) { return !!row.sell; }
@@ -292,6 +293,6 @@ window.PD = {
   balances: balances,
   servicePacket: function(packet) { if(!packet||packet.origin!=="service") return false; if(packet.type==="STATE") { state=packet.data||{}; render(); } else if(packet.type==="ERROR" || packet.type==="POSTED") { var text=packet.data&&packet.data.message?packet.data.message:(packet.type==="ERROR"?"Service error":"Posted"); appendActivity(text,Date.now()); if(packet.type==="ERROR"&&window.DexiconWallet&&DexiconWallet.failed(text)) return true; notice(text,packet.type==="ERROR"?"error":"posted"); } return true; },
   state: function() { return state; }, send: send, renderAssets: function() { renderAssetsPage(); }, bal: function(w) { var m=balancesState[w]; return m&&m.at>0?m:null; }, fmtBal: fmtBal, render: render, renderBookOnly: renderBookOnly, renderAllPages: renderAllPages, renderOrdersPage: renderOrdersPage,
-  isBuy: function() { return isBuy; }, el: el, fmt: fmt, fmtPrice: fmtPrice, num: num, dec: dec, esc: esc, jsArg: jsArg, notice: notice, appendActivity: appendActivity,
+  isBuy: function() { return isBuy; }, group: function() { return GROUPS[groupIdx] || ""; }, el: el, fmt: fmt, fmtPrice: fmtPrice, num: num, dec: dec, esc: esc, jsArg: jsArg, notice: notice, appendActivity: appendActivity,
   setStage: setStageText, paintNotice: paintNotice, switchView: switchView, bookMid: bookMid, tradeTime: tradeTime, preview: preview, chooseSide: chooseSide
 };

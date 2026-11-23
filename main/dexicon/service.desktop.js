@@ -2,8 +2,13 @@
  * service.desktop.js — the Dexicon background engine as this desktop runs it (DESKTOP-OWNED; the lib/ crypto/ vendor/
  * resting/ files beside it are BYTE-IDENTICAL copies of mds/dexicon, enforced by scripts/dexicon-parity-manifest.cjs).
  *
- * A hand mirror of mds/dexicon/service.js at 9a95eb114ad35d3e18692a60c248529762fd72d5 (0.0.91; its sha256 is in the
- * parity manifest, so a donor change is noticed). Everything not listed here is the donor's text:
+ * A hand mirror of mds/dexicon/service.js at cefb6caf9fc6ac15e87ef39bb8597096d39d556f (0.0.153; was 0.0.91 at
+ * 9a95eb114ad35d3e18692a60c248529762fd72d5; its sha256 is in the parity manifest, so a donor change is noticed). Ported from
+ * 0.0.92-0.0.153 (0.19.406): lib/proofs.js and the coin proof requests answered after the takes (answerProofs), ONE maker
+ * refresh at a time (runRefresh, its relock errors logged and said), the NEWBLOCK re-back of an order waiting coinless
+ * for its relock (rebackOnBlock), the resting engine's coin reservations mirrored to kv (mirrorCoinLock), afterFill with
+ * the fill's txpowid and the remaining the take was checked against, and that remaining kept on the fill_ record
+ * (`verified`). Everything not listed here is the donor's text:
  *
  *   NOT LOADED  doors/ and lib/door.js (the AtomiX taker engine) and no axEvent: room 1 of this app is the real AtomiX
  *               engine on the same ETH key, and a second settlement engine on that key would collide.
@@ -45,9 +50,25 @@
  *               (handleTake unanswered, settleFills settleUnknown): the outcome is recorded at once as a fill with
  *               status 'unknown' (written to disk before anything else), the order is reduced as if it was posted, and
  *               the taker is told nothing (a taker voids an unanswered take by itself, and "taken" needs a txpowid
- *               this node never got). The chain decides later: one of the take's output coins exists = done; this
+ *               this node never got). (0.19.406) afterFill counts a fill once by its txpowid (0.0.146 refuses one without),
+ *               and this one has none: it is applied under its own id (unansweredId: 0x + 48 zeros + 16 hex of the record's
+ *               time and sequence, never a real txpowid), kept on the record as `applied`; the record's txpowid stays '' so
+ *               reconcileFills never deducts it a second time. The chain decides later: one of the take's output coins exists = done; this
  *               node's own input coin is unspent and out of the mempool ten minutes on, or nothing after two hours =
  *               lost, and the amount is put back on the order.
+ *   ATTEST      (0.19.406) the coin-key attestation the donor signs while answering proof requests (0.0.128/0.0.152) is
+ *   OFF         OFF here: answerProofs passes no signing key and kv attest_sign is '0' at every boot (this wallet signs
+ *               no statement for a stranger yet; the owner's call). Coin proofs are answered as in the donor.
+ *   NEWBLOCK    (0.19.406) the donor's NEWBLOCK re-back runs under the tick's guard: while a tick runs it is only marked
+ *   RE-BACK     due (rebackDue) and the next tick's refresh does it, so it never overlaps a co-sign or a ladder pass.
+ *   FILL        (0.19.406, from DexiconPro 0.2.150/0.2.158/0.2.159) a co-signed fill whose afterFill did not save keeps
+ *   PENDING     its order's coins locked and every further take of that order refused (FILL_PENDING) until a retry (every
+ *               tick, before the takes) or the refresh's reconcileFills has applied it; and every take is checked against
+ *               the TRUE remaining (the stored one less every maker fill_ record not applied yet): a take of an order with
+ *               an unapplied record is refused as busy until the refresh applies it. The records unreadable: refused.
+ *   SAID        (0.19.406) a save that did not land (the engine's store lock, a fill not applied, a relock that failed), a
+ *               take refused for one of the reasons above: a packet to the screens ({type: save_failed | take_refused |
+ *               relock_failed, message}), never only a log line (renderer/dexicon-ui.js shows it).
  *   OWN ORDERS  as the donor since 0.0.91: lib/ownskip.js wraps the two planners so an order routes PAST this node's own
  *               on-chain orders, and a LIMIT with nothing but own orders inside its limit is answered with the engine's
  *               sentence and sends nothing (onlyOwnOrders). The desktop's own refusal rule (selfTrade, 0.18.99) is gone.
@@ -68,6 +89,7 @@ MDS.load('lib/envelope.js');
 MDS.load('lib/relay.js');
 MDS.load('lib/fill.js');
 MDS.load('lib/maker.js');
+MDS.load('lib/proofs.js');   // the coin proof hand-over: a taker whose node cannot see one of my backing coins asks for its proof
 MDS.load('lib/ladder.js');   // the FAST market maker (ORDERS › MARKET MAKER), reconciled every tick below
 // RESTING layer: the PandaDEX engine, service.js's own load order. decimal.js is already loaded above.
 MDS.load('resting/safety.js'); MDS.load('resting/covenant.js'); MDS.load('resting/input-claims.js'); MDS.load('resting/funding.js'); MDS.load('resting/signlock.js');
@@ -75,6 +97,7 @@ MDS.load('resting/book.js'); MDS.load('resting/pool.js'); MDS.load('resting/comp
 MDS.load('resting/tape.js'); MDS.load('resting/maker.js'); MDS.load('resting/price.js'); MDS.load('resting/verifier.js');
 MDS.load('resting/pending.js'); MDS.load('resting/stats.js'); MDS.load('resting/split.js'); MDS.load('resting/chain.js');
 MDS.load('resting/history.js'); MDS.load('resting/pd_service.js');
+mirrorCoinLock(PandaCoinLock);   // the page's coin choosers see the resting engine's reservations (lib/maker.js holds)
 MDS.load('lib/autocross.js');   // trades PandaPools back to the ladder's rungs (needs the resting/ engine above)
 MDS.load('lib/ownskip.js');     // an order never fills against my own on-chain order: the planners route past them
 AX.ownskip.install(PandaComposite, PandaBook, PDService.isMine, PDService.keysUsable);
@@ -88,11 +111,33 @@ var LOCK_MS = 180000;
 var TICKING = false, tickStartedMs = 0, TICK_WATCHDOG_MS = 120000, tickSeq = 0;
 var lastPdBootMs = 0;
 var STORE_MINE = false;   // FOREIGN STORE (header): true once the store is known to be this wallet's
+var ATTEST_OFF = '0';     // ATTEST OFF (header): kv attest_sign at every boot
+var rebackDue = false;    // NEWBLOCK RE-BACK (header): a re-back asked for while a tick ran
 
 function log(s) { MDS.log('[dexicon] ' + s); }
 function logOnce(s) { if (s !== lastBootLog) { lastBootLog = s; log(s); } }
 function nowS() { return Math.floor(Date.now() / 1000); }
 function notify(obj) { try { MDS.comms.solo(JSON.stringify(obj)); } catch (e) { } }
+/** service.js, verbatim (review 23 Nov, MINOR): PandaCoinLock (resting/funding.js, vendored: never edited) lives in this service's memory; the
+ *  page's create/edit (lib/maker.js holds) cannot see it. Every reserve / claim / finish / release is mirrored to kv
+ *  'coinlock_held' = {lc coin id: until ms} (a reservation lasts 3 min; a claimed input until it is finished, 10 min). */
+function mirrorCoinLock(L) {
+    var held = {}, TTL = 180000;
+    function lk(x) { return String(x && x.coinid ? x.coinid : x).toLowerCase(); }
+    function save() { var now = Date.now(), k; for (k in held) if (held[k] <= now) delete held[k]; AX.mds.kvSet('coinlock_held', JSON.stringify(held), function () { }); }
+    function wrap(name, f) { var orig = L[name]; if (typeof orig !== 'function') return; L[name] = function (x) { var r = orig.apply(L, arguments); if (r !== false) { try { (x || []).forEach(f); save(); } catch (e) { } } return r; }; }
+    wrap('reserve', function (c) { held[lk(c)] = Date.now() + TTL; });
+    wrap('claimInputs', function (id) { held[lk(id)] = Date.now() + 10 * 60000; });
+    wrap('finishInputs', function (id) { held[lk(id)] = Date.now() + TTL; });
+    wrap('release', function (c) { delete held[lk(c)]; });
+}
+/** SAID (header): the engine's words for a save of my orders that did not land (lib/maker.js withLock / fencedWrite /
+ *  afterFill), said to the screens as well as logged. Nothing was placed, cancelled or published by such a save. */
+var SAVE_FAILED = /store is held by another writer|store lock could not be used|stored orders could not be read|stored orders are unreadable|the save of your orders|not saved, nothing published|cancel failed, retried next pass|ladder cancel \S+ (\(\S+\) )?failed|was NOT applied/;
+function saveFailed(where, e) {
+    var m = String((e && e.message) || e || '');
+    if (SAVE_FAILED.test(m)) notify({ type: 'save_failed', where: where, message: m });
+}
 
 function tryBoot() {
     if (READY || BOOTING) return;
@@ -114,6 +159,7 @@ function tryBoot() {
                 AX.prng.init(function (pe) { if (pe) log('PRNG init failed: ' + pe.message + ' — sealed replies will fail until it succeeds'); });
                 loadRelays(function () {
                     AX.mds.kvSet('publicId', ME.publicId(), function () {});
+                    AX.mds.kvSet('attest_sign', ATTEST_OFF, function () {});   // ATTEST OFF (header)
                     READY = true;
                     log('booted — publicId ' + ME.publicId() + '; relays: ' + RELAY.relays.length);
                     pdBoot();
@@ -213,7 +259,7 @@ function tick(done) {
         if (!RELAY.relays.length) { logOnce('no relays configured'); return end(); }
         RELAY.pollInbox(ME.publicId(), HOLD_SECONDS, function (err, msgs, url) {
             if (err) logOnce('inbox poll ' + url + ' failed: ' + err.message);
-            var takes = [], perSender = {};   // flood limits (review 30 Oct): 2 takes per sender, 16 per cycle
+            var takes = [], perSender = {}, asks = [], askers = {};   // flood limits (review 30 Oct): 2 takes per sender, 16 per cycle; proof requests: 64 senders per cycle (0.0.138; AX.proofs.answer queues them, round robin), one sender's requests merged up to 32 coins
             for (var i = 0; i < (msgs || []).length; i++) {
                 var opened = AX.identity.open(ME, msgs[i].env.blob);
                 if (!opened || !opened.valid) continue;
@@ -221,9 +267,17 @@ function tick(done) {
                 if (inner && inner.k === 'take' && opened.fromPublicId && takes.length < 16 && (perSender[opened.fromPublicId] || 0) < 2) {
                     perSender[opened.fromPublicId] = (perSender[opened.fromPublicId] || 0) + 1;
                     inner._from = opened.fromPublicId; takes.push(inner);
+                } else if (inner && inner.k === 'proofs?' && opened.fromPublicId && Object.prototype.toString.call(inner.coins) === '[object Array]' && (askers[opened.fromPublicId] || asks.length < 64)) {   // 0.0.128: coins may be [] when only attestations are asked
+                    // 0.0.116: a taker asks once per ORDER, so several requests of one sender in one poll are merged (up to 32
+                    // coins), never dropped: the 0.0.111 "one per sender" left every order but the first unanswered for 10 blocks
+                    var aq = askers[opened.fromPublicId] || (askers[opened.fromPublicId] = asks[asks.push({ from: opened.fromPublicId, coins: [], attest: [], seen: {} }) - 1]);
+                    for (var ci = 0; ci < inner.coins.length && aq.coins.length < 32; ci++) { var ck = String(inner.coins[ci]).toLowerCase(); if (!aq.seen[ck]) { aq.seen[ck] = true; aq.coins.push(inner.coins[ci]); } }   // NIT: de-duplicated before the cap
+                    // 0.0.128: the addresses whose coin-key attestation the taker wants (up to 32); ATTEST OFF (header): none is signed here
+                    var at = Object.prototype.toString.call(inner.attest) === '[object Array]' ? inner.attest : [];
+                    for (ci = 0; ci < at.length && aq.attest.length < 32; ci++) { var ak = 'a:' + String(at[ci]).toLowerCase(); if (!aq.seen[ak]) { aq.seen[ak] = true; aq.attest.push(at[ci]); } }
                 }
             }
-            processTakes(takes, function () {
+            processTakes(takes, function () { answerProofs(asks, function () {
                 if (ticks % 3 === 0) settleFills();
                 // owner 7 Nov (mirror of APK 0.2.81): the relay check reads every relay's whole book in turn — a repair sweep,
                 // so once a minute or straight after a take, not every 10 s tick in front of the next inbox poll
@@ -231,18 +285,60 @@ function tick(done) {
                 ladderPass(function () { crossPass(function () { afterCross(function () {
                     (sync ? AX.maker.syncRelays : function (a, b, c, cb) { cb({ lines: [] }); })(AX.mds, RELAY, ME, function (rep) {   // then every relay must match this node
                         (rep && rep.lines || []).forEach(function (l) { log(l); });
-                        if (ticks % REFRESH_EVERY_TICKS !== 0) return end();
-                        refreshAddresses(function () {
-                            AX.maker.refresh(AX.mds, RELAY, ME, function (e, n, relocked) {
-                                if (e) log('refresh failed: ' + e.message);
-                                else if (n || relocked) log('refresh republished ' + n + ' order(s)' + (relocked ? '; relocked stale backing coins in txpow ' + relocked : ''));
-                                end();
-                            });
-                        });
+                        // NEWBLOCK RE-BACK (header): a re-back asked for during this tick is done by its refresh
+                        if (ticks % REFRESH_EVERY_TICKS !== 0 && !rebackDue) return end();
+                        rebackDue = false;
+                        refreshAddresses(function () { runRefresh(end); });
                     });
                 }); }); });
-            });
+            }); });
         });
+    });
+}
+
+function refreshed(e, n, relocked, relockErrs) {
+    if (e) { log('refresh failed: ' + e.message); saveFailed('refresh', e); }
+    else if (n || relocked) log('refresh republished ' + n + ' order(s)' + (relocked ? '; relocked stale backing coins in txpow ' + relocked : ''));
+    (relockErrs || []).forEach(function (r) {   // 0.0.102: never swallowed (SAID, header)
+        log('refresh: ' + r + ' — the order stays coinless; the relock is retried after a backoff (2 blocks, doubling to 64)');
+        notify({ type: 'relock_failed', message: String(r) });
+    });
+}
+/** 0.0.109 (review 22 Nov, MINOR 5): one maker refresh at a time — the minute's tick and NEWBLOCK never overlap. A
+ *  refresh that never called back frees the slot after 5 minutes (orders must keep their 60-minute heartbeat). done():
+ *  at once when the slot is taken, else when the refresh has called back. */
+var refreshingSince = 0, REFRESH_STUCK_MS = 5 * 60000;
+function runRefresh(done) {
+    done = done || function () { };
+    if (refreshingSince && Date.now() - refreshingSince < REFRESH_STUCK_MS) return done();
+    var mine = refreshingSince = Date.now();
+    AX.maker.refresh(AX.mds, RELAY, ME, function (e, n, relocked, relockErrs) { if (refreshingSince === mine) refreshingSince = 0; refreshed(e, n, relocked, relockErrs); done(); });
+}
+/** 0.0.102: an order placed or edited on coins that had to be refreshed is published coinless; it is re-backed on the
+ *  block that confirms the relock, not up to a minute later at the tick's refresh. Only an order coinless because a
+ *  relock of its coins is pending counts (AX.maker.awaitingBacking); nothing to do → nothing runs. NEWBLOCK RE-BACK
+ *  (header): while a tick runs it is only marked due, and that tick's end does it. */
+function rebackOnBlock() {
+    if (TICKING && Date.now() - tickStartedMs < TICK_WATCHDOG_MS) { rebackDue = true; return; }
+    AX.maker.load(AX.mds, function (e, list) { if (AX.maker.awaitingBacking(list)) runRefresh(); });
+}
+
+/** 0.0.111, the coin proof hand-over (lib/proofs.js): a taker whose node cannot see a coin backing one of my live orders
+ *  (older than its window) asks for the coin's proof; it gets `coinexport` of each such coin, sealed to it. Takes are
+ *  answered first; a request never makes this node export a coin that backs no live order of mine. Review 23 Nov (M1):
+ *  one poll seals at most 2 messages / 120K chars in at most 3 s (AX.proofs.answer); the rest waits for the next poll,
+ *  after its takes. ATTEST OFF (header): no signing key is passed, so no attestation is signed. */
+function answerProofs(asks, done) {
+    if (!asks.length && !AX.proofs.pending()) return done();
+    AX.maker.load(AX.mds, function (e, list) {
+        AX.proofs.answer(AX.mds, list || [], asks, function (replies) {
+            replies.forEach(function (r) {
+                RELAY.publish(r.raw, function () {});
+                var na = r.coins.filter(function (c) { return c.indexOf('a:') === 0; }).length;
+                log('coin proofs sent to ' + r.to + ': ' + (r.again ? 'the reply already sealed at this height, again' : (r.coins.length - na) + ' coin(s), ' + na + ' attestation(s), ' + r.raw.length + ' chars'));   // NIT: no coin list (up to 32 ids a line)
+            });
+            done();
+        }, sealed);
     });
 }
 
@@ -353,7 +449,7 @@ function settleUnknown(key, f, next) {
                 var o = e ? null : AX.maker.find(list, f.orderId);
                 if (!o || o.status !== 'live') return next();   // filled, cancelled or gone meanwhile: left as it is
                 o.remaining = AX.fill.plain(AX.fill.d(o.remaining).plus(AX.fill.d(f.filled))); o.seq = Math.max(nowS(), Number(o.seq || 0) + 1);   // lib/maker.js nextSeq
-                AX.maker.save(AX.mds, list, function () { log('unanswered fill of ' + f.orderId + ' was never posted (' + why + '): ' + f.filled + ' MINIMA is back on the order'); notify({ type: 'fill', status: 'lost' }); next(); });
+                AX.maker.save(AX.mds, list, function (e3) { if (e3) { log('unanswered fill of ' + f.orderId + ' was never posted (' + why + '), but putting ' + f.filled + ' MINIMA back on the order failed: ' + e3.message); saveFailed('fill', e3); return next(); } log('unanswered fill of ' + f.orderId + ' was never posted (' + why + '): ' + f.filled + ' MINIMA is back on the order'); notify({ type: 'fill', status: 'lost' }); next(); });
             });
         });
     }
@@ -380,8 +476,41 @@ function processTakes(takes, done) {
         if (i >= takes.length) return done();
         handleTake(takes[i++], step);
     }
-    step();
+    retryFills(step);   // FILL PENDING (header): a fill not saved yet is applied first (one at a time with the takes: the tick's guard)
 }
+
+/* ---- FILL PENDING (header; DexiconPro 0.2.150 / 0.2.158 / 0.2.159) ---- */
+var FILL_PENDING = {};   // orderId -> { orderId, txpowid, filled, spent, verified, coins, ts }
+/** Applied already: the order lists its id, is no longer live, or the fill is older than what the order's fillsFrom counts. */
+function fillApplied(list, p) { var o = AX.maker.find(list, p.orderId); return !o || o.status !== 'live' || (o.fills || []).indexOf(p.txpowid) >= 0 || (p.ts > 0 && o.fillsFrom > 0 && p.ts < o.fillsFrom); }
+function fillDone(p) { if (FILL_PENDING[p.orderId] === p) { delete FILL_PENDING[p.orderId]; unlockCoins(p.coins); log('fill ' + p.txpowid + ' on ' + p.orderId + ' is applied: its order takes takes again'); } }
+function retryFills(done) {
+    var ids = Object.keys(FILL_PENDING); if (!ids.length) return done();
+    AX.maker.load(AX.mds, function (e, list) {
+        var i = 0;
+        (function next() {
+            if (i >= ids.length) return done();
+            var p = FILL_PENDING[ids[i++]]; if (!p) return next();
+            if (!e && fillApplied(list, p)) { fillDone(p); return next(); }
+            AX.maker.afterFill(AX.mds, RELAY, ME, p.orderId, p.filled, p.spent, function (e2) { if (!e2) fillDone(p); else log('afterFill retry: ' + e2.message); next(); }, p.txpowid, p.verified);
+        })();
+    });
+}
+/** cb(remaining | null): o's stored remaining less every maker fill_ record of it not yet applied (the vendored
+ *  reconcileFills on a copy), never above the stored one; null (refuse) when the records cannot be read. */
+function trueRemaining(list, o, cb) {
+    var copy = JSON.parse(JSON.stringify(list)), ok = true, m = Object.create(AX.mds);
+    m.sql = function (q, k) { AX.mds.sql(q, function (r) { if (!r || !r.status) ok = false; k(r); }); };
+    AX.maker.reconcileFills(m, copy, function () {
+        var c = AX.maker.find(copy, o.orderId), F = AX.fill;
+        if (!ok || !c) return cb(null);
+        if (c.status !== 'live') return cb('0');
+        try { cb(F.d(c.remaining).lt(F.d(o.remaining)) ? F.plain(F.d(c.remaining)) : String(o.remaining)); } catch (e) { cb(null); }
+    });
+}
+/** POST UNANSWERED (header): the id an unanswered fill is applied under. Never a real txpowid (48 leading zeros). */
+var unansweredSeq = 0;
+function unansweredId() { return '0x' + ('000000000000000000000000000000000000000000000000' + ('000000000000' + Date.now().toString(16)).slice(-12) + ('0000' + ((++unansweredSeq) & 0xffff).toString(16)).slice(-4)); }
 
 /** The market maker: one reconcile pass (15 s pacing inside), then the feed line for the page's editor. */
 function ladderPass(then) {
@@ -390,9 +519,9 @@ function ladderPass(then) {
     });
 }
 
+function sealed(toPublicId, obj) { return AX.envelope.msg(ME, toPublicId, AX.identity.seal(ME, toPublicId, AX.hex.utf8(JSON.stringify(obj))), nowS() + 300); }
 function reply(toPublicId, obj) {
-    var blob = AX.identity.seal(ME, toPublicId, AX.hex.utf8(JSON.stringify(obj)));
-    var raw = AX.envelope.msg(ME, toPublicId, blob, nowS() + 300), urls, i = 0;
+    var raw = sealed(toPublicId, obj), urls, i = 0;
     if (!obj || obj.k !== 'refused') return RELAY.publish(raw, function () {});   // carries a result ("taken"): never low, never dropped
     // REFUSALS (header): relay after relay like RELAY.publish (lib/relay.js: a msg goes to /dex/msg), at low priority
     urls = RELAY.relays.slice();
@@ -406,27 +535,63 @@ function handleTake(take, next) {
     AX.maker.load(AX.mds, function (err, list) {
         var o = AX.maker.find(list, take.orderId);
         if (!o || o.status !== 'live') { reply(taker, { k: 'refused', orderId: take.orderId, reason: 'order not live' }); return next(); }
+        var pend = FILL_PENDING[o.orderId];
+        if (pend && fillApplied(list, pend)) { fillDone(pend); pend = null; }
+        if (pend) {   // FILL PENDING (header): never a take checked against a size a fill not saved yet has already sold
+            log('take for ' + o.orderId + ' from ' + taker + ' refused: its fill ' + pend.txpowid + ' is not saved yet');
+            notify({ type: 'take_refused', orderId: o.orderId, taker: taker, reason: 'a fill of this order is still being saved' });
+            reply(taker, { k: 'refused', orderId: o.orderId, reason: 'busy: a fill of this order is still being saved; try again shortly' });
+            return next();
+        }
         if (!lockCoins(o.coins)) { reply(taker, { k: 'refused', orderId: take.orderId, reason: 'taken' }); return next(); }
+        trueRemaining(list, o, function (rem) {
+        if (rem === null || !AX.fill.d(rem).gt(0)) {
+            unlockCoins(o.coins);
+            log('take for ' + o.orderId + ' from ' + taker + ' refused: ' + (rem === null ? 'its fill records could not be read' : 'its unapplied fills sold all of it'));
+            if (rem === null) notify({ type: 'take_refused', orderId: o.orderId, taker: taker, reason: 'its fill records could not be read (the node database did not answer): nothing was co-signed; it is tried again with the next take' });
+            reply(taker, { k: 'refused', orderId: o.orderId, reason: rem === null ? 'busy: try again shortly' : 'order not live' });
+            return next();
+        }
+        // a fill record not applied yet makes the true remaining lower than the stored one: no take is checked while that
+        // is so (it would be deducted twice: by afterFill from min(stored, checked), then by the refresh), busy, and the
+        // refresh at the end of this tick applies the records (FILL PENDING, header)
+        if (AX.fill.d(rem).lt(AX.fill.d(o.remaining))) {
+            unlockCoins(o.coins); rebackDue = true;
+            log('take for ' + o.orderId + ' from ' + taker + ' refused: a fill of it is recorded but not applied yet (' + rem + ' of the stored ' + o.remaining + ' is left); the refresh applies it');
+            notify({ type: 'take_refused', orderId: o.orderId, taker: taker, reason: 'busy: an earlier fill of this order is still being applied' });
+            reply(taker, { k: 'refused', orderId: o.orderId, reason: 'busy: an earlier fill of this order is still being applied; try again shortly' });
+            return next();
+        }
         log('take received for ' + o.orderId + ' from ' + taker + ' (' + take.txn.length / 2 + ' bytes)');
         var recvMs = Date.now();   // ACTIVITY: "Co-signed for <taker> in X.Xs" (take received → posted)
         var spentByMe = [], outs = [];
+        /** afterFill's end, either way: applied → the coins are free; not saved → FILL PENDING (header), said */
+        function applied(txid, filled, ts) {
+            return function (e2) {
+                if (!e2) unlockCoins(o.coins);
+                else {
+                    log('afterFill: ' + e2.message); saveFailed('fill', e2);
+                    FILL_PENDING[o.orderId] = { orderId: o.orderId, txpowid: txid, filled: filled, spent: spentByMe, verified: rem, coins: o.coins.slice(), ts: ts };
+                    for (var i = 0; i < o.coins.length; i++) coinLocks[o.coins[i]] = Infinity;
+                }
+            };
+        }
         AX.fill.cosign(AX.mds, take.txn, AX.fill.signKeys(o.scripts), function (txn, wallet) {
-            var v = AX.fill.verifyAsMaker(txn, { side: o.side, price: o.price, address: o.address }, o.coins, o.remaining, addressList().concat(wallet));
+            var v = AX.fill.verifyAsMaker(txn, { side: o.side, price: o.price, address: o.address }, o.coins, rem, addressList().concat(wallet));
             if (v.ok) for (var i = 0; i < txn.inputs.length; i++) if (o.coins.indexOf(txn.inputs[i].coinid) >= 0) spentByMe.push(txn.inputs[i].coinid);
             if (v.ok) for (var j = 0; j < txn.outputs.length; j++) if (txn.outputs[j] && txn.outputs[j].coinid) outs.push(txn.outputs[j].coinid);
             return v;
         }, function (e, txpowid, verdict, outCoins) {
             // POST UNANSWERED (header): signed, and the node never answered txnpost (main/dexicon.js UNANSWERED)
             if (e && verdict && verdict.ok && /the node did not answer txnpost/.test(String(e.message))) {
-                var key = 'fill_unanswered_' + Date.now() + '_' + o.orderId;
+                var key = 'fill_unanswered_' + Date.now() + '_' + o.orderId, ux = unansweredId(), ts = nowS();
                 log('take for ' + o.orderId + ': the node did not answer txnpost, so it is NOT KNOWN whether the fill was posted. Recorded as ' + key + '; the order is reduced by ' + verdict.filled + ' MINIMA until the chain says which');
-                return AX.mds.kvSet(key, JSON.stringify({ role: 'maker', orderId: o.orderId, side: o.side, price: o.price, filled: verdict.filled, received: verdict.received, paid: verdict.paid, txpowid: '', coins: outs, spent: spentByMe, taker: taker, ts: nowS(), recvMs: recvMs, status: 'unknown' }), function () {
+                return AX.mds.kvSet(key, JSON.stringify({ role: 'maker', orderId: o.orderId, side: o.side, price: o.price, filled: verdict.filled, received: verdict.received, paid: verdict.paid, txpowid: '', applied: ux, coins: outs, spent: spentByMe, taker: taker, ts: ts, recvMs: recvMs, status: 'unknown', verified: rem }), function () {
                     AX.maker.afterFill(AX.mds, RELAY, ME, o.orderId, verdict.filled, spentByMe, function (e2) {
-                        unlockCoins(o.coins);
-                        if (e2) log('afterFill: ' + e2.message);
+                        applied(ux, verdict.filled, ts)(e2);
                         notify({ type: 'fill', status: 'unknown' });
                         next();
-                    });
+                    }, ux, rem);
                 });
             }
             if (e) {
@@ -436,14 +601,15 @@ function handleTake(take, next) {
                 return next();
             }
             log('FILLED ' + o.orderId + ' ' + verdict.filled + ' MINIMA → txpow ' + txpowid);
-            AX.mds.kvSet('fill_' + txpowid, JSON.stringify({ role: 'maker', orderId: o.orderId, side: o.side, price: o.price, filled: verdict.filled, received: verdict.received, paid: verdict.paid, txpowid: txpowid, coins: outCoins, taker: taker, ts: nowS(), recvMs: recvMs, cosignMs: Date.now() - recvMs, status: 'settling' }), function () {});
+            var fts = nowS();
+            AX.mds.kvSet('fill_' + txpowid, JSON.stringify({ role: 'maker', orderId: o.orderId, side: o.side, price: o.price, filled: verdict.filled, received: verdict.received, paid: verdict.paid, txpowid: txpowid, coins: outCoins, spent: spentByMe, taker: taker, ts: fts, recvMs: recvMs, cosignMs: Date.now() - recvMs, status: 'settling', verified: rem }), function () {});   // 0.0.145: verified = the remaining the take was checked against (reconcileFills)
             reply(taker, { k: 'taken', orderId: o.orderId, txpowid: txpowid, filled: verdict.filled, coins: outCoins });
             AX.maker.afterFill(AX.mds, RELAY, ME, o.orderId, verdict.filled, spentByMe, function (e2) {
-                unlockCoins(o.coins);
-                if (e2) log('afterFill: ' + e2.message);
+                applied(txpowid, verdict.filled, fts)(e2);   // 0.0.133: never a silent success; refresh deducts it from fill_ (reconcileFills)
                 notify({ type: 'fill', txpowid: txpowid });
                 next();
-            });
+            }, txpowid, rem);   // 0.0.139: the remaining the take was verified against
+        });
         });
     });
 }
@@ -619,4 +785,5 @@ MDS.init(function (msg) {
     pdEvent(msg);
     if (msg.event === 'inited') { tryBoot(); }
     else if (msg.event === 'MDS_TIMER_10SECONDS') { if (!READY) tryBoot(); else { pollBook(); tick(function () {}); } }
+    else if (msg.event === 'NEWBLOCK' && READY) rebackOnBlock();   // 0.0.102 (NEWBLOCK RE-BACK, header)
 });

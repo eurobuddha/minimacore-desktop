@@ -285,6 +285,7 @@ contextBridge.exposeInMainWorld("mcd", {
   dxStatus: () => ipcRenderer.invoke("mcd:dxStatus"),
   dxBook: () => ipcRenderer.invoke("mcd:dxBook"),
   dxMine: () => ipcRenderer.invoke("mcd:dxMine"),
+  dxFastCoins: (patch) => ipcRenderer.invoke("mcd:dxFastCoins", patch),
   dxCommand: (a) => ipcRenderer.invoke("mcd:dxCommand", a),
   dxSkipWarning: () => ipcRenderer.invoke("mcd:dxSkipWarning"),
   dxSkipCheck: () => ipcRenderer.invoke("mcd:dxSkipCheck"),

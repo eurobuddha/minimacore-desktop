@@ -42,12 +42,15 @@ var PandaBook = PandaBook || {};
       B.slice(cmd, cb, found, seen, depth, width, true, false, full, addr);
     });
   };
+  /** The most grains a partial take shrinks to stay inside the taker's amount and limit (see plan). */
+  B.SAFE_STEPS = 1000;
   B.plan = function (book, buy, amount, limit, block) {
     var side=[],i,o,remaining=P.d(amount), takes=[], totalMin=P.d(0), totalUsdt=P.d(0), expiryMargin=30;
     for(i=0;i<book.length;i++){o=book[i]; if(o.fillable===false || o.sell!==buy || (block-o.created)>P.EXPIRY-expiryMargin)continue; if(limit && (buy?o.price.gt(limit):o.price.lt(limit)))continue; side.push(o);}
     side.sort(function(a,b){return buy?a.price.cmp(b.price):b.price.cmp(a.price);});
     for(i=0;i<side.length && takes.length<P.MAX_ORDERS && remaining.gt(0);i++){
-      o=side[i]; var avail=o.minima, take=remaining.gte(avail)?avail:remaining, partial=take.lt(avail), lockedTake=o.sell?take:P.up(take.mul(o.price),P.DP), rem=o.locked.sub(lockedTake);
+      /* 0.4.34: a partial sale to a bid starts from the FLOORED release (see the taker-safety loop below). */
+      o=side[i]; var avail=o.minima, take=remaining.gte(avail)?avail:remaining, partial=take.lt(avail), lockedTake=o.sell?take:(partial?P.down(take.mul(o.price),P.DP):P.up(take.mul(o.price),P.DP)), rem=o.locked.sub(lockedTake);
       /* Shrink the take so the order keeps at least its minimum remainder. `rem` MUST be
          recomputed here: it is what txn.js writes as the covenant's remainder output and what the
          new want is derived from, so leaving the pre-clamp value builds a transaction whose
@@ -55,6 +58,20 @@ var PandaBook = PandaBook || {};
          rejected on-chain, every time, after paying for the proof-of-work. */
       if(partial && rem.lt(o.minRem)){ lockedTake=o.locked.sub(o.minRem); take=o.sell?lockedTake:P.down(lockedTake.div(o.price),P.DP); if(!take.gt(0))break; rem=o.locked.sub(lockedTake); partial=true; }
       var pay=partial?P.up(o.wantAmt.mul(lockedTake).div(o.locked),P.DP):o.wantAmt;
+      /* TAKER SAFETY (0.4.34). The covenant needs `pay` ceiled the maker's way, so a partial take could trade MORE than
+         the taker asked or PAST its limit: selling 3.33333333 to a 0.3 bid delivered 3.33333334 MINIMA for 1 MxUSD
+         (0.2999999994), selling 0.00000007 delivered 0.0000001, buying 3.33333333 from a 0.3 ask paid 1 (0.3000000003).
+         The size is the taker's free choice, so it shrinks a grain at a time until the take delivers at most what is
+         asked and trades at or inside the limit (when one is given); the maker still gets its ceiled pay. When that
+         takes more than SAFE_STEPS grains this order is not taken (the plan stops here). Full takes are exact. */
+      if(partial){
+        var steps=0, lim=limit?P.d(limit):null, G=P.d(1).div(Math.pow(10,P.DP));
+        var unsafe=function(){ return o.sell ? (lim!==null && pay.gt(lockedTake.mul(lim))) : (pay.gt(remaining) || (lim!==null && lockedTake.lt(pay.mul(lim)))); };
+        while(lockedTake.gt(0) && unsafe() && steps<B.SAFE_STEPS){ lockedTake=lockedTake.sub(G); pay=P.up(o.wantAmt.mul(lockedTake).div(o.locked),P.DP); steps++; }
+        if(!lockedTake.gt(0) || !pay.gt(0) || unsafe()) break;
+        if(o.sell) take=lockedTake;
+        rem=o.locked.sub(lockedTake);
+      }
       /* Against a BUY order the taker delivers MINIMA, and what it actually delivers is `pay` —
          ceiled the maker way — not `take`, which was floored. Reporting `take` understated the
          spend by a grain per fill, so the "rest as a limit order" remainder came out too large. */

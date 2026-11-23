@@ -54,6 +54,16 @@
         return h % n;
     }
 
+    /** Why the node's row `c` cannot back a take of `order` ('' when it can): it must be the token the MAKER gives
+     *  (MINIMA for an ask, MxUSD for a bid), unspent and state-free. ONE rule: plan() refuses a take on it, and
+     *  lib/takeable.js hides the order on it before anyone clicks. */
+    function makerCoinProblem(order, c) {
+        var sell = order.side === 'sell';
+        if (!c || !eqTok(c.tokenid, sell ? MINIMA : MXUSD)) return 'maker coin ' + (c && c.coinid) + ' is not ' + (sell ? 'MINIMA' : 'MxUSD');
+        if (c.spent === true || (c.state && c.state.length)) return 'maker coin ' + c.coinid + ' spent or carries state';
+        return '';
+    }
+
     /**
      * plan(order, takeMinima, makerCoins, takerCoins, takerAddress) → the taker's transaction.
      *   order: a verified order envelope (side = side of MINIMA the MAKER takes: 'sell' = maker sells MINIMA).
@@ -71,12 +81,10 @@
         var makerGives = sell ? take : down8(take.times(price));          // buy: maker pays MxUSD rounded DOWN
         var takerGives = sell ? up8(take.times(price)) : take;             // sell: taker pays MxUSD rounded UP
         if (makerGives.lte(0) || takerGives.lte(0)) throw new Error('amount below grain');
-        var mc = [];
+        var mc = [], why;
         for (var i = 0; i < makerCoins.length; i++) {
-            var c = makerCoins[i];
-            if (!eqTok(c.tokenid, makerTok)) throw new Error('maker coin ' + c.coinid + ' is not ' + (sell ? 'MINIMA' : 'MxUSD'));
-            if (c.spent === true || (c.state && c.state.length)) throw new Error('maker coin ' + c.coinid + ' spent or carries state');
-            mc.push(c);
+            if ((why = makerCoinProblem(order, makerCoins[i]))) throw new Error(why);
+            mc.push(makerCoins[i]);
         }
         var m = pick(mc, makerGives, 32, takerAddress);
         if (!m) throw new Error('maker coins do not cover ' + plain(makerGives));
@@ -370,5 +378,5 @@
         });
     }
     AX.fill = { MIN_REM: MIN_REM, floorTake: floorTake, MINIMA: MINIMA, MXUSD: MXUSD, d: d, up8: up8, down8: down8, fit44: fit44, plain: plain, coinValue: coinValue, pick: pick,
-                spreadIndex: spreadIndex, plan: plan, verifyAsMaker: verifyAsMaker, build: build, takerGuard: takerGuard, cosign: cosign, takerAuthorised: takerAuthorised, signKeys: signKeys, setMxUsd: setMxUsd, overrideOnTestChain: overrideOnTestChain };
+                spreadIndex: spreadIndex, makerCoinProblem: makerCoinProblem, plan: plan, verifyAsMaker: verifyAsMaker, build: build, takerGuard: takerGuard, cosign: cosign, takerAuthorised: takerAuthorised, signKeys: signKeys, setMxUsd: setMxUsd, overrideOnTestChain: overrideOnTestChain };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

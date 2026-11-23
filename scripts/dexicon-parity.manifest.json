@@ -2,12 +2,12 @@
   "_comment": "Digests of the Dexicon engine files copied verbatim from the MiniDapp. Regenerate ONLY with `node scripts/dexicon-parity-manifest.cjs --update` beside a deliberate re-copy. Desktop-only differences belong in main/dexicon/loader.js, main/dexicon/service.desktop.js or main/dexicon.js, never in an engine file.",
   "donor": {
     "root": "../../mds/dexicon",
-    "mdsVersion": "0.0.91",
-    "branch": "security/2026-11-07",
-    "gitSha": "9a95eb114ad35d3e18692a60c248529762fd72d5",
-    "serviceJsSha256": "d5211948e7f351895ed382560bd0735ca4544d66caf2954f76843d6d2bfd4340"
+    "mdsVersion": "0.0.153",
+    "branch": "(detached worktree of mds/dexicon at its 0.0.153 commit)",
+    "gitSha": "cefb6caf9fc6ac15e87ef39bb8597096d39d556f",
+    "serviceJsSha256": "d0ca9bc53fc6f5ef037497c3d848d1e74bad508c2d682e32450c0c22db8253b1"
   },
-  "digest": "9dcf6fa233f9f74c7ae3113cdbbe90b58cb65758c2c2d94fdb8dbf232122ab08",
+  "digest": "eeff259f003fc415434468790fb6676eb6a3be68ee79c2f9a0ecca7781e11dec",
   "files": {
     "lib/rhino_shim.js": {
       "sha256": "3c836294a244afb5198002dcdce2c569eb166300553cb1ba60fb5b56209a487b",
@@ -66,16 +66,20 @@
       "bytes": 13516
     },
     "lib/fill.js": {
-      "sha256": "3e59021c2436c58ca88432d8dbd9bbd38e419dc3b272bf53b23a22927c3283ea",
-      "bytes": 26937
+      "sha256": "bfbcf0c53a210d04e2be37749368730739702db5fbea229d9772bc713e7e8e4a",
+      "bytes": 27449
     },
     "lib/maker.js": {
-      "sha256": "39c7f1bd978ea75c63c831e41d609a511f4b806311dbcb414c8cec7d0efecd23",
-      "bytes": 27111
+      "sha256": "42fa9a8c458edcf61b852f1f83d202c4d9123b832467a01b0a3d9647de348454",
+      "bytes": 75110
+    },
+    "lib/proofs.js": {
+      "sha256": "5aa3eaeb1fd783fb66b833be06104b31a5a1be6acba11f1b12f9f91c6aedb03b",
+      "bytes": 39951
     },
     "lib/ladder.js": {
-      "sha256": "e11b51bcaca178d4e873897d3773f5429c60e7e01c39cd5ef2a0aa6b959a375a",
-      "bytes": 25535
+      "sha256": "5dd498e921646f8ebf53b3abd5890e0a26774911db1575a7b16e3ccfb0e69966",
+      "bytes": 26635
     },
     "resting/safety.js": {
       "sha256": "de84385a929a5a582fddb9dc6e214b78d535096164a6a748eda5f782d2e31485",
@@ -98,8 +102,8 @@
       "bytes": 4890
     },
     "resting/book.js": {
-      "sha256": "88aab89ef92b35400445705d78949a08287c1fa01a108f75d637519d2f522d60",
-      "bytes": 5263
+      "sha256": "b99478a1336edf1975087fae757a11c93963aaaa0e08bbf54e5e0497073713c4",
+      "bytes": 6823
     },
     "resting/pool.js": {
       "sha256": "33a75fbe3de6800042fe642fb71c534e839e7d793be5a264ab75259a625272c2",
@@ -150,8 +154,8 @@
       "bytes": 7007
     },
     "resting/pd_service.js": {
-      "sha256": "6f415034ca09653c0ea90ced695020abff58f1e416d80f2f755fb5c96be2c224",
-      "bytes": 85271
+      "sha256": "50cb7001bcbc83ca1c35256a7cd396936fa2f0632433d0d36e71dac7273debbf",
+      "bytes": 86852
     },
     "lib/autocross.js": {
       "sha256": "b32893c5fec9ecfb417a2cd3a64b02130e21e3612a9fb08b78cc228813cb478c",

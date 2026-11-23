@@ -26,7 +26,8 @@
  *                                          (AX.maker.create is refused while that take runs), and no money action starts
  *                                          while another is running (running()). The review itself is drawn from the
  *                                          page's own FAST book, sent with every report (`fast`).
- *   the AtomiX doors                    -> not in this app (doors/ and lib/door.js are not served); their hooks are
+ *   the AtomiX doors                    -> not in this app (doors/ and lib/door.js are not served, but doors/sha3.js:
+ *                                          the hash lib/takeable.js needs, 0.19.406); their hooks are
  *                                          no-ops, so the page never starts a second settlement engine on the ETH key.
  */
 (function () {
@@ -201,7 +202,17 @@
     var row = function (o) { return { side: o.side, price: String(o.price), minima: String(o.amount) }; };
     try { return DexiconFast.crossing(true, "1000000000000000").map(row).concat(DexiconFast.crossing(false, "0.000000000000000001").map(row)); } catch (e) { return null; }
   }
-  var MONEY = { place: 1, cancelFast: 1, editFast: 1, cancelChain: 1, editChain: 1, makerStop: 1 };
+  /** 0.19.406 (owner: "If an order is not tradable, it shouldn't be displayed anywhere as a real market"): the FAST book
+   *  as the page's takeable rule shows it (lib/takeable.js through DexiconFast.bookView, exact prices), the hidden summary
+   *  and the change counter. Before ready() only my own orders are in it. null: the page has not booted its views. */
+  function viewNow() {
+    if (!window.DexiconFast || !DexiconFast.bookView) return null;
+    try {
+      var h = DexiconFast.hiddenView() || {};
+      return { ready: !!DexiconFast.ready(), rev: Number(DexiconFast.rev()) || 0, asks: DexiconFast.bookView(true, ""), bids: DexiconFast.bookView(false, ""), hidden: String(h.summary || "") };
+    } catch (e) { return null; }
+  }
+  var MONEY = { place: 1, cancelFast: 1, editFast: 1, cancelChain: 1, editChain: 1, makerStop: 1, sweepFast: 1, sweepChain: 1 };
   var ACTS = {
     /** One order from the Trade form. layer "fast": takes the crossing FAST orders best-first or, when none crosses,
      *  rests as a FAST order (ui/app.js place). layer "chain": the on-chain book and pools (ui/pd_app.js place). */
@@ -255,6 +266,25 @@
       if (PandaComposite.isEmpty(c)) return { totalMinima: "0", totalUsdt: "0", orderMinima: "0", poolMinima: "0" };
       return { totalMinima: s(c.totalMinima), totalUsdt: s(c.totalUsdt), orderMinima: s(c.orderMinima), poolMinima: s(c.poolMinima) };
     },
+    /** 0.19.406, SWEEP part 1: the FAST take the page's own run makes (DexiconFast.take), TAKE-ONLY: it never rests
+     *  anything. Resolves the run's own {ok, got, unanswered, tried, reason} (exact decimal strings). */
+    sweepFast: function (a) {
+      need(typeof a.buy === "boolean" && NUM.test(a.limit) && NUM.test(a.amount), "Enter a valid price and amount.");
+      need(window.DexiconFast && typeof DexiconFast.take === "function", "This page cannot take FAST orders yet. Nothing was sent.");
+      return new Promise(function (res) { DexiconFast.take({ isBuy: a.buy, limit: a.limit, amount: a.amount, takeOnly: true }, res); });
+    },
+    /** 0.19.406, SWEEP part 2: the on-chain remainder as a TAKE-ONLY LIMIT (resting/pd_service.js 0.4.33+: takes what
+     *  crosses up to the amount, never rests; nothing crosses → its ERROR, nothing sent). Sent as the page sends a LIMIT;
+     *  the service's POSTED or ERROR says how it went (the native screen waits for it). The limit is on the 6-decimal grid. */
+    sweepChain: function (a) {
+      need(typeof a.buy === "boolean" && NUM.test(a.price) && NUM.test(a.amount), "Enter a valid price and amount.");
+      need((a.price.split(".")[1] || "").length <= 6 && (a.amount.split(".")[1] || "").length <= 8, "An on-chain order takes a price of at most 6 decimals and an amount of at most 8. Nothing was sent.");
+      chainReady();
+      var own = window.AX && AX.ownskip ? String(AX.ownskip.onlyOwn(state.book || [], state.pools || [], !!a.buy, a.amount, a.price, Number(state.block || 0)) || "") : "";
+      need(!own, own);
+      need(chainCrosses(a), "Nothing on the chain crosses this price now. Nothing was sent.");
+      send("LIMIT", { buy: !!a.buy, minima: a.amount, price: a.price, takeOnly: true });
+    },
     addRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.addRelay(a.url); },
     removeRelay: function (a) { need(typeof a.url === "string" && a.url.length < 300, "bad relay address"); DexiconFast.removeRelay(a.url); },
     discover: function () { DexiconFast.discover(); },
@@ -294,6 +324,12 @@
       asked = null;
       answer = d.act === "quote" ? null : { any: d.act !== "place", reviewed: d.args && d.args.reviewed, prompt: d.args && d.args.price };   // a quote answers no dialog
       value = ACTS[d.act](d.args || {});
+      if (value && typeof value.then === "function") {   // 0.19.406: sweepFast answers when the page's run has ended
+        answer = null;
+        value.then(function (v) { parent.postMessage({ dxRoom: 1, driven: d.id, error: null, asked: null, value: v }, "*"); report(); },
+          function (e) { parent.postMessage({ dxRoom: 1, driven: d.id, error: (e && e.message) || String(e), asked: null, value: null }, "*"); report(); });
+        return;
+      }
       if (d.act !== "quote") value = null;
     } catch (e) { err = (e && e.message) || String(e); value = null; }
     answer = null;
@@ -312,7 +348,7 @@
       trading: running(), dialog: !!document.querySelector("dialog[open]"),
       // 0.18.118: the book the page will act on (the native review is drawn from it), and its own amount field: after
       // a sweep it holds only what is surely untraded (ui/app.js finishSweep), after a published order it is empty
-      fast: fastBook(), amount: $("amount") ? String($("amount").value || "") : "",
+      fast: fastBook(), view: viewNow(), amount: $("amount") ? String($("amount").value || "") : "",
       relays: Array.prototype.map.call(rows, function (r) {
         var u = r.querySelector(".url"), m = r.querySelector(".meta"), dot = r.querySelector("b");
         return { url: u ? u.textContent : "", meta: m ? m.textContent : "", state: dot ? dot.className : "", found: r.classList.contains("discovered") };

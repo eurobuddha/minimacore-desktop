@@ -36,7 +36,7 @@ test.after(() => { for (const h of hosts) h.stop(); for (const d of dirs) fs.rmS
 
 test("the parity manifest verifies, and the host loads only manifest files", () => {
   const out = execFileSync(process.execPath, [path.join(__dirname, "dexicon-parity-manifest.cjs"), "--verify"], { encoding: "utf8" });
-  assert.match(out, /^PASS 38 Dexicon engine files match the committed manifest/);
+  assert.match(out, /^PASS 39 Dexicon engine files match the committed manifest/);
   const { FILES } = require("./dexicon-parity-manifest.cjs");
   const loaded = [...fs.readFileSync(path.join(M.root, "main/dexicon/service.desktop.js"), "utf8").matchAll(/^MDS\.load\('([^']+)'\)|; MDS\.load\('([^']+)'\)/gm)].map(m => m[1] || m[2]);
   assert.deepEqual(loaded, FILES, "service.desktop.js loads exactly the manifest's files, in its order");
@@ -139,7 +139,7 @@ test("the command bridge: only the verbs the MiniDapp page issues, one command a
   const { host, node } = await boot();
   const refused = async (command, why) => { const n = node.seen.length; await assert.rejects(host.command({ op: "cmd", command }), why, command); assert.equal(node.seen.length <= n + 40 && !node.seen.slice(n).includes(command), true, "never sent: " + command); };
   for (const c of ["send amount:1 address:0x00", "vault action:seed", "backup file:x.bak", "restore file:x.bak", "megammrsync action:resync", "keys action:list", "mds action:list",
-    "tokencreate name:x amount:1", "consolidate tokenid:0x00", "sendpoll action:list", "quit", "sign data:0x01 publickey:0x02", "coinexport coinid:0x01", "txnstate id:a port:1 value:2", "runscript script:\"RETURN TRUE\""])
+    "tokencreate name:x amount:1", "consolidate tokenid:0x00", "sendpoll action:list", "quit", "sign data:0x01 publickey:0x02", "txnstate id:a port:1 value:2", "runscript script:\"RETURN TRUE\""])
     await refused(c, /not available to Dexicon/);
   await refused("balance;send amount:1 address:0x00", /bad command/);
   await refused("balance\nsend amount:1 address:0x00", /bad command/);
@@ -485,7 +485,11 @@ async function frameRig(o = {}) {
   b.ctx.__orders = [order]; vm.runInContext("RELAY.orders = function () { return __orders; }; RELAY.pollBook = function (h, cb) { cb(null, false, ''); };", b.ctx);
   const cmd = (command) => b.host.command({ op: "cmd", command });
   // the page's MDS, as renderer/dexicon/mds.js makes it: every command through the bridge
-  const mds = { cmd: (c, cb) => { cmd(c).then(r => cb(r)); }, cmdR: (c, cb) => { cmd(c).then(r => (r && r.status ? cb(null, r.response, r) : cb(new Error((r && r.error) || "failed"), null, r))); } };
+  // kvGet / kvSet (0.19.406: the 0.0.153 relock reads its backoff from kv): through the bridge's own SQL, as lib/mdsw.js does
+  const sql = (q) => b.host.command({ op: "sql", query: q });
+  const mds = { cmd: (c, cb) => { cmd(c).then(r => cb(r)); }, cmdR: (c, cb) => { cmd(c).then(r => (r && r.status ? cb(null, r.response, r) : cb(new Error((r && r.error) || "failed"), null, r))); },
+    kvGet: (k, d, cb) => { sql("SELECT v FROM ax_kv WHERE k='" + k + "'").then(r => cb(r && r.status && r.rows.length ? String(r.rows[0].V) : d), () => cb(d)); },
+    kvSet: (k, v, cb) => { sql("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + String(v).split("'").join("''") + "')").then(() => cb && cb(), () => cb && cb()); } };
   const take = (minima) => new Promise(res => { let p; try { p = F.plan(order, minima, [coins()[MC]], [coins()[UC]], M.ADDRESS); } catch (e) { return res({ err: e }); } F.build(mds, p, (err, hex) => res({ err, hex, plan: p })); });
   const signs = () => b.node.seen.filter(c => /^txnsign /.test(c)), posts = () => b.node.seen.filter(c => /^txnpost /.test(c));
   return Object.assign(b, { cmd, mds, take, signs, posts, order, review: (buy, price, amount) => b.host.command({ op: "reviewed", buy, price, amount }), txns });
@@ -1248,4 +1252,157 @@ test("0.19.373: a start of the on-chain engine that ends in its ERROR is logged 
   assert.equal(nodeLog.length, 1, "logged once, not once a minute");
   assert.match(fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), /\ndexicon\.emitter\.on\("nodelog", \(line\) => node\.log\("\[dexicon\] " \+ line\)\);/, "main.js writes those lines to the node log");
   host.stop();
+});
+
+// ---- 0.19.406: Dexicon engine 0.0.153 (cefb6caf9fc6ac15e87ef39bb8597096d39d556f) ----
+const { dexSql } = require("../main/dexicon.js");
+test("0.19.406 allow-lists: the proof hand-over's three commands in their exact shapes, MegaMMR lookups, the store lock's and the fenced save's eight SQL shapes; nothing near them", () => {
+  const H = "0x" + "AB".repeat(32), PROOF = "0x" + "0".repeat(144), TOK = "w" + "mfx3k2a1".repeat(2) + ".12";
+  for (const c of ["coinexport coinid:" + H, "coinimport data:" + PROOF + " track:false", "coinimport data:0x" + "a".repeat(15998) + " track:false",
+    "verify publickey:" + H + " data:" + H + " signature:0x" + "cd".repeat(100), "coins coinid:" + H + " megammr:true checkmempool:true", "coins coinid:" + H + " megammr:true"]) assert.equal(dexCommand(c), c, c);
+  for (const [c, why] of [["coinexport coinid:" + H + " file:x.bin", /only exporting one coin's proof/], ["coinexport coinid:0x01", /only exporting/],
+    ["coinimport data:" + PROOF + " track:true", /only an untracked coin proof import/], ["coinimport data:" + PROOF, /untracked/], ["coinimport data:0x" + "a".repeat(15999) + " track:false", /untracked/],
+    ["coinimport data:0x" + "a".repeat(142) + " track:false", /untracked/], ["verify publickey:" + H + " data:" + H + " signature:0x" + "a".repeat(16000), /only checking one coin-key attestation/],
+    ["sign data:" + H + " publickey:" + H, /not available to Dexicon: sign/], ["cointrack enable:false coinid:" + H, /not available to Dexicon: cointrack/], ["cointrack enable:true coinid:" + H, /cointrack/]])
+    assert.throws(() => dexCommand(c), why, c);
+  const ok = ["CREATE TABLE IF NOT EXISTS `dx_lock` (`id` varchar(32) NOT NULL PRIMARY KEY, `owner` varchar(80), `ts` bigint)",
+    "INSERT INTO `dx_lock` (`id`,`owner`,`ts`) SELECT 'myorders','',0 WHERE NOT EXISTS (SELECT 1 FROM `dx_lock` WHERE `id`='myorders')",
+    "INSERT INTO `dx_lock` (`id`,`owner`,`ts`) SELECT 'coinimport','',0 WHERE NOT EXISTS (SELECT 1 FROM `dx_lock` WHERE `id`='coinimport')",
+    "UPDATE `dx_lock` SET `owner`='" + TOK + "', `ts`=1763900000000 WHERE `id`='myorders' AND (`owner`='' OR `owner` IS NULL OR `owner`='')",
+    "UPDATE `dx_lock` SET `owner`='" + TOK + "', `ts`=1763900000000 WHERE `id`='coinimport' AND (`owner`='' OR `owner` IS NULL OR `owner`='w1.2')",
+    "UPDATE `dx_lock` SET `owner`='' WHERE `id`='myorders' AND `owner`='" + TOK + "'",
+    "SELECT `owner` FROM `dx_lock` WHERE `id`='coinimport'",
+    "INSERT INTO ax_kv (k, v) SELECT 'myorders', '[]' WHERE NOT EXISTS (SELECT 1 FROM ax_kv WHERE k='myorders')",
+    "UPDATE ax_kv SET v='[{\"note\":\"it''s\"}]' WHERE k='myorders' AND EXISTS (SELECT 1 FROM `dx_lock` WHERE `id`='myorders' AND `owner`='" + TOK + "')",
+    "SELECT v FROM ax_kv WHERE k='myorders'", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('fill_" + H + "', '{\"role\":\"taker\",\"filled\":\"5\"}')"];
+  for (const q of ok) assert.equal(dexSql(q), q, q);
+  const no = ["DELETE FROM `dx_lock`", "DROP TABLE `dx_lock`", "UPDATE `dx_lock` SET `owner`='' WHERE `id`='myorders'",
+    "INSERT INTO `dx_lock` (`id`,`owner`,`ts`) SELECT 'other','',0 WHERE NOT EXISTS (SELECT 1 FROM `dx_lock` WHERE `id`='other')",
+    "INSERT INTO `dx_lock` (`id`,`owner`,`ts`) SELECT 'myorders','',0 WHERE NOT EXISTS (SELECT 1 FROM `dx_lock` WHERE `id`='coinimport')",
+    "UPDATE `dx_lock` SET `owner`='bad token!', `ts`=1 WHERE `id`='myorders' AND (`owner`='' OR `owner` IS NULL OR `owner`='')",
+    "UPDATE `dx_lock` SET `owner`='" + TOK + "', `ts`=1 WHERE `id`='myorders' AND `ts` < 5",
+    "UPDATE ax_kv SET v='[]' WHERE k='relays' AND EXISTS (SELECT 1 FROM `dx_lock` WHERE `id`='myorders' AND `owner`='" + TOK + "')",
+    "UPDATE ax_kv SET v='[]' WHERE k='myorders'",
+    "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '[]')", "DELETE FROM ax_kv WHERE k='myorders'",
+    "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('fill_" + H + "', '{\"role\":\"maker\",\"filled\":\"-50\",\"txpowid\":\"" + H + "\"}')", "DELETE FROM ax_kv WHERE k='fill_" + H + "'",
+    "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('attest_sign', '1')", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('require_attest', '1')", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('coinlock_held', '{}')",
+    "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('legacy_fresh', '0')", "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('coin_max_age', '5')"];
+  for (const q of no) assert.throws(() => dexSql(q), /not available|engine's own|fenced save|maker's fill records/, q);
+});
+
+test("0.19.406: the service answers a coin proof request with coinexport only (no attestation signed: kv attest_sign is '0'), loads lib/proofs.js and mirrors the resting coin locks; it adds no MegaMMR walk of its own", async () => {
+  const H = (c) => "0x" + c.repeat(32), BACK = H("C1"), ADDR = H("A1"), proof = "0x00000020" + BACK.slice(2) + "00000020" + ADDR.slice(2);
+  const b = await boot({ node: { on: (c) => (c === "coinexport coinid:" + BACK ? { status: true, pending: false, response: { data: proof } } : null) } });
+  assert.equal((await sql(b.host, "SELECT v FROM ax_kv WHERE k='attest_sign'"))[0].V, "0");
+  await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([Object.assign(LIVE_ORDER(b.node.ADDRESS), { coins: [BACK], scripts: ["RETURN SIGNEDBY(" + b.node.KEY + ")"] })]) + "')");
+  const asker = vm.runInContext('AX.identity.fromSeed("0x' + "b2".repeat(32) + '", "decks").publicId()', b.ctx), logs = [];
+  b.host.emitter.on("log", (l) => logs.push(l));
+  const posts = () => b.net.calls.filter(c => /^POST .*\/dex\/msg$/.test(c)).length, before = posts();
+  b.ctx.__ask = [{ from: asker, coins: [BACK], attest: [ADDR], seen: {} }];
+  vm.runInContext("var __proofsDone = false; answerProofs(__ask, function () { __proofsDone = true; });", b.ctx);
+  await M.until(() => vm.runInContext("__proofsDone", b.ctx));
+  assert.ok(b.node.seen.includes("coinexport coinid:" + BACK), "the coin's proof was exported");
+  assert.ok(!b.node.seen.some(c => /^sign\b/.test(c)), "nothing signed");
+  await M.until(() => posts() > before); assert.ok(logs.some(l => /coin proofs sent to .*: 1 coin\(s\), 0 attestation\(s\)/.test(l)), logs.join("\n"));
+  assert.equal(typeof vm.runInContext("PandaCoinLock.reserve", b.ctx), "function");
+  const svc = fs.readFileSync(path.join(M.root, "main/dexicon/service.desktop.js"), "utf8");
+  assert.ok(!/megammr/i.test(svc.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")) && !/lib\/takeable\.js|doors\/sha3/.test(svc.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")), "the service does no MegaMMR lookup and loads no takeable rule (the page does: its 16 a height)");
+  assert.ok(/mirrorCoinLock\(PandaCoinLock\);/.test(svc) && /MDS\.load\('lib\/proofs\.js'\);/.test(svc));
+});
+
+test("0.19.406: a co-signed take is applied ONCE (afterFill with its txpowid, the fill_ record with `verified`); a refresh does not deduct it again", async () => {
+  const b = await makerWithTake(() => ({ status: true, pending: false, response: { txpowid: POSTED } }));
+  await M.until(() => vm.runInContext("__takeDone", b.ctx));
+  let o = await orderNow(b.host); assert.equal(o.remaining, "60"); assert.deepEqual(o.fills, [POSTED]);
+  const f = (await fillsNow(b.host)).find(x => x.txpowid === POSTED); assert.equal(f.verified, "100"); assert.deepEqual(f.spent, [COIN]);
+  b.ctx.__l = null; vm.runInContext("AX.maker.load(AX.mds, function (e, l) { AX.maker.reconcileFills(AX.mds, l, function (ch) { __l = { changed: ch.length, rem: AX.maker.find(l, '" + ORDER + "').remaining }; }); });", b.ctx);
+  await M.until(() => b.ctx.__l); assert.deepEqual(JSON.parse(JSON.stringify(b.ctx.__l)), { changed: 0, rem: "60" }, "the refresh's reconcile finds it applied");
+});
+
+test("0.19.406 FILL PENDING: a fill whose save failed keeps its coins locked and refuses every further take of that order, said; the retry applies it; and a take is refused while a recorded fill is not applied (true remaining)", async () => {
+  const b = await makerWithTake(() => ({ status: true, pending: false, response: { txpowid: POSTED } }), null);
+  await M.until(() => vm.runInContext("__takeDone", b.ctx));
+  // a second engine with afterFill failing (the store lock held by a stalled page)
+  const c = await boot({ node: { on: (cmd) => (/^txnpost id:dmtest/.test(cmd) ? { status: true, pending: false, response: { txpowid: POSTED } } : null) } });
+  await sql(c.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([LIVE_ORDER(c.node.ADDRESS)]) + "')");
+  const said = []; c.host.emitter.on("comms", (m) => said.push(JSON.parse(m)));
+  vm.runInContext(`AX.maker.refresh = function (a, b, c, cb) { cb(null, 0, null); }; AX.maker.syncRelays = function (a, b, c, cb) { cb({ lines: [] }); };
+    var __realAfter = AX.maker.afterFill, __fail = true;
+    AX.maker.afterFill = function (mds, relay, me, id, filled, spent, cb, tx, ver) { if (__fail) return cb(new Error("the fill of " + filled + " MINIMA (txpow " + tx + ") was NOT applied to order " + id + ": another writer changed it three times")); __realAfter.apply(AX.maker, arguments); };
+    AX.fill.verifyAsMaker = function () { return { ok: true, filled: "40", received: "0.492", paid: "40" }; };
+    AX.fill.cosign = function (mds, hex, keys, verifyFn, cb) { var v = verifyFn({ inputs: [{ coinid: "${COIN}" }], outputs: [{ coinid: "${OUT}" }] }, []);
+      mds.cmdR("txnpost id:dmtest", function (e, post) { if (e) return cb(e, null, v); cb(null, post.txpowid, v, ["${OUT}"]); }); };
+    var __from = AX.identity.fromSeed("0x" + new Array(33).join("a0"), "decks").publicId(), __n = 0;
+    function __take(done) { handleTake({ _from: __from, txn: "0xabcd", orderId: "${ORDER}" }, done); }
+    __take(function () { __n = 1; });`, c.ctx);
+  await M.until(() => vm.runInContext("__n", c.ctx) === 1);
+  assert.ok(said.some(p => p.type === "save_failed" && /was NOT applied/.test(p.message)), "said to the screens");
+  assert.equal((await orderNow(c.host)).remaining, "100", "not applied yet");
+  const posts = c.node.seen.filter(x => /^txnpost id:dmtest/.test(x)).length;
+  vm.runInContext("__take(function () { __n = 2; });", c.ctx); await M.until(() => vm.runInContext("__n", c.ctx) === 2);
+  assert.equal(c.node.seen.filter(x => /^txnpost id:dmtest/.test(x)).length, posts, "the second take was not co-signed");
+  assert.ok(said.some(p => p.type === "take_refused" && /still being saved/.test(p.reason)));
+  vm.runInContext("__fail = false; var __r = false; retryFills(function () { __r = true; });", c.ctx); await M.until(() => vm.runInContext("__r", c.ctx));
+  const o = await orderNow(c.host); assert.equal(o.remaining, "60"); assert.deepEqual(o.fills, [POSTED]);
+  assert.equal(vm.runInContext("Object.keys(FILL_PENDING).length", c.ctx), 0);
+  // true remaining: a maker fill_ record of this order not yet on its fills → the next take is refused as busy, not checked against 60
+  const T2 = "0x" + "EE".repeat(32), ts = Math.floor(Date.now() / 1000) + 5;
+  await sql(c.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('fill_" + T2 + "', '" + JSON.stringify({ role: "maker", orderId: ORDER, filled: "20", txpowid: T2, ts, verified: "60", status: "settling" }) + "')");
+  const p2 = c.node.seen.filter(x => /^txnpost id:dmtest/.test(x)).length;
+  vm.runInContext("__take(function () { __n = 3; });", c.ctx); await M.until(() => vm.runInContext("__n", c.ctx) === 3);
+  assert.equal(c.node.seen.filter(x => /^txnpost id:dmtest/.test(x)).length, p2, "not co-signed");
+  assert.ok(said.some(p => p.type === "take_refused" && /earlier fill of this order is still being applied/.test(p.reason)));
+  assert.equal(vm.runInContext("rebackDue", c.ctx), true, "the refresh at the end of the tick applies it");
+});
+
+test("0.19.406 NEWBLOCK RE-BACK: an order waiting coinless for its relock is re-backed on the next block, never beside a running tick; one refresh at a time", async () => {
+  const b = await boot();
+  vm.runInContext(`var __refreshes = 0, __hold = null; AX.maker.refresh = function (a, b, c, cb) { __refreshes++; __hold = function () { cb(null, 0, null, ["relock: coin 0x01 failed: no funds"]); }; };
+    AX.maker.awaitingBacking = function () { return true; };`, b.ctx);
+  const said = []; b.host.emitter.on("comms", (m) => said.push(JSON.parse(m)));
+  vm.runInContext("TICKING = true; tickStartedMs = Date.now(); rebackOnBlock();", b.ctx);
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(vm.runInContext("__refreshes", b.ctx), 0); assert.equal(vm.runInContext("rebackDue", b.ctx), true, "marked due for the tick's end");
+  vm.runInContext("TICKING = false; rebackOnBlock(); rebackOnBlock();", b.ctx);
+  await M.until(() => vm.runInContext("__refreshes", b.ctx) === 1);
+  await new Promise(r => setTimeout(r, 30)); assert.equal(vm.runInContext("__refreshes", b.ctx), 1, "one refresh at a time");
+  vm.runInContext("__hold()", b.ctx);
+  assert.ok(said.some(p => p.type === "relock_failed" && /no funds/.test(p.message)), "a failed relock is said");
+  const svc = fs.readFileSync(path.join(M.root, "main/dexicon/service.desktop.js"), "utf8");
+  assert.ok(/else if \(msg\.event === 'NEWBLOCK' && READY\) rebackOnBlock\(\);/.test(svc));
+});
+
+test("0.19.406: page SQL and service SQL are ONE database: a page cancel of Y (the vendored lib through this app's bridge, dexSql + pageSql) and a service fill of X both land, at every offset", async () => {
+  const b = await boot(), X = "0x" + "1".repeat(32), Y = "0x" + "2".repeat(32);
+  const LIB = ["lib/rhino_shim.js", "vendor/nacl.js", "vendor/blake.js", "vendor/sha256.js", "vendor/sha512.js", "vendor/decimal.js", "lib/hex.js", "lib/flow.js", "crypto/ax_sodium.js", "lib/identity.js", "lib/mdsw.js", "lib/prng.js", "lib/envelope.js", "lib/relay.js", "lib/fill.js", "lib/maker.js"];
+  const refused = []; b.host.emitter.on("log", (l) => { if (/refused SQL/.test(l)) refused.push(l); });
+  const pageMds = { log() {}, comms: { solo() {} },
+    sql: (q, cb) => { b.host.command({ op: "sql", query: q }).then((r) => cb && cb(r), (e) => cb && cb({ status: false, error: e.message })); },
+    cmd: (c, cb) => { b.host.command({ op: "cmd", command: c }).then((r) => cb && cb(r), (e) => cb && cb({ status: false, error: e.message })); } };
+  const page = vm.createContext({ MDS: pageMds, console, setTimeout, clearTimeout, setInterval, clearInterval }); page.global = page;
+  for (const f of LIB) vm.runInContext(fs.readFileSync(path.join(M.root, "main/dexicon", f), "utf8"), page, { filename: "page/" + f });
+  vm.runInContext("var __me = AX.identity.fromSeed('0x" + "c3".repeat(32) + "', 'decks'), __relay = { relays: ['https://relay.example'], publish: function (r, cb) { cb([{ url: 'https://relay.example', ok: true }]); }, publishTo: function (u, r, cb) { cb({ ok: true }); } };", page);
+  for (const off of [0, 5, 15, 30]) {
+    const orders = [Object.assign(LIVE_ORDER(b.node.ADDRESS), { orderId: X, coins: [] }), Object.assign(LIVE_ORDER(b.node.ADDRESS), { orderId: Y, coins: [], seq: Date.now() })];
+    await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify(orders) + "')");
+    const TX = "0x" + String(off + 10).padStart(2, "0").repeat(32);
+    const fill = new Promise((res) => { b.ctx.__res = res; vm.runInContext("AX.maker.afterFill(AX.mds, RELAY, ME, '" + X + "', '40', [], function (e) { __res(e ? e.message : ''); }, '" + TX + "', '100');", b.ctx); });
+    const cancel = new Promise((res) => setTimeout(() => { page.__res = res; vm.runInContext("AX.maker.cancel(AX.mds, __relay, __me, '" + Y + "', function (e) { __res(e ? e.message : ''); });", page); }, off));
+    const [ef, ec] = await Promise.all([fill, cancel]);
+    assert.equal(ef, "", "fill at offset " + off); assert.equal(ec, "", "cancel at offset " + off);
+    const now = JSON.parse((await sql(b.host, "SELECT v FROM ax_kv WHERE k='myorders'"))[0].V), x = now.find(o => o.orderId === X), y = now.find(o => o.orderId === Y);
+    assert.equal(x.remaining, "60", "X sold 40 stays sold at offset " + off); assert.equal(x.status, "live"); assert.equal(y.status, "cancelled", "Y cancelled at offset " + off);
+  }
+  assert.deepEqual(refused, [], "every page statement of the lock and the fenced save passed the allow-list");
+});
+
+test("0.19.406: the FAST backing-coin settings: read and written by the app's own Settings (only what is given), never by the page", async () => {
+  const b = await boot();
+  assert.deepEqual(b.host.fastCoins(), { legacyFresh: true, coinMaxAge: "", maxAgeLimit: 900 }, "unset: refresh ON, 900 blocks");
+  assert.deepEqual(b.host.fastCoinsSave({ legacyFresh: false }), { legacyFresh: false, coinMaxAge: "", maxAgeLimit: 900 });
+  assert.deepEqual(b.host.fastCoinsSave({ coinMaxAge: "120" }), { legacyFresh: false, coinMaxAge: "120", maxAgeLimit: 900 });
+  for (const bad of [{ coinMaxAge: "0" }, { coinMaxAge: "901" }, { coinMaxAge: "1.5" }, { legacyFresh: "no" }, {}]) assert.throws(() => b.host.fastCoinsSave(bad), /coin max age|true or false|nothing to save/, JSON.stringify(bad));
+  await assert.rejects(b.host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('legacy_fresh', '1')" }), /engine's own/);
+  const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8");
+  assert.ok(/ipcMain\.handle\("mcd:dxFastCoins", \(_e, patch\) => \(patch && typeof patch === "object" \? dexicon\.fastCoinsSave\(patch\) : dexicon\.fastCoins\(\)\)\);/.test(main) && /dxFastCoins: \(patch\) => ipcRenderer\.invoke\("mcd:dxFastCoins", patch\),/.test(pre));
 });

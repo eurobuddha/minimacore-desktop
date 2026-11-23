@@ -252,7 +252,7 @@ test("a refusal is shown in the words it came in, whoever refused", () => {
 });
 
 test("nothing outside the allow-list leaves the Exchange screens", () => {
-  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview", "quote"]);
+  assert.deepEqual(C.ACTS, ["place", "cancelFast", "editFast", "cancelChain", "editChain", "addRelay", "removeRelay", "discover", "refresh", "makerOpen", "makerStop", "makerReview", "quote", "sweepFast", "sweepChain"]);
   for (const act of ["send", "consolidate", "eval", "txnsign", "__proto__", "constructor", ""]) assert.throws(() => C.driveCall(1, act, {}), /not an action of the Exchange screens/, act);
   assert.deepEqual(C.driveCall(7, "place", { buy: true }), { dxRoom: 1, drive: { id: 7, act: "place", args: { buy: true } } });
   // from the page's frame: only the four bridge ops, each rebuilt from its named fields (nothing else rides along)
@@ -523,7 +523,7 @@ test("H2: the Trade button takes one click at a time, sends what was reviewed, a
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
   const els = {}, listeners = {};
   const status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} };
-  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
   win.window = win;
   win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async () => ({ status: true, rows: [] }),
@@ -581,7 +581,7 @@ test("Trade buttons: no relay answering leaves BUY / SELL and BOOK / POOL live i
     const mk = (tag) => { const e = { tag, dataset: {}, style: {}, children: [], attrs: {}, hidden: false, value: "", innerHTML: "", textContent: "", classList: { toggle() {} }, contentWindow: { postMessage() {} }, setAttribute(k, v) { e.attrs[k] = v; }, addEventListener() {},
       appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false }; return e; };
     const els = {}, listeners = {}, status = { version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays, price: {} };
-    const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+    const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
       document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
     win.window = win;
     win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async () => ({ status: true, rows: [] }),
@@ -861,6 +861,11 @@ test("the native Exchange screens record the confirmed on-chain trade, edit and 
 
 // ---------------------------------------------------------------- the on-chain engine not ready (0.19.373)
 /** The Trade screen over a stand-in engine: status, the service's book and the page's FAST book are the test's. */
+/** 0.19.406: the page's takeable view (renderer/dexicon/mds.js viewNow, DexiconFast.bookView rows) of a FAST list. */
+function pageView(fast, ready) {
+  const rows = (side) => (fast || []).filter(x => x.side === side).map(x => ({ price: x.price, exact: x.price, size: x.minima, cumulative: x.minima, own: !!x.ours }));
+  return { ready: ready !== false, rev: 1, asks: rows("sell"), bids: rows("buy"), hidden: "" };
+}
 async function tradeUi(o) {
   const vm = require("node:vm"), posted = [], cmds = [];
   let answerLate = null;
@@ -869,10 +874,10 @@ async function tradeUi(o) {
     appendChild(c) { e.children.push(c); c.parent = e; }, remove() {}, querySelectorAll: () => [], querySelector: () => null, contains: () => false, showModal() { o.dialogs.push(e); setImmediate(() => e.onclick({ target: { closest: () => ({ dataset: { x: o.answer === false ? "0" : "1" } }) } })); }, close() {} }; return e; };
   o.dialogs = o.dialogs || [];
   const els = {}, listeners = {}, status = Object.assign({ version: "0.0.91", started: true, ready: true, restingReady: true, epoch: 1, relays: ["https://relay.example/dex-relay"], price: {} }, o.status || {});
-  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
+  const win = { DexCore: C, DexPools: { tick() {}, render() {}, shared() {}, part: () => "" }, DexAx: { pill: () => ({ text: "", currency: "", busy: false, label: "" }), tick() {}, switchCurrency() {}, shared() {}, part: () => "", click: async () => false }, console, JSON, Promise, setInterval() {}, setTimeout, clearTimeout, localStorage: { getItem: () => null, setItem() {} }, Date,
     document: { getElementById: (id) => els[id] || (els[id] = mk(id)), createElement: mk, querySelectorAll: () => [], activeElement: null }, addEventListener: (t, f) => { listeners[t] = f; } };
   win.window = win;
-  win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async (a) => { cmds.push(a); return { status: true, rows: [] }; },
+  win.mcd = { dxStatus: async () => status, onDexicon() {}, clip: async () => true, dxMine: async () => ({ orders: [], pending: [] }), dxCommand: async (a) => { cmds.push(a); return { status: true, rows: a.op === "sql" && /fill_%/.test(a.query || "") ? (o.fills ? o.fills() : []).map(f => ({ K: "fill_" + f.txpowid, V: JSON.stringify(f) })) : [] }; },
     dxBook: async () => o.book, cmd: async () => ({ status: true, response: [{ tokenid: "0x00", sendable: "100000" }, { tokenid: "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90", sendable: "1000" }] }) };
   Object.assign(win, require("./i18n-plain.cjs").globals());
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../renderer/dexicon-ui.js"), "utf8") + ";globalThis.DexUI = DexUI;", win);
@@ -881,7 +886,7 @@ async function tradeUi(o) {
   win.DexUI.init({ go() {}, leave() {}, start() {} }); win.DexUI.node({ state: "running" }); await settle();
   win.DexUI.paint("dexicon"); win.DexUI.render(); await settle();
   const frame = shell.children.find(c => c.tag === "iframe");
-  const page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [], fast: o.book.fast.filter(x => !x.ours), amount: "", trading: false }, p) } });
+  const page = (p) => listeners.message({ source: frame.contentWindow, data: { dxRoom: 1, page: Object.assign({ ready: true, relays: [{ url: "https://relay.example/dex-relay", state: "ok" }], log: [], fast: o.book.fast.filter(x => !x.ours), view: pageView(o.book.fast), amount: "", trading: false }, p) } });
   page({});
   const answer = (id, r) => listeners.message({ source: frame.contentWindow, data: Object.assign({ dxRoom: 1, driven: id, error: null }, r) });
   answerLate = answer;
@@ -1045,16 +1050,16 @@ test("0.19.375: the page's quote action is read only: the page's own plan as tot
   say({ dxRoom: 1, drive: { id: 4, act: "refresh", args: {} } }); assert.equal(reply().value, null, "only a quote carries a value");
 });
 
-test("0.19.375: the investigator's repro on the Trade screen: the FAST row under a POOL row → SWEEP offered (FAST 500 + on-chain 1234.56789012, average cut), not sendable and said why; BOOK / POOL alone sends the 6-decimal limit", async () => {
+test("0.19.375: the investigator's repro on the Trade screen: the FAST row under a POOL row → SWEEP offered (FAST 500 + on-chain 1234.56789012, average cut), sendable since 0.19.406 (both parts take-only); BOOK / POOL alone sends the 6-decimal limit", async () => {
   const u = await tradeUi({ book: OWNER_BOOK, quote: OWNER_QUOTE });
   const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));
   u.els.dxBids.onclick({ target: { closest: () => ({ dataset: rows[1] }) } }); await u.settle(); await u.settle();
   assert.deepEqual([u.els.dxPrice.value, u.els.dxAmount.value], ["0.00441234", "1734.56789012"]);
   assert.equal(u.quotes().length, 3, "the page was asked three quotes, nothing else"); assert.equal(u.drives().length, 0);
   const sw = u.els.dxCtaSweep;
-  assert.equal(sw.hidden, false); assert.equal(sw.disabled, true);
+  assert.equal(sw.hidden, false); assert.equal(sw.disabled, false);
   assert.equal(sw.innerHTML, "SWEEP SELL 1734.56789012 · POOL + FAST · avg 0.00447473<small>up to 500 instant, then 1234.56789012 on-chain</small>");
-  assert.match(u.els.dxReview.innerHTML, /SWEEP cannot be sent from this app yet: the on-chain engine cannot be told to take only what crosses/);
+  assert.match(u.els.dxReview.innerHTML, /SWEEP takes the FAST part first, then what is left of your amount on-chain \(BOOK \/ POOL\) inside your limit\. Both parts only take: nothing is left resting\./);
   assert.match(u.els.dxCta.innerHTML, /SELL 500 NOW · FAST/, "the single-source buttons stay below");
   assert.equal(u.els.dxCta2.hidden, false);
   // no second round of quotes while nothing changes
@@ -1109,4 +1114,75 @@ test("0.19.404: History is one chronological list of every kind; NET counts FAST
   html = els.dxBody.innerHTML;
   assert.ok(html.includes("PP69") && !/data-hmore/.test(html), "the older pool rows are there after Show more, none dropped by a 60 cap");
   const heads = [...html.matchAll(/<div class="dx-day">([^<]*)<\/div>/g)].map(m => m[1]); assert.ok(heads.every((d, i) => heads.indexOf(d) === i), "each day header once");
+});
+
+// ---- 0.19.406: engine 0.0.153 on the native screen ----
+test("0.19.406: SWEEP sends: one confirmation with both parts and the worst price; the FAST part take-only through the page's run, then the on-chain remainder as a take-only LIMIT; results with every transaction id whole", async () => {
+  const H = (c) => "0x" + c.repeat(32), ORDER = H("0A"), FILLTX = H("1B"), CHAINTX = H("2C");
+  let fills = [];
+  const u = await tradeUi({ book: OWNER_BOOK, quote: OWNER_QUOTE, fills: () => fills });
+  const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));
+  u.els.dxBids.onclick({ target: { closest: () => ({ dataset: rows[1] }) } }); await u.settle(); await u.settle();
+  const sw = u.els.dxCtaSweep; assert.equal(sw.disabled, false);
+  sw.onclick(); await u.settle();
+  assert.equal(u.dialogs.length, 1);
+  const q = u.dialogs[0].innerHTML;
+  assert.match(q, /Sweep SELL 1734\.56789012 MINIMA\?/);
+  assert.match(q, /1\. FAST, now: up to 500 MINIMA from the fast book, at 0\.00441234 at worst\./);
+  assert.match(q, /2\. Then on-chain \(BOOK \/ POOL\): what is left of your 1734\.56789012 MINIMA, at your limit 0\.004413 at worst/);
+  assert.match(q, /Worst price of either part: 0\.00441234 MxUSD per MINIMA\./, "a SELL: the lower of the two");
+  assert.match(q, /nothing is left resting/);
+  const rev = u.cmds.find(c => c.op === "reviewed");
+  assert.deepEqual(JSON.parse(JSON.stringify(rev)), { op: "reviewed", buy: false, price: "0.00441234", amount: "500" }, "the FAST part is signed only inside what was confirmed");
+  const d1 = u.drives()[0].drive;
+  assert.equal(d1.act, "sweepFast"); assert.deepEqual(JSON.parse(JSON.stringify(d1.args)), { buy: false, limit: "0.00441234", amount: "500" });
+  fills = [{ role: "taker", orderId: ORDER, txpowid: FILLTX, side: "sell", filled: "500", price: "0.00441234", ts: Math.floor(Date.now() / 1000) + 1, status: "posted" }];
+  u.answer(d1.id, { value: { ok: true, got: "500", unanswered: "0", tried: [ORDER], reason: "" } }); await u.settle(); await u.settle();
+  const intent = u.cmds.filter(c => c.op === "intent").pop();
+  assert.deepEqual(JSON.parse(JSON.stringify(intent)), { op: "intent", type: "LIMIT", buy: false, price: "0.004413", amount: "1234.56789012" }, "the remainder, at the 6-decimal limit (SELL up)");
+  const d2 = u.drives()[1].drive;
+  assert.equal(d2.act, "sweepChain"); assert.deepEqual(JSON.parse(JSON.stringify(d2.args)), { buy: false, price: "0.004413", amount: "1234.56789012" });
+  u.answer(d2.id, {}); await u.settle();
+  u.win.DexUI._service(JSON.stringify({ origin: "service", type: "POSTED", data: { message: "Blended trade submitted — waiting for confirmation", tx: CHAINTX } })); await u.settle(); await u.settle();
+  const log = u.els.dxLog.innerHTML;
+  assert.ok(log.includes("FAST: 500 MINIMA co-signed and sent.") && log.includes("FAST transaction " + FILLTX), log);
+  assert.ok(log.includes("On-chain: Blended trade submitted") && log.includes("On-chain transaction " + CHAINTX), "every id whole");
+});
+
+test("0.19.406: SWEEP is refused, with the reason and nothing sent, while the on-chain engine or the page's takeable check is not ready", async () => {
+  let u = await tradeUi({ book: OWNER_BOOK, quote: OWNER_QUOTE });
+  const rows = [...u.els.dxBids.innerHTML.matchAll(/data-side="(\w+)" data-price="([0-9.]+)" data-cum="([0-9.]+)"/g)].map(m => ({ side: m[1], price: m[2], cum: m[3] }));
+  u.els.dxBids.onclick({ target: { closest: () => ({ dataset: rows[1] }) } }); await u.settle(); await u.settle();
+  u.page({ view: pageView(OWNER_BOOK.fast, false) }); await u.settle();
+  u.els.dxCtaSweep.onclick(); await u.settle();
+  assert.equal(u.drives().length, 0); assert.equal(u.dialogs.length, 0);
+  assert.match(u.els.dxLog.innerHTML, /The FAST book is still being checked for orders this node can take\. Nothing was signed or sent\./);
+  Object.assign(u.status, { restingReady: false, restingWhy: "" }); u.page({}); await u.settle();
+  assert.equal(u.els.dxCtaSweep.hidden || u.els.dxCtaSweep.disabled, true, "off while the on-chain engine is not ready");
+});
+
+test("0.19.406: the ladder shows only the FAST orders the page's takeable view shows (an order this node cannot take is no market); before the page has checked, only my own", async () => {
+  const book = { fast: [{ side: "sell", price: "0.0040", minima: "100", ours: false }, { side: "sell", price: "0.0041", minima: "50", ours: true }], book: [], poolAsks: [], poolBids: [], pools: [] };
+  const u = await tradeUi({ book });
+  const asks = () => [...u.els.dxAsks.innerHTML.matchAll(/data-price="([0-9.]+)"/g)].map(m => m[1]);
+  assert.deepEqual(asks().sort(), ["0.004", "0.0041"].sort());
+  u.page({ view: pageView([book.fast[1]]) }); await u.settle();   // the takeable rule hid the stranger's order
+  assert.deepEqual(asks(), ["0.0041"], "the relay's raw list (dxBook) is not what is drawn");
+  u.page({ view: Object.assign(pageView([book.fast[1]], false)) }); await u.settle();
+  assert.match(u.els.dxKind.textContent, /checking which FAST orders this node can take…/);
+  u.page({ view: Object.assign(pageView([book.fast[1]]), { hidden: "1 order hidden: its coins could not be found" }) }); await u.settle();
+  assert.match(u.els.dxKind.textContent, /1 order hidden: its coins could not be found/);
+  const ui = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ui.js"), "utf8"), bridge = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon", "mds.js"), "utf8");
+  assert.ok(/const lad = \(\) => C\.ladder\(X\.book, X\.group, takeable\(\)\);/.test(ui));
+  assert.ok(/asks: DexiconFast\.bookView\(true, ""\), bids: DexiconFast\.bookView\(false, ""\), hidden: String\(h\.summary \|\| ""\)/.test(bridge) && /ready: !!DexiconFast\.ready\(\), rev: Number\(DexiconFast\.rev\(\)\)/.test(bridge));
+});
+
+test("0.19.406: an order placed on old coins: the engine's notice is said; a coinless order is 'waiting for its coins'; the service's alerts are said", async () => {
+  const says = C.pageSays({ notice: "Fast sell 10 MINIMA @ 0.004 placed; goes live to takers after the next block (refreshing your coins) — on 2/2 relays — order 0xAB", kind: "posted", log: [] }, {});
+  assert.deepEqual(says.lines, ["Fast sell 10 MINIMA @ 0.004 placed; goes live to takers after the next block (refreshing your coins) — on 2/2 relays — order 0xAB"]);
+  const u = await tradeUi({ book: CHAIN_BOOK });
+  u.win.DexUI._service(JSON.stringify({ type: "save_failed", where: "fill", message: "the fill of 5 MINIMA on order 0x01 was NOT applied" })); await u.settle();
+  assert.match(u.els.dxLog.innerHTML, /A save of your orders did not land: the fill of 5 MINIMA on order 0x01 was NOT applied\. Nothing was placed, cancelled or published by it\./);
+  const ui = fs.readFileSync(path.join(__dirname, "..", "renderer", "dexicon-ui.js"), "utf8");
+  assert.ok(ui.includes('I18N.t("waiting for its coins: goes live to takers after the next block")'));
 });

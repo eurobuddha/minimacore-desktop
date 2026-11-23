@@ -1133,6 +1133,10 @@ PDService.actionInner = function(message) {
   }
   if (message.type === "LIMIT") {
     data = message.data || {};
+    /* takeOnly is strict (0.4.33): boolean true = take-only, absent or false = normal. Anything else ("true", 1,
+       "yes", null) used to read as false and RESTED the order a caller meant never to rest: refused, nothing sent. */
+    if (data.hasOwnProperty("takeOnly") && data.takeOnly !== true && data.takeOnly !== false)
+      return PDService.tell("ERROR", {message:"takeOnly must be true or false (got " + JSON.stringify(data.takeOnly) + "). Nothing was sent."});
     amountD = PDService.maybeDec(data.minima); priceD = PDService.maybeDec(data.price); minRemD = PDService.dec(data.minRem);
     if (!amountD || !amountD.gt(0)) return PDService.tell("ERROR", {message:"Enter a valid MINIMA amount"});
     if (!priceD || !priceD.gt(0)) return PDService.tell("ERROR", {message:"Enter a valid price"});
@@ -1157,25 +1161,33 @@ PDService.limitWithPools = function(data) {
     PDService.tell("ERROR", {message:"Could not plan the trade — " + (error && error.message ? error.message : error) + " (nothing was sent)"});
   }
 };
+/* TAKE-ONLY (data.takeOnly === true): take what crosses the limit, up to the amount, and NEVER rest — no restQueue
+   entry, no PandaTxn.create. A client that swept its FAST book first sends the on-chain share this way so nothing is
+   left resting. Nothing crosses -> ERROR, nothing sent; part crosses -> that part trades and the untraded remainder is
+   said in the stage and the POSTED message. Without the flag every path below is exactly as before. */
+PDService.takeOnlyRest = function(rest, price) {
+  return " \u2014 " + PandaDEX.plain(rest) + " MINIMA did not cross " + price + " and was not placed (take-only)";
+};
 PDService.limitWithPoolsInner = function(data) {
   /* data.minima was already validated and normalised by the LIMIT handler before the pool refresh;
      re-derive it here because this no longer shares a scope with it. */
-  var i, plan, comp, rest, amountD = PandaDEX.d(data.minima);
+  var i, plan, comp, rest, amountD = PandaDEX.d(data.minima), takeOnly = data.takeOnly === true, left = "";
   {
     comp = PandaComposite.plan(PDService.book, PDService.pools, !!data.buy, data.minima, data.price || null, PDService.block);
     if (!PandaComposite.isEmpty(comp) && PandaComposite.poolCount(comp) > 0) {
       PDService.filling = {};
       for (i = 0; i < comp.sourceCoinIds.length; i++) PDService.filling[comp.sourceCoinIds[i]] = true;
       rest = amountD.sub(comp.totalMinima);
+      if (takeOnly && rest.gt(0)) left = PDService.takeOnlyRest(rest, data.price);
       PDService.setBusy(true); PDService.setStage("Building blended transaction… selecting coins and signing");
       return PandaTxn.fillComposite(PDService.cmd, PDService.identity, comp, !!data.buy, function(error, tx) {
         PDService.setBusy(false);
         if (error) { PDService.filling = {}; PDService.setStage("Trade failed — " + error); return PDService.tell("ERROR", {message:error}); }
-        PDService.setStage("Posted — waiting for a block to confirm your " + (data.buy ? "buy" : "sell") + " of " + PandaDEX.plain(comp.totalMinima) + " MINIMA");
-        PDService.tell("POSTED", {message:"Blended trade submitted — waiting for confirmation", tx:tx});
+        PDService.setStage("Posted — waiting for a block to confirm your " + (data.buy ? "buy" : "sell") + " of " + PandaDEX.plain(comp.totalMinima) + " MINIMA" + left);
+        PDService.tell("POSTED", {message:"Blended trade submitted — waiting for confirmation" + left, tx:tx});
         /* The remainder only rests once every source coin has actually left the chain. Posting it
            earlier would spend funding the blended transaction is still relying on. */
-        if (rest.gt(0)) {
+        if (rest.gt(0) && !takeOnly) {
           PDService.restQueue = {buy:!!data.buy, minima:PandaDEX.plain(rest), price:data.price, gtc:data.gtc, minRem:data.minRem};
           PDService.restQueueCoins = comp.sourceCoinIds.slice();
           PDService.restQueueBlock = PDService.block;
@@ -1196,6 +1208,7 @@ PDService.limitWithPoolsInner = function(data) {
     }
     plan = PandaBook.plan(PDService.book, !!data.buy, data.minima, data.price || null, PDService.block);
     if (!plan || !plan.takes || !plan.takes.length) {
+      if (takeOnly) { PDService.setStage("Nothing on-chain crosses " + data.price + ". Nothing was sent."); return PDService.tell("ERROR", {message:"Nothing on-chain crosses " + data.price + ". Nothing was sent."}); }
       PDService.setBusy(true); PDService.setStage("Building transaction… selecting coins and signing");
       return PandaTxn.create(PDService.cmd, PDService.identity, data, function(error, tx, orderId) {
         PDService.setBusy(false);
@@ -1208,13 +1221,14 @@ PDService.limitWithPoolsInner = function(data) {
     PDService.filling = {};
     for (i = 0; i < plan.takes.length; i++) PDService.filling[plan.takes[i].order.coinid] = true;
     rest = PDService.dec(data.minima).sub(plan.totalMinima);
+    if (takeOnly && rest.gt(0)) left = PDService.takeOnlyRest(rest, data.price);
     PDService.setBusy(true); PDService.setStage("Building transaction… selecting coins and signing");
     return PandaTxn.fill(PDService.cmd, PDService.identity, plan, function(error, tx) {
       PDService.setBusy(false);
       if (error) { PDService.filling = {}; PDService.setStage("Trade failed — " + error); return PDService.tell("ERROR", {message:error}); }
-      PDService.setStage("Posted — waiting for a block to confirm your " + (data.buy ? "buy" : "sell") + " of " + PandaDEX.plain(plan.totalMinima) + " MINIMA");
-      PDService.tell("POSTED", {message:"Trade submitted — waiting for confirmation", tx:tx});
-      if (rest.gt(0)) {
+      PDService.setStage("Posted — waiting for a block to confirm your " + (data.buy ? "buy" : "sell") + " of " + PandaDEX.plain(plan.totalMinima) + " MINIMA" + left);
+      PDService.tell("POSTED", {message:"Trade submitted — waiting for confirmation" + left, tx:tx});
+      if (rest.gt(0) && !takeOnly) {
         PDService.restQueue = {buy:!!data.buy, minima:PandaDEX.plain(rest), price:data.price, gtc:data.gtc, minRem:data.minRem};
         PDService.restQueueCoins = [];
         for (i = 0; i < plan.takes.length; i++) PDService.restQueueCoins.push(plan.takes[i].order.coinid);

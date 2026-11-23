@@ -3,9 +3,9 @@
  * (dexicon-parity-manifest.cjs, which this script only reads).
  *
  * renderer/dexicon/ holds the MiniDapp's page, byte for byte from mds/dexicon at the SAME commit as the engine:
- * index.html, ui/, and the four files only the page loads (lib/activity.js, lib/calm.js, resting/{balance,zip,export,
- * explorer}.js). mds.js is this app's own bridge and the only file there that is not pinned. doors/ and lib/door.js
- * must not be there at all.
+ * index.html, ui/, and the files only the page loads (lib/activity.js, lib/calm.js, lib/takeable.js, resting/{balance,zip,
+ * export,explorer}.js, and doors/sha3.js: the hash lib/takeable.js needs). mds.js is this app's own bridge and the only file
+ * there that is not pinned. Every other door, and lib/door.js, must not be there at all.
  *
  *   node scripts/dexicon-page-manifest.cjs --verify    (default; CI: the committed digests)
  *   node scripts/dexicon-page-manifest.cjs --update    (beside a re-copy; needs the donor repo, checks every byte against its commit)
@@ -33,7 +33,8 @@ function listed() {
 function digest() {
   const files = {};
   for (const f of listed()) {
-    if (/^doors\//.test(f) || f === 'lib/door.js') fail('FAIL the AtomiX doors must not be in the page folder: renderer/dexicon/' + f);
+    // doors/sha3.js only (0.19.406): AXSHA3, which lib/takeable.js needs for a script's address; it is a hash, no AtomiX door
+    if ((/^doors\//.test(f) && f !== 'doors/sha3.js') || f === 'lib/door.js') fail('FAIL the AtomiX doors must not be in the page folder: renderer/dexicon/' + f);
     const buf = fs.readFileSync(path.join(pageDir, f));
     files[f] = { sha256: sha256(buf), bytes: buf.length };
   }

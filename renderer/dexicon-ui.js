@@ -163,10 +163,11 @@ const DexUI = (() => {
     const ok = node.state === "running" && st && st.ready;
     if (!ok) { X.book = null; X.loaded = false; return; }
     const got = await Promise.allSettled([api.dxBook(), api.dxMine(), api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k IN ('myorders','pending_takes','mm_config','mm_status','mm_feed','mm_pool','mm_review','activity')" }),
-      api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%'" }), api.cmd("balance")]);
+      api.dxCommand({ op: "sql", query: "SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%'" }), api.cmd("balance"), api.dxFastCoins ? api.dxFastCoins() : null]);
     const val = (i, d) => (got[i].status === "fulfilled" && got[i].value != null ? got[i].value : d);
     X.kv = {}; for (const r of (val(2, {}).rows || [])) X.kv[r.K || r.k] = String(r.V == null ? r.v : r.V);
     const json = (k, d) => { try { const v = JSON.parse(X.kv[k]); return v == null ? d : v; } catch (e) { return d; } };
+    X.coins = val(5, null);   // 0.19.406: the FAST backing-coin settings (main dexicon.fastCoins)
     X.book = val(0, null); X.mine = val(1, { orders: [], pending: [] }); X.orders = json("myorders", []); if (!Array.isArray(X.orders)) X.orders = [];
     X.takes = json("pending_takes", {}); X.mm = json("mm_config", {}); X.acts = json("activity", []); if (!Array.isArray(X.acts)) X.acts = [];
     X.fills = ((val(3, {}).rows) || []).map(r => { try { return JSON.parse(r.V || r.v); } catch (e) { return null; } }).filter(Boolean).sort((a, b) => (b.ts || 0) - (a.ts || 0));
@@ -177,8 +178,18 @@ const DexUI = (() => {
   }
   function onService(message) {   // the service's packets, in its own words (main/dexicon.js "comms")
     let p = null; try { p = JSON.parse(message); } catch (e) { return; }
+    // 0.19.406 (service.desktop.js SAID): a save that did not land, a take refused, a coin refresh that failed: said
+    if (p && !p.origin && /^(save_failed|take_refused|relock_failed)$/.test(String(p.type))) return void say(serviceAlert(p), "error");
     if (!p || p.origin !== "service") return;
     if (p.type === "STATE") X.svc = p.data || {};
+    if ((p.type === "POSTED" || p.type === "ERROR") && X.chainWait) { const w = X.chainWait; X.chainWait = null; w(p); }   // SWEEP part 2 waits for the service's answer
+  }
+  /** The service's alert in plain words, its own message whole (identifiers in full). */
+  function serviceAlert(p) {
+    const m = String(p.message || p.reason || "");
+    return p.type === "take_refused" ? I18N.t("A take of your order {orderId} was refused: {reason}", { orderId: String(p.orderId || ""), reason: m })
+      : p.type === "relock_failed" ? I18N.t("Refreshing the coins of one of your FAST orders failed: {message}. It stays waiting for its coins and is tried again by itself.", { message: m })
+      : I18N.t("A save of your orders did not land: {message}. Nothing was placed, cancelled or published by it.", { message: m });
   }
   /** H2 (0.18.118): after a FAST trade or order the amount field is the PAGE's own: only what is surely untraded
    *  after a sweep (ui/app.js finishSweep), empty after a published order. Never the full amount again. */
@@ -191,12 +202,17 @@ const DexUI = (() => {
   /** One money action at a time in the whole of Dexicon (H2): a second click, a held Enter or another button, in any
    *  room, does nothing while one is being reviewed, signed or sent. */
   const money = (fn) => C.money(fn, draw);   // the gate is DexCore's: rooms 1 and 2 pass through the same one
-  /** The FAST orders the book, the row click's cumulative amount and the sweep may count. All of them for now; the one
-   *  place where a later change leaves out orders this node cannot take (designed separately). */
-  const takeable = (fast) => fast;
-  const book = () => C.tradeBook(X.book, Array.isArray(Page.state.fast) ? takeable(Page.state.fast) : Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
+  /** 0.19.406 (owner: "If an order is not tradable, it shouldn't be displayed anywhere as a real market"): the FAST
+   *  orders the ladder shows are the PAGE's takeable view (lib/takeable.js through DexiconFast.bookView, reported by
+   *  renderer/dexicon/mds.js as `view`), never the relay's raw list (X.book.fast, the service's read model). Before the
+   *  page has checked the book only my own orders are in it; no view yet: no FAST row at all. The Trade ticket plans on
+   *  the page's crossing list (`fast`), which is the same rule's. */
+  const takeable = () => { const v = Page.state.view; if (!v) return [];
+    const rows = (list, side) => (Array.isArray(list) ? list : []).map(r => ({ side, price: String(r.exact || r.price), minima: String(r.size), ours: !!r.own }));
+    return rows(v.asks, "sell").concat(rows(v.bids, "buy")); };
+  const book = () => C.tradeBook(X.book, Page.state.fast);   // the Trade ticket plans on the book the page will act on (H1)
   const fundsNow = () => C.funds(X.bal && X.bal.minima, X.bal && X.bal.mxusd, X.orders, X.fills);
-  const lad = () => C.ladder(X.book, X.group, takeable((X.book && X.book.fast) || []));
+  const lad = () => C.ladder(X.book, X.group, takeable());
 
   /** What stops trading right now: { text, soft } in plain words, or null when nothing does. soft: the FAST layer may be
    *  deaf but on-chain orders and pools still work, so the buttons stay live. Decided here, never from the (translated) text. */
@@ -304,6 +320,7 @@ const DexUI = (() => {
     $("dxAsks").onclick = rowClick; $("dxBids").onclick = rowClick;
     $("dxCta").onclick = () => money(() => submit("fast"));
     $("dxCta2").onclick = () => money(() => submit("chain"));
+    $("dxCtaSweep").onclick = () => money(() => sweep());
     $("dxMyOrders").onclick = (e) => { const b = e.target.closest("[data-oact]"); if (b) money(() => orderAction(b.dataset.oact, b.dataset.kind, b.dataset.id, b.dataset.price)); };
   }
   function paintTrade() {
@@ -314,7 +331,9 @@ const DexUI = (() => {
     sync.textContent = !nRelays ? I18N.t("● no relays") : relayDown() ? I18N.t("● no relay answers") : anyOk ? I18N.t("● live") : I18N.t("● connecting"); sync.dataset.ok = anyOk && !relayDown() ? "1" : "0";
     $("dxMid").textContent = L.mid ? C.fmtPrice(L.mid) : "…";
     $("dxSpread").textContent = L.spread ? I18N.t("spread {spread}", { spread: C.fmt(L.spread) }) : "";
-    $("dxKind").textContent = I18N.t("{bestBid} · FAST + BOOK + POOL", { bestBid: (!L.mid ? I18N.t("no live orders") : L.bestBid && L.bestAsk ? I18N.t("mid of best bid / best ask") : L.bestBid ? I18N.t("best bid only") : I18N.t("best ask only")) });
+    const view = Page.state.view;   // 0.19.406: what the takeable rule left out, in the page's words; or that it has not checked yet
+    $("dxKind").textContent = I18N.t("{bestBid} · FAST + BOOK + POOL", { bestBid: (!L.mid ? I18N.t("no live orders") : L.bestBid && L.bestAsk ? I18N.t("mid of best bid / best ask") : L.bestBid ? I18N.t("best bid only") : I18N.t("best ask only")) })
+      + (!view || !view.ready ? " · " + I18N.t("checking which FAST orders this node can take…") : view.hidden ? " · " + view.hidden : "");
     $("dxBidsN").textContent = I18N.t("{fast} fast · {book} book order{book2}", { fast: L.count.fast, book: L.count.book, book2: I18N.s(L.count.book) });
     $("dxAsksN").textContent = I18N.t("{pools} pool{pools2}", { pools: L.count.pools, pools2: I18N.s(L.count.pools) });
     // the only outside price shown is MEXC's, with the label the engine's read model gives it
@@ -357,13 +376,13 @@ const DexUI = (() => {
     const typo = C.entryProblem($("dxPrice").value) || C.entryProblem($("dxAmount").value);
     $("dxWarn").textContent = typo ? typo : pl.ok === false && pl.why ? pl.why : short ? I18N.t("Exceeds your free {buy} by {short} (free {free})", { buy: (buy ? "MxUSD" : "MINIMA"), short: C.fmt(pl.short), free: C.fmtBal(pl.free) }) : "";
     const chainNo = C.chainWhy(st);   // 0.19.373: the on-chain engine is not ready: said, and BOOK / POOL is off
-    const sw = sweepFor(pl, chainNo);   // 0.19.375: FAST and on-chain both cross: the SWEEP (shown, not sendable yet)
-    $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).concat(pl.ok && pl.chain && chainNo ? [chainNo] : []).concat(sw ? [String(SWEEP_NOT_YET)] : []).map(l => `<p>${esc(l)}</p>`).join("")
+    const sw = sweepFor(pl, chainNo);   // 0.19.375: FAST and on-chain both cross: the SWEEP (sendable since 0.19.406: both parts take-only)
+    $("dxReview").innerHTML = C.review(pl, ((st && st.relays) || []).length).concat(pl.ok && pl.chain && chainNo ? [chainNo] : []).concat(sw ? [I18N.t(SWEEP_SAYS)] : []).map(l => `<p>${esc(l)}</p>`).join("")
       || `<p>${th("Crosses FAST orders → the button IS the trade: one click takes them best-first up to your amount, no dialog, progress in the log below; what they can't cover is not traded. BOOK/POOL on-chain liquidity still shows a confirm. Nothing crosses → rests on the relays as your FAST order.")}</p>`;
     const cta = $("dxCta"), cta2 = $("dxCta2"), trading = !!Page.state.trading || C.gate.on, dead = !!why && !why.soft;
     const cta3 = $("dxCtaSweep");
     for (const b of [cta, cta2, cta3]) b.dataset.side = buy ? "buy" : "sell";
-    cta3.hidden = !sw || trading; cta3.disabled = true;   // SWEEP_NOT_YET: the page cannot be told to take on-chain without resting a remainder
+    cta3.hidden = !sw || trading; cta3.disabled = dead || !f.known || trading || !!typo || !!chainNo || short;
     cta3.innerHTML = sw ? esc(I18N.t("SWEEP {side} {total} · {route} + FAST · avg {avg}", { side: side.trim(), total: C.fmt(C.add(sw.chainQ, sw.fastQ)), route: sw.route, avg: sw.avg ? C.fmtPrice(sw.avg) : "—" }))
       + "<small>" + esc(I18N.t("up to {fast} instant, then {chain} on-chain", { fast: C.fmt(sw.fastQ), chain: C.fmt(sw.chainQ) })) + "</small>" : "";
     cta.innerHTML = trading ? "TRADING…" : pl.ok && pl.fast && !pl.stuck ? esc(I18N.t("{take} NOW · FAST", { take: side + C.fmt(pl.take) })) + "<small>" + th("instant ·") + " " + esc(C.fmtPrice(pl.avg)) + "</small>" : buy ? th("BUY MINIMA") : th("SELL MINIMA");
@@ -378,13 +397,12 @@ const DexUI = (() => {
     log.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join("") + (mine ? `<div class="dx-log__${mine.kind}">${esc(mine.text)}</div>` : "");
     log.dataset.kind = says.error ? "error" : "";   // "Only your own orders are at this price…" is plan feedback
   }
-  // ---- SWEEP (0.19.375): the phone's split (C.decideBoth) over the PAGE's own on-chain quotes (ACTS.quote) ----
-  /** Why the button cannot be pressed. The phone runs part 2 as an on-chain trade of exactly the re-quoted amount that
-   *  rests nothing. This page's only on-chain message is a LIMIT, and the engine (resting/pd_service.js) rests whatever
-   *  of a LIMIT does not cross when it plans (after re-reading the pools), or all of it when nothing crosses then. So a
-   *  book that moved between the quote and the send would leave an order resting, signed by the engine with no review.
-   *  Until the engine can be told "take only", SWEEP is shown with its split and average and is not sendable. */
-  const SWEEP_NOT_YET = L_("SWEEP cannot be sent from this app yet: the on-chain engine cannot be told to take only what crosses, so if the book moved before the on-chain part was sent, part of it could be left resting as an order, and a sweep must leave nothing resting. Take the FAST part with the first button, then the rest with BOOK / POOL.");
+  // ---- SWEEP (0.19.375; sendable since 0.19.406): the phone's split (C.decideBoth) over the PAGE's own on-chain quotes ----
+  /** One click, two take-only parts, nothing ever rests: the FAST part first through the page's own run
+   *  (DexiconFast.take, takeOnly), then what is left of the amount on-chain as a TAKE-ONLY LIMIT (resting/pd_service.js
+   *  0.4.33+: it takes what crosses up to the amount and never rests; nothing crosses → nothing sent). Before 0.19.406
+   *  the engine could not be told "take only", so the button was shown and never sendable. */
+  const SWEEP_SAYS = L_("SWEEP takes the FAST part first, then what is left of your amount on-chain (BOOK / POOL) inside your limit. Both parts only take: nothing is left resting.");
   const Sweep = { key: "", res: null };
   /** The sweep for this ticket, or null. Asked of the page once per change of the ticket or the book; drawn when it answers. */
   function sweepFor(pl, chainNo) {
@@ -397,6 +415,51 @@ const DexUI = (() => {
       C.decideBoth(b, buy, price, amount, quote).then(res => res, () => null).then(res => { if (Sweep.key === key) { Sweep.res = res; paintTicket(); } });
     }
     return Sweep.res;
+  }
+  /** The SWEEP button: one confirmation naming both parts and the worst price, then the FAST take, then the on-chain
+   *  remainder; the results in plain words with every transaction id whole. Refused, with the reason, when either
+   *  engine is not ready. */
+  async function sweep() {
+    const buy = X.buy, price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim(), sw = Sweep.res, side = buy ? I18N.t("BUY") : I18N.t("SELL");
+    X.said = null;
+    const typo = C.entryProblem(price) || C.entryProblem(amount); if (typo) return say(typo, "note");
+    const chainNo = C.chainWhy(st); if (chainNo) return say(chainNo + " " + I18N.t("Nothing was signed or sent."), "note");
+    if (!Page.state.ready || !Page.state.view || !Page.state.view.ready) return say(I18N.t("The FAST book is still being checked for orders this node can take. Nothing was signed or sent."), "note");
+    if (!sw) return say(I18N.t("There is no sweep for this ticket now: the book changed. Nothing was signed or sent."), "note");
+    const lim = C.chainLimit(buy, price), fastPl = C.plan(book(), buy, price, C.str(sw.fastQ), fundsNow());
+    if (!lim || !fastPl.ok || fastPl.stuck || !fastPl.fast) return say(I18N.t("The FAST book changed: review the sweep again. Nothing was signed or sent."), "note");
+    const fastWorst = C.dec(C.expectOf(fastPl).worst), worst = !fastWorst ? lim : (buy ? (C.cmp(fastWorst, lim) > 0 ? fastWorst : lim) : (C.cmp(fastWorst, lim) < 0 ? fastWorst : lim));
+    const ok = await dialog(I18N.t("Sweep {side} {total} MINIMA?", { side, total: C.fmt(C.dec(amount)) }),
+      I18N.t("1. FAST, now: up to {fast} MINIMA from the fast book, at {fastWorst} at worst.\n2. Then on-chain (BOOK / POOL): what is left of your {total} MINIMA, at your limit {limit} at worst (on-chain prices have 6 decimals). Final when a block confirms it (about 3 minutes).\n\nWorst price of either part: {worst} MxUSD per MINIMA.\nBoth parts only take: what does not cross is not traded, and nothing is left resting.",
+        { fast: C.fmt(sw.fastQ), fastWorst: fastWorst ? C.fmtPrice(fastWorst) : "—", total: C.fmt(C.dec(amount)), limit: C.fmtPrice(lim), worst: C.fmtPrice(worst) }), I18N.t("Sign and send"));
+    if (!ok) return say(I18N.t("Nothing was signed or sent."), "note");
+    // part 1: the FAST take, signed only inside what was just confirmed (main/dexicon-signgate.js)
+    try { await api.dxCommand({ op: "reviewed", buy, price, amount: C.str(sw.fastQ) }); } catch (e) { return say(I18N.t("The review could not be recorded, so nothing was signed: {message}", { message: C.refusal(e && e.message) })); }
+    const t0 = Date.now(), r1 = await drive("sweepFast", { buy, limit: price, amount: C.str(sw.fastQ) });
+    if (r1.error) return say(r1.error);
+    const f = r1.value || {}, got = C.dec(f.got) || C.zero, unanswered = C.dec(f.unanswered) || C.zero;
+    await load();
+    const tried = Array.isArray(f.tried) ? f.tried.map(String) : [];
+    const ids = X.fills.filter(x => x.role === "taker" && tried.includes(String(x.orderId)) && Number(x.ts) * 1000 >= t0 - 2000).map(x => String(x.txpowid));
+    const lines = [I18N.t("FAST: {got} MINIMA co-signed and sent.", { got: C.fmt(got) }) + (unanswered.v > 0n ? " " + I18N.t("{n} MINIMA sent to makers who have not answered yet (it may still fill within 5 minutes).", { n: C.fmt(unanswered) }) : "") + (f.ok === false && f.reason ? " " + String(f.reason) : "")]
+      .concat(ids.map(id => I18N.t("FAST transaction {txpowid}", { txpowid: id })));
+    // part 2: what is left of the amount (what may still fill counts as taken: never more than asked), take-only
+    const left = C.down(C.sub(C.dec(amount), C.add(got, unanswered)), 8);
+    if (left.v > 0n) {
+      try { await api.dxCommand({ op: "intent", type: "LIMIT", buy, price: C.str(lim), amount: C.str(left) }); }
+      catch (e) { lines.push(I18N.t("On-chain: not sent: {message}", { message: C.refusal(e && e.message) })); say(lines.join("\n"), "error"); return; }
+      let tm = null; const heard = new Promise(res => { X.chainWait = (p) => { clearTimeout(tm); res(p); }; tm = setTimeout(() => { X.chainWait = null; res(null); }, 180000); });
+      const r2 = await drive("sweepChain", { buy, price: C.str(lim), amount: C.str(left) });
+      if (r2.error) { X.chainWait = null; clearTimeout(tm); lines.push(I18N.t("On-chain: not sent: {message}", { message: r2.error })); }
+      else {
+        const p = await heard, d = (p && p.data) || {};
+        lines.push(!p ? I18N.t("On-chain: sent to the engine; it has not answered yet. Activity shows how it went.")
+          : p.type === "POSTED" ? I18N.t("On-chain: {message}", { message: String(d.message || "") }) + (d.tx ? "\n" + I18N.t("On-chain transaction {txpowid}", { txpowid: String(d.tx) }) : "")
+          : I18N.t("On-chain: not sent: {message}", { message: String(d.message || "") }));
+      }
+    } else lines.push(I18N.t("On-chain: nothing left to take."));
+    say(lines.join("\n"), "note");
+    load().then(draw, draw);
   }
   async function submit(layer) {
     const price = $("dxPrice").value.trim(), amount = $("dxAmount").value.trim();
@@ -445,7 +508,7 @@ const DexUI = (() => {
     for (const o of X.orders) {
       if (o.status !== "live") continue;
       const sell = o.side === "sell", rem = C.dec(o.remaining), price = C.dec(o.price); if (!rem || !price) continue;
-      out.push(orderRow(sell, (sell ? "SELL " : "BUY ") + C.fmt(rem) + " @ " + C.fmtPrice(price) + ((o.coins || []).length ? "" : "  UNBACKED"), I18N.t("FAST · order {orderId}", { orderId: o.orderId }), "fast", o.orderId, C.fmt(price)));
+      out.push(orderRow(sell, (sell ? "SELL " : "BUY ") + C.fmt(rem) + " @ " + C.fmtPrice(price) + ((o.coins || []).length ? "" : "  " + coinless(o)), I18N.t("FAST · order {orderId}", { orderId: o.orderId }), "fast", o.orderId, C.fmt(price)));
     }
     for (const o of (X.mine.orders || [])) {
       const m = C.dec(o.minima), price = C.dec(o.price); if (!m || !price) continue;
@@ -457,6 +520,9 @@ const DexUI = (() => {
     }
     return out.join("");
   }
+  /** 0.19.406 (Dexicon 0.0.102+): a FAST order with no backing coins: waiting for its coins (a refresh is under way),
+   *  its refresh failed (the engine's reason, retried by itself), or unbacked (the service re-backs it). */
+  const coinless = (o) => ((o.relocking || []).length ? I18N.t("waiting for its coins: goes live to takers after the next block") : o.relockError ? I18N.t("waiting for its coins: refreshing them failed ({error}); tried again by itself", { error: String(o.relockError) }) : "UNBACKED");
   const orderRow = (sell, text, sub, kind, id, price, busy) => `<div class="dx-orow"><div><span class="dx-o${sell ? "sell" : "buy"}">${esc(text)}</span><small data-copy="${esc(id)}" title="${th("Click to copy")}">${esc(sub)}</small></div>`
     + (busy ? "" : `<button data-oact="edit" data-kind="${kind}" data-id="${esc(id)}" data-price="${esc(price)}" aria-label="${th("Change the price of this order")}">✎</button><button class="dx-ox" data-oact="cancel" data-kind="${kind}" data-id="${esc(id)}" aria-label="${th("Cancel this order")}">✕</button>`) + `</div>`;
   async function orderAction(act, kind, id, price) {
@@ -510,7 +576,7 @@ const DexUI = (() => {
         any = true;
         const left = Math.max(0, Math.floor(((Number(o.expiry) || 0) - Date.now() / 1000) / 3600));
         out.push(`<div class="dx-card dx-ocard"><div class="dx-row"><span class="dx-oline dx-o${sell ? "sell" : "buy"}">${tr("{sell}{rem} MINIMA @ {price}", { sell: sell ? (th("SELL") + " ") : (th("BUY") + " "), rem: C.fmt(rem), price: C.fmtPrice(price) })}</span><span class="dx-oacts"><button data-oact="edit" data-kind="fast" data-id="${esc(o.orderId)}" data-price="${C.fmt(price)}" aria-label="${th("Change the price of this order")}">✎</button><button class="dx-ox" data-oact="cancel" data-kind="fast" data-id="${esc(o.orderId)}" aria-label="${th("Cancel this order")}">✕</button></span></div>`
-          + `<div class="dx-sub">${tr("FAST · of {rem}  ·  {n} backing coin{n2}{n3}{left}  ·  seq {seq}", { rem: esc(C.fmt(C.dec(o.amount) || rem)), n: n, n2: I18N.s(n), n3: n ? "" : (" " + th("(UNBACKED: takers skip it until your node backs it again)")), left: o.expiry ? ("  " + tr("·  expires in {left}h", { left: left })) : "", seq: esc(o.seq) })}</div>${idLine("order", o.orderId)}${idLine("pay-to", o.address)}</div>`);
+          + `<div class="dx-sub">${tr("FAST · of {rem}  ·  {n} backing coin{n2}{n3}{left}  ·  seq {seq}", { rem: esc(C.fmt(C.dec(o.amount) || rem)), n: n, n2: I18N.s(n), n3: n ? "" : (" " + ((o.relocking || []).length || o.relockError ? "(" + esc(coinless(o)) + ")" : th("(UNBACKED: takers skip it until your node backs it again)"))), left: o.expiry ? ("  " + tr("·  expires in {left}h", { left: left })) : "", seq: esc(o.seq) })}</div>${idLine("order", o.orderId)}${idLine("pay-to", o.address)}</div>`);
       }
       for (const o of (X.mine.orders || [])) {
         const m = C.dec(o.minima), price = C.dec(o.price); if (!m || !price) continue;
@@ -598,6 +664,15 @@ const DexUI = (() => {
     if (ds.ainfo) return void dialog(I18N.t("Activity"), ACT_INFO, "");
     if (ds.asset) { X.open[ds.asset] = !X.open[ds.asset]; return draw(); }
     if (ds.room != null) return opts.go(C.ROOMS[Number(ds.room)].view);
+    if (ds.coins) {   // 0.19.406: only what was changed is written (main dexicon.fastCoinsSave)
+      const fc = X.coins || {}, legacy = !!($("dxLegacy") && $("dxLegacy").checked), age = String(($("dxMaxAge") && $("dxMaxAge").value) || "").trim(), patch = {};
+      if (age !== "" && !(/^\d{1,3}$/.test(age) && Number(age) >= 1 && Number(age) <= 900)) return say(I18N.t("The coin max age is a whole number of blocks from 1 to 900, or empty for 900. Nothing was saved."), "note");
+      if (legacy !== (fc.legacyFresh !== false)) patch.legacyFresh = legacy;
+      if (age !== String(fc.coinMaxAge || "")) patch.coinMaxAge = age;
+      if (!Object.keys(patch).length) return say(I18N.t("Nothing changed."), "note");
+      try { X.coins = await api.dxFastCoins(patch); } catch (e) { return say(C.refusal(e && e.message)); }
+      return say(I18N.t("Saved. It applies to the next refresh of your FAST orders."), "note");
+    }
     if (ds.relay) {
       const url = ds.relay === "add" ? $("dxRelayIn").value.trim().replace(/\/+$/, "") : ds.url;
       const bad = ds.relay === "add" ? C.relayProblem(url) : "";
@@ -679,7 +754,15 @@ const DexUI = (() => {
   function settingsHtml() {
     const relays = Page.state.relays || [], px = st && st.price;
     const health = (r) => (r.found ? "found through " + r.meta.replace(/^via\s*/, "") : r.state === "ok" ? (I18N.t("OK ·") + " ") + r.meta : r.state === "bad" ? I18N.t("ERROR · {meta}", { meta: r.meta }) : I18N.t("not polled yet"));
-    return DexAx.part("settings") + `<div class="dx-card"><div class="dx-h">${th("WALLET")}</div><div class="dx-sub dx-sub--sans">${th("Dexicon trades with this node's own wallet: the node signs every trade with its own keys. Your node's seed phrase backs up everything here.")}</div></div>`
+    const fc = X.coins, legacy = !fc || fc.legacyFresh !== false;
+    // 0.19.406 (Dexicon 0.0.101-0.0.122, as DexiconPro's One order): which coins back my FAST orders. ON (the default)
+    // keeps every backing coin young by refreshing old ones, so takers on every app version can take the order
+    const coinsCard = `<div class="dx-card"><div class="dx-h">${th("FAST ORDERS ON OLD COINS")}</div>`
+      + `<label class="dx-sub dx-sub--sans"><input type="checkbox" id="dxLegacy"${legacy ? " checked" : ""}${fc ? "" : " disabled"}> ${th("Refresh my coins so every app version can take my orders")}</label>`
+      + `<div class="dx-sub dx-sub--sans">${legacy ? th("ON: an order on old coins is placed at once and goes live to takers after the next block, once its coins are refreshed (a small transaction to yourself).") : th("Old coins back orders at once; takers on older app versions and all phone apps cannot take those orders until they update.")}</div>`
+      + `<label class="dx-sub dx-sub--sans">${th("Coin max age, in blocks (1 to 900; empty means 900)")} <input class="dx-in dx-in--s" id="dxMaxAge" inputmode="numeric" autocomplete="off" value="${esc(fc ? fc.coinMaxAge : "")}"${fc ? "" : " disabled"} aria-label="${th("Coin max age, in blocks")}"></label>`
+      + `<div class="dx-mm__b"><button class="dx-btn dx-btn--acc" data-coins="save"${fc ? "" : " disabled"}>${th("SAVE")}</button></div></div>`;
+    return DexAx.part("settings") + coinsCard + `<div class="dx-card"><div class="dx-h">${th("WALLET")}</div><div class="dx-sub dx-sub--sans">${th("Dexicon trades with this node's own wallet: the node signs every trade with its own keys. Your node's seed phrase backs up everything here.")}</div></div>`
       + `<div class="dx-card"><div class="dx-h">${th("ADD RELAY")}</div><div class="dx-sub dx-sub--sans">${th("A Dexicon relay is the dexrelay cape of parlons-node.jar / maxima-server.jar. Orders are published to EVERY relay here; the book is the union. On the desktop a relay must be an https address.")}</div>`
       + `<input class="dx-in dx-in--s" id="dxRelayIn" placeholder="${th("https://relay.example/dex-relay")}" aria-label="${th("Relay address")}" autocomplete="off" spellcheck="false"><div class="dx-mm__b"><button class="dx-btn dx-btn--acc" data-relay="add">${th("ADD")}</button><button class="dx-btn dx-btn--acc" data-relay="discover">${th("DISCOVER")}</button></div></div>`
       + (relays.length ? relays.map(r => `<div class="dx-card dx-relay"><div><div class="dx-relay__u" data-copy="${esc(r.url)}" title="${th("Click to copy")}">${esc(r.url)}</div><div class="dx-relay__s" data-state="${r.found ? "" : esc(r.state)}">${esc(health(r))}</div></div>`

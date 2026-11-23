@@ -1,13 +1,17 @@
 {
   "_comment": "Digests of the Dexicon page files copied verbatim from the MiniDapp, at the same commit as the engine (scripts/dexicon-parity.manifest.json). Regenerate ONLY with `node scripts/dexicon-page-manifest.cjs --update` beside a deliberate re-copy. This app's differences belong in renderer/dexicon/mds.js, never in a page file.",
   "donor": {
-    "mdsVersion": "0.0.91",
-    "gitSha": "9a95eb114ad35d3e18692a60c248529762fd72d5"
+    "mdsVersion": "0.0.153",
+    "gitSha": "cefb6caf9fc6ac15e87ef39bb8597096d39d556f"
   },
   "files": {
+    "doors/sha3.js": {
+      "sha256": "274f091114d81679ec27964c9e80e33be03ae1827f67ecab059a49d59a66c560",
+      "bytes": 30221
+    },
     "index.html": {
-      "sha256": "56d40c2f6c046d2c3e455c3cb9f0fed69ba259fe5dc7bfada456be79bc71e832",
-      "bytes": 25751
+      "sha256": "36b03052d715e3fde8358e7364287f83ce1eb1d3f27dbcac305055bf82bc865e",
+      "bytes": 26117
     },
     "lib/activity.js": {
       "sha256": "9b876a506a0f2717231e5fc21084ebcb576be4bd3b70dbdfb383b511453164c8",
@@ -16,6 +20,10 @@
     "lib/calm.js": {
       "sha256": "fc374cacbbbafa8383fdafdd74ca8bfcfb3a33a1aed75caa2c8b89ab3fd4aded",
       "bytes": 21049
+    },
+    "lib/takeable.js": {
+      "sha256": "1e23783d9fca96a2d8360181f8715d6c144ff25219a37db937abf83b223ff026",
+      "bytes": 40659
     },
     "resting/balance.js": {
       "sha256": "75101e7f0ebd281823086ad9218edc571b2be62b4d6835504df72bc66327fde4",
@@ -38,12 +46,12 @@
       "bytes": 11441
     },
     "ui/app.js": {
-      "sha256": "17ece603c5be74be7976f7a2db49f7333410e0c8532bc19c2046d4af79ebe7be",
-      "bytes": 51826
+      "sha256": "8e1de037cc7300d86cb2c174299a1ef3f8ac55435bb0eb22172cf8f1c9f2065c",
+      "bytes": 68483
     },
     "ui/dexicon.css": {
-      "sha256": "529d5291aee1e3c9c4639f0e5359d17eeb49308fff4ca5c49dc4bca1f18a1d3f",
-      "bytes": 13763
+      "sha256": "e2b2751b1b1f9532e190c2c3381b51d09b8e392ffbf5257f8491769e025bc234",
+      "bytes": 13960
     },
     "ui/doors.js": {
       "sha256": "bd6cff70294f46dcfb238b8ca0f427c2aebd3e3097de53700cc2c1297bb5d157",
@@ -74,8 +82,8 @@
       "bytes": 11908
     },
     "ui/pd_app.js": {
-      "sha256": "f5e26aaeaadb93946fa027ae0b665cdbcbb355f5b310697bc22e5f16952bf1af",
-      "bytes": 69602
+      "sha256": "2a96960bb14437cb9c9a5cbdcfee5596ba510c73740ece7f6ab5d10b9210427e",
+      "bytes": 69733
     },
     "ui/style.css": {
       "sha256": "86dc7c3ebeb23624e5a5790fe3bdf8ca75b8099b125f640d405f0edfe81f9909",

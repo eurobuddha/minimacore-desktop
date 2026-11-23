@@ -90,7 +90,7 @@ function makeLane(size, limitMs, onDrop) {
     active: () => active, waiting: () => waiting.length
   };
 }
-const ENGINE_VERSION = "0.0.91";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
+const ENGINE_VERSION = "0.0.153";    // mds/dexicon's dapp.conf version of the vendored engine (the manifest's donor.mdsVersion; a test holds them equal)
 const PRICE_HOST = "api.mexc.com";   // resting/price.js DEPTH_URL / BOOK_URL
 const GECKO_HOST = "api.coingecko.com", GECKO_PATH = "/api/v3/coins/minima/tickers";   // lib/ladder.js GECKO_MEXC_URL: MEXC's ticker, when MEXC itself cannot be reached
 /** A GET of the engine's price source: MEXC, or that one CoinGecko path. x = a parsed https URL. */
@@ -103,6 +103,11 @@ const priceUrl = (x) => !x.port && (x.hostname === PRICE_HOST || (x.hostname ===
 const DEX_VERBS = new Set(["balance", "block", "checkmode", "coins", "getaddress", "history", "newscript", "random",
   "scripts", "status", "txpow", "txncheck", "txncreate", "txndelete", "txnexport", "txninput",
   "txnoutput", "txnpost", "txnsign", "txnview"]);   // txnimport left the list in 0.18.120: the page never sends it, and an imported transaction is one the frame did not build
+const PROOF_SHAPES = {
+  coinexport: { re: /^coinexport coinid:0x[0-9A-Fa-f]{64}$/, why: "only exporting one coin's proof, by its id" },
+  coinimport: { re: /^coinimport data:0x[0-9A-Fa-f]{144,15998} track:false$/, why: "only an untracked coin proof import" },
+  verify: { re: /^verify publickey:0x[0-9A-Fa-f]{64} data:0x[0-9A-Fa-f]{64} signature:0x[0-9A-Fa-f]{2,15998}$/, why: "only checking one coin-key attestation" }
+};
 // THE FRAME'S TRANSACTIONS (0.18.120, main/dexicon-signgate.js): the exact commands the page's two builders issue
 // (lib/fill.js buildSigned, lib/maker.js relock). Any other spelling of a txn command is refused.
 const TXID = "([A-Za-z0-9]{3,40})", HEX = "0x[0-9A-Fa-f]{64}";
@@ -129,6 +134,12 @@ function dexCommand(c) {
   // page's own sandboxed frame (identitySeed below, main/dexicon-room.js deliverIdentity).
   if (verbs.includes("seedrandom")) throw new Error("the trading identity is not read through this bridge");
   if (!verb) throw new Error("not available to Dexicon: " + verbs.join(" / "));
+  // 0.19.406, Dexicon 0.0.111-0.0.153 (lib/proofs.js): the coin proof hand-over and the coin-key attestation, in exactly
+  // the engine's shapes (from DexiconPro main/rooms.js): a proof is exported for one coin by id (never to a file), imported
+  // UNTRACKED and size-capped as lib/proofs.js accepts one (146 to 16000 characters, MAX_PROOF_CHARS), and an attestation
+  // is only CHECKED (`verify`: a read, no key, no key use). `sign` and `cointrack` stay refused (not on the list).
+  const SHAPE = PROOF_SHAPES[verb];
+  if (SHAPE) { if (!SHAPE.re.test(c)) throw new Error(SHAPE.why); return c; }
   if (!DEX_VERBS.has(verb)) throw new Error("not available to Dexicon: " + verb);
   const names = require("./cmdverb").paramNames(c);   // as the node reads them (main/cmdverb.js read, 0.19.266)
   if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c) || names.some(n => /^(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)$/.test(n))) throw new Error("that parameter is not available to Dexicon");
@@ -140,7 +151,7 @@ function dexCommand(c) {
  *  mds/dexicon 0.0.91) and the native screens (renderer/dexicon-ui.js load) issue, on ax_kv and one read of
  *  fill_state. One statement, every value a quoted literal. The store's own record of whose it is (publicId) is the
  *  service's to write. A page statement that is not here is refused and logged: add it with the line that issues it. */
-const SQL_LIT = "'(?:[^']|'')*'";
+const SQL_LIT = "'(?:[^']|'')*'", LOCK_ID = "(myorders|coinimport)", LOCK_TOK = "[A-Za-z0-9._-]{1,80}";
 const SQL_OK = [
   "CREATE TABLE IF NOT EXISTS `ax_kv` \\(`k` varchar\\(200\\) NOT NULL PRIMARY KEY, `v` text NOT NULL\\)",
   "SELECT v FROM ax_kv WHERE k=" + SQL_LIT,
@@ -148,12 +159,38 @@ const SQL_OK = [
   "SELECT k, v FROM ax_kv WHERE k IN \\(" + SQL_LIT + "(?:," + SQL_LIT + ")*\\)",
   "MERGE INTO ax_kv \\(k, v\\) KEY\\(k\\) VALUES \\(" + SQL_LIT + ", " + SQL_LIT + "\\)",
   "DELETE FROM ax_kv WHERE k=" + SQL_LIT,
-  "SELECT `json` FROM `fill_state` WHERE `id`=1"
+  "SELECT `json` FROM `fill_state` WHERE `id`=1",
+  // 0.19.406, Dexicon 0.0.132-0.0.153 (lib/maker.js withLock / fencedWrite): the store lease lock the page shares with the
+  // service, for its orders save ('myorders') and its proof imports ('coinimport'), and the orders save fenced by the
+  // lock's token. Exactly the engine's shapes (DexiconPro 5be80b8 main/rooms.js dexSql): those two ids, a token of the
+  // engine's charset, a millisecond time. Anything else naming dx_lock (another id, DROP, DELETE, a free-form steal) is
+  // refused, so the page can neither block the service's saves for good nor forge a hold.
+  "CREATE TABLE IF NOT EXISTS `dx_lock` \\(`id` varchar\\(32\\) NOT NULL PRIMARY KEY, `owner` varchar\\(80\\), `ts` bigint\\)",
+  "INSERT INTO `dx_lock` \\(`id`,`owner`,`ts`\\) SELECT '" + LOCK_ID + "','',0 WHERE NOT EXISTS \\(SELECT 1 FROM `dx_lock` WHERE `id`='\\1'\\)",
+  "UPDATE `dx_lock` SET `owner`='" + LOCK_TOK + "', `ts`=\\d{1,16} WHERE `id`='" + LOCK_ID + "' AND \\(`owner`='' OR `owner` IS NULL OR `owner`='(?:" + LOCK_TOK + ")?'\\)",
+  "UPDATE `dx_lock` SET `owner`='' WHERE `id`='" + LOCK_ID + "' AND `owner`='" + LOCK_TOK + "'",
+  "SELECT `owner` FROM `dx_lock` WHERE `id`='" + LOCK_ID + "'",
+  "INSERT INTO ax_kv \\(k, v\\) SELECT 'myorders', '\\[\\]' WHERE NOT EXISTS \\(SELECT 1 FROM ax_kv WHERE k='myorders'\\)",
+  "UPDATE ax_kv SET v=" + SQL_LIT + " WHERE k='myorders' AND EXISTS \\(SELECT 1 FROM `dx_lock` WHERE `id`='myorders' AND `owner`='" + LOCK_TOK + "'\\)"
 ].map(p => new RegExp("^" + p + "$"));
+/** kv keys the page may never write: the store's identity, the service's coin reservations, the attestation settings
+ *  (0.19.406: signing stays OFF on this wallet; requiring attestations is not offered yet) and the FAST backing-coin
+ *  settings (written by the app's own Dexicon Settings, main fastCoinsSave). */
+const ENGINE_KEYS = ["publicId", "coinlock_held", "attest_sign", "require_attest", "legacy_fresh", "coin_max_age"];
 function dexSql(q) {
   if (typeof q !== "string" || !q.trim() || q.length > 1000000) throw new Error("bad query");
   if (!SQL_OK.some(re => re.test(q))) throw new Error("that statement is not available to Dexicon's screens");
-  if (/^(MERGE INTO ax_kv \(k, v\) KEY\(k\) VALUES \(|DELETE FROM ax_kv WHERE k=)'publicId'/i.test(q)) throw new Error("that record is the engine's own");
+  const w = /^(?:MERGE INTO ax_kv \(k, v\) KEY\(k\) VALUES \(|DELETE FROM ax_kv WHERE k=)'((?:[^']|'')*)'(?:, '((?:[^']|'')*)'\))?$/.exec(q);
+  if (w) {
+    const k = w[1].replace(/''/g, "'");
+    if (ENGINE_KEYS.includes(k)) throw new Error("that record is the engine's own");
+    // 0.19.406: the orders store is written only by its fenced save (its store lock held), never a plain MERGE or DELETE
+    if (k === "myorders") throw new Error("the orders store is written only by the engine's fenced save");
+    // 0.19.406 (DexiconPro 0.2.155): the refresh's reconcileFills applies a MAKER fill_ record of any size, a negative one
+    // too (a forged record of -50 would put 50 back on an order and sell it again): the page writes its own taker fills only
+    if (/^fill_/.test(k)) { let f = null; try { f = w[2] === undefined ? null : JSON.parse(w[2].replace(/''/g, "'")); } catch (e) { f = null; }
+      if (!f || typeof f !== "object" || f.role !== "taker") throw new Error("the maker's fill records are the engine's own"); }
+  }
   return q;
 }
 
@@ -638,7 +675,7 @@ function makeHost(opts = {}) {
     if (!sqlShim) throw new Error("Dexicon is still starting");
     const r = sqlShim.sql(q);
     if (/^\s*(INSERT|UPDATE|MERGE|DELETE)/i.test(q) && WRITES_NOW.test(q)) { try { sqlShim.flush(); } catch (e) {} }
-    if (HOLD_KEYS.test(q) && /^\s*(MERGE|DELETE)/i.test(q)) syncHolds();   // the page writes its takes (pending_takes, void_takes) through here
+    if (HOLD_KEYS.test(q) && /^\s*(MERGE|DELETE|UPDATE|INSERT)/i.test(q)) syncHolds();   // the page writes its takes (pending_takes, void_takes) and, since 0.19.406, its orders (the fenced UPDATE) through here
     return r;
   }
   /** a page MDS.comms.solo → the service's MDSCOMMS event. Only the page's own two origins. */
@@ -690,9 +727,34 @@ function makeHost(opts = {}) {
     throw new Error("unknown Dexicon op");
   }
 
+  // ---- FAST backing coins (Dexicon 0.0.101-0.0.122): kv legacy_fresh and coin_max_age, read and written as the engine reads
+  // them (lib/maker.js legacyOn / maxAgeOf: unset legacy_fresh = ON; coin_max_age 1..900, empty = 900). The app's own
+  // Dexicon Settings write them here; the page may not (dexSql ENGINE_KEYS). From DexiconPro main/dexicon.js fastCoins. ----
+  const kvRead = (k) => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k='" + k + "'"); if (!r.status) throw new Error(r.error || "the store could not be read"); return r.rows.length ? String(r.rows[0].V || "") : ""; };
+  function fastCoins() {
+    if (!sqlShim || !ctx || !ctx.AX || !ctx.AX.maker) throw new Error("Dexicon is still starting");
+    const M = ctx.AX.maker, raw = kvRead("coin_max_age");
+    return { legacyFresh: !!M.legacyOn(kvRead("legacy_fresh")), coinMaxAge: raw ? String(M.maxAgeOf(raw)) : "", maxAgeLimit: M.COIN_MAX_AGE };
+  }
+  /** { legacyFresh?: boolean, coinMaxAge?: "" | whole blocks 1..900 } → fastCoins(). Only the fields given are written. */
+  function fastCoinsSave(input) {
+    if (held) throw new Error(heldText());
+    if (!sqlShim || !ctx || !ctx.AX || !ctx.AX.maker) throw new Error("Dexicon is still starting");
+    const has = (k) => input && input[k] !== undefined, max = ctx.AX.maker.COIN_MAX_AGE;
+    if (!has("legacyFresh") && !has("coinMaxAge")) throw new Error("nothing to save");
+    if (has("legacyFresh") && typeof input.legacyFresh !== "boolean") throw new Error("legacyFresh must be true or false");
+    const age = !has("coinMaxAge") || input.coinMaxAge === null ? "" : String(input.coinMaxAge).trim();
+    if (age !== "" && !(/^\d{1,4}$/.test(age) && Number(age) >= 1 && Number(age) <= max)) throw new Error("The coin max age is a whole number of blocks from 1 to " + max + ", or empty for " + max + ".");
+    const put = (k, v) => { const r = sqlShim.sql("MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + v + "')"); if (!r.status) throw new Error(r.error || "not saved"); };
+    if (has("legacyFresh")) put("legacy_fresh", input.legacyFresh ? "1" : "0");
+    if (has("coinMaxAge")) put("coin_max_age", age);
+    flush();
+    return fastCoins();
+  }
+
   let confirmFn = null;   // main.js: a main-process question (dialog.showMessageBox) for a page action with no recorded intent
   return { setConfirm: (fn) => { confirmFn = fn; }, emitter, init, start, stop, hold, gate, release, setHeldReason: (fn) => { heldReason = fn; }, flush, invalidate, status, activeWork, book, mine, command, storePath, coinHolds,
-    identitySeed, checkEpoch,
+    identitySeed, checkEpoch, fastCoins, fastCoinsSave,
     _sql: (q) => { const r = sqlShim.sql(String(q)); try { sqlShim.flush(); } catch (e) {} return r; },   // tests only: any statement, on the open store
     _lanes: () => ({ work: work.active(), workWaiting: work.waiting(), polls: polls.active(), pollsWaiting: polls.waiting(), dropped }),
     _setRunner: (fn) => { runner = fn; }, _setDataDir: (d) => { dataDir = d; }, _ctx: () => ctx, _fire: fire, _netAllowed: netAllowed };

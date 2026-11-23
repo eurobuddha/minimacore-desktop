@@ -970,6 +970,8 @@ node.on("status", (s) => { if (s.state === "running" && !axStarted) { axStarted 
 ipcMain.handle("mcd:dxStatus", () => dexicon.status());
 ipcMain.handle("mcd:dxBook", () => dexicon.book());
 ipcMain.handle("mcd:dxMine", () => dexicon.mine());
+// 0.19.406: the FAST backing-coin settings (Dexicon Settings): read with no argument, written with { legacyFresh?, coinMaxAge? }
+ipcMain.handle("mcd:dxFastCoins", (_e, patch) => (patch && typeof patch === "object" ? dexicon.fastCoinsSave(patch) : dexicon.fastCoins()));
 // { op: "identity" }: the page asks for its trading identity. Derived here, put straight into the page's sandboxed
 // frame (main/dexicon-room.js deliverIdentity), and NOT returned: the answer says only whether it was delivered.
 ipcMain.handle("mcd:dxCommand", async (e, a) => {
