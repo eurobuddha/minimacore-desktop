@@ -93,6 +93,14 @@ jobs:
       - name: Verify file import
         run: npm run test:import
 
+      # Every text in zh / ru / uk, and every sentence the main process says read back in each language (renderer/mainsaid.js).
+      - name: Verify translations
+        run: npm run test:i18n
+
+      # A restore refused while work is open; the stop guard in front of every node stop, restart and quit (main/inflight.js).
+      - name: Verify restore and in-flight guards
+        run: node --test scripts/restore-test.cjs scripts/inflight-test.cjs
+
       # Keets chat: the wire schema, the file transfer port and the peer-string caps (as released 0.18.182).
       - name: Verify chat
         run: npm run test:chat
