@@ -785,7 +785,7 @@ class NodeManager extends EventEmitter {
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
-             startedTs: this.proc ? this.startedTs : 0,
+             startedTs: this.proc ? this.startedTs : 0, bootTs: this.startedTs || 0,   // bootTs: the last start, kept after the node stopped (a broken MegaMMR is said once per start)
              uptimeMs: this.proc && this.startedTs ? Date.now() - this.startedTs : 0 };
   }
   /**
@@ -842,7 +842,7 @@ class NodeManager extends EventEmitter {
     // loadAllDB: "Your MEGAMMR is BROKEN …" / "Your Cascade is BROKEN.. please 'reset' your node"). Without -mobile the node then halts
     // with exit code 0 at EVERY start, so the reason and the way out are the exit's words (fatalHint); with -mobile it goes on, and the
     // Node tab says it from the snapshot. Read again at every start, so every later launch says it too. Believed only from the boot.
-    if (!this.polled && this.proc && /Your (MEGAMMR|Cascade) is BROKEN/.test(l)) {
+    if (!this.polled && this.proc && /^Minima @ [\d/]+ [\d:]+ \[[^\]]*\] : (java\.lang\.Exception: )?Your (MEGAMMR|Cascade) is BROKEN/.test(l)) {   // MinimaLogger's own line only
       const mega = /MEGAMMR/.test(l);
       if (mega) this.megammrBroken = true; else this.cascadeBroken = true;
       this.fatalHint = mega ? MEGAMMR_BROKEN_HINT : CASCADE_BROKEN_HINT;

@@ -349,7 +349,8 @@ const megafile = require("./megammrfile").create({ node, config, status: () => r
   call: (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c), imports, mayStop: () => guardStop(), held, runResync,   // inside its own exclusive: the stop guard alone
   // what is open is what restore refuses on (main/restore.js activeWorkList), but this wallet's own standing pools: the import keeps the wallet
   work: async () => (await walletWork()).filter(i => !String(i).endsWith(restore.CONFIRM_HINT)),
-  holdEngines: () => node.onEnginesHold(), releaseEngines: () => node.releaseEngines(), fs, totalmem: () => require("os").totalmem(), platform: process.platform,
+  // the other apps' loops start again at the next node status once nothing holds them
+  holdEngines: () => { pauseLoops(); return node.onEnginesHold(); }, releaseEngines: () => node.releaseEngines(), fs, totalmem: () => require("os").totalmem(), platform: process.platform,
   log: (l) => node.log(l), sleep: (ms) => new Promise(r => setTimeout(r, ms)), upMs: 10 * 60 * 1000 });
 // Restore from a backup FILE (main/restore.js): the backup's key mode must be this install's recorded one.
 ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", async () => {
@@ -397,6 +398,11 @@ async function guardStop(ack, action) { if (!await stopGuard.pass(ack, action)) 
 // Web Wallet's MegaMMR switch all come through mayStop (or saveConfigPatch / nodeStart), refused with the plain reason. A restart in the
 // middle of an import cuts it after the node reset its chain; a start without -megammr deletes the MegaMMR it is writing.
 const nodeBusy = () => megafile.busy() || !!node.resyncing;
+// The other apps' background loops (Mail, miniMall, Vestr, Future Cash Next, P2P Chance) during a MegaMMR file import and while it is
+// unfinished: the node's chain and balance are being replaced. Stopped when the import holds the engines; their start sites refuse meanwhile
+// and start them again at the first node status after (main/freeze.js paused, the Future Cash Next and P2P Chance sites below).
+const loopsPaused = () => megafile.busy() || !!config.load().megammrImport;
+function pauseLoops() { mail.stopLoop(); shop.stopLoop(); vestr.stopLoop(); futurecash.stop().catch(() => {}); casino.stopLoop(); casinoStarted = false; }
 function notBusy() { if (nodeBusy()) throw new Error(require("./megammrfile").BUSY); }
 node.on("status", (s) => stopGuard.seen(s && s.state));   // a stop that happened ends the guard's hold (0.19.316)
 // What a yes let go, run so that a failure which left the node running ends the hold (0.19.319): a restore refused for a wrong
@@ -424,7 +430,8 @@ const freeze = require("./freeze").create({
     dexicon: { gate: async () => { dexicon.gate(); await Promise.all([atomix.hold(), pandapools.hold()]); }, start: () => node.onEnginesRelease(), stop: () => node.onEnginesHold() }
   },
   // A wallet-replacing megammrsync holds the same engines (node-manager runResync): from before its hold until its settle has released them.
-  replacing: () => !!node.replacingWallet || !!(node.walletCheck && node.walletCheck.held) || megafile.busy(),   // a MegaMMR file import holds the engines too
+  replacing: () => (megafile.busy() ? "import" : !!node.replacingWallet || !!(node.walletCheck && node.walletCheck.held)),   // a MegaMMR file import holds the engines too (said as such)
+  paused: () => loopsPaused(),
   dexiconWork: async () => Object.assign(await inFlightWork(), { ownPools: await pandapools.ownPools().catch(() => null), holds: (() => { try { return dexicon.coinHolds(); } catch (e) { return null; } })() })
 });
 ethwallet.setFrozen(() => freeze.isFrozen("dexicon"));
@@ -520,7 +527,7 @@ const fcStarter = require("./futurecash").createStarter({ start: () => futurecas
   granted: () => { const g = config.load().fcGrant; return !!(g && typeof g === "object" && Object.keys(g).length); },
   notify: () => { try { const n = new Notification({ title: "Future Cash Next", body: lang.t("Future Cash Next could not start, so its guardian is not watching your stakes. It is tried again by itself."), silent: false }); n.on("click", () => { if (win) { win.show(); win.focus(); } }); n.show(); } catch (e) {} } });
 node.on("status", (s) => {
-  if (s.state !== "running") { fcBlock = 0; fcStarter.reset(); futurecash.stop().catch(() => {}); return; }
+  if (s.state !== "running" || loopsPaused()) { fcBlock = 0; fcStarter.reset(); futurecash.stop().catch(() => {}); return; }   // not during a MegaMMR file import, nor while it is unfinished
   const b = s.health && s.health.block;
   fcStarter.tick().then(() => { if (b && b !== fcBlock && !freeze.isFrozen("futurecash")) { fcBlock = b; return futurecash.pass(b).then(fcPush); } }).catch(() => {});   // frozen (Apps tab): no store opened, no pass
 });
@@ -964,7 +971,7 @@ ipcMain.handle("mcd:dxSkipCheck", async () => {
   const list = await walletWork(false);
   if (!restore.onlyDexiconUnchecked(list)) throw new Error(list.length ? restore.activeWorkProblem(list) : "Dexicon can be checked now. Try the restore again.");
   dexSkipUntil = Date.now() + 120000;
-  node.log("[app] the user chose to replace the wallet after this warning: " + list.join(" | "));
+  node.log("[app] the user chose to go on without these checks after this warning: " + list.join(" | "));
   return true;
 });
 // A store that cannot be opened (0.18.137): the room shows the error, and the user may have the file moved aside
@@ -1009,7 +1016,7 @@ ipcMain.handle("mcd:casinoInvalidate", () => { casino.invalidate(); return true;
 casino.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casino"); });
 let casinoStarted = false;
 function startCasinoIfEnabled() {
-  if (casinoStarted) return;
+  if (casinoStarted || loopsPaused()) return;
   if (node.state !== "running") return;
   casinoStarted = true;
   if (require("./config").load().casinoEnabled) casino.startLoop(); else casino.watch();
@@ -1029,7 +1036,7 @@ let vestrStarted = false;
 node.on("status", (s) => { if (s.state === "running") { vestrStarted = true; freeze.start("vestr"); } });
 
 // Web Wallet (local, megammr-gated). All node I/O + fund logic lives in webwallet.js; the seed reaches only
-// the local node over loopback. `wwEnableMegammr` sets the -megammr param and restarts (the tab's warning CTA).
+// the local node over loopback. Its gate points to Resync from a MegaMMR file (0.19.395): a MegaMMR switched on without a file is empty.
 ipcMain.handle("mcd:wwMegammr", () => webwallet.isMegammr());
 ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
 ipcMain.handle("mcd:wwRead", (_e, address, nodeSeed) => webwallet.read(address, nodeSeed));
@@ -1039,15 +1046,6 @@ ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(
 webwallet.setKeyMode(() => config.load().keyMode);   // off on a block key wallet (0.19.333)
 webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
-ipcMain.handle("mcd:wwEnableMegammr", async () => {
-  await mayStop();   // main's own question when anything is in flight (0.19.268)
-  return held(async () => {
-    const c = config.load();
-    config.save({ params: Object.assign({}, c.params, { megammr: true }) });
-    await node.restart();
-    return node.snapshot();
-  });
-});
 webwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:webwallet"); });
 
 ipcMain.handle("mcd:histGet", (_e, limit) => histDb.all(limit));

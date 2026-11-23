@@ -37,7 +37,7 @@ test("Freeze: every refusal and every reason in its list", async () => {
   const freeze = require("../main/freeze.js"), now = Date.now();
   const make = (o) => freeze.create(Object.assign({ load: () => [], save() {}, engines: { dexicon: { gate() {}, stop() {}, start() {} }, mail: { stop() { throw new Error("EBUSY"); }, start() {} } }, replacing: () => false, readMs: 30 }, o));
   check(await rejected(make().set("core", true))); check(await rejected(make().set("parlons", true))); check(await rejected(make().set("nope", true)));
-  check(await rejected(make({ replacing: () => true }).set("dexicon", true)));
+  check(await rejected(make({ replacing: () => true }).set("dexicon", true))); check(await rejected(make({ replacing: () => "import" }).set("dexicon", true)));
   check(await rejected(make().set("mail", true)));   // could not be stopped
   check(await rejected(make({ dexiconWork: async () => { throw new Error("x"); } }).set("dexicon", true)));
   check(await rejected(make({ dexiconWork: () => new Promise(() => {}) }).set("dexicon", true)));
@@ -253,6 +253,9 @@ test("A file the node is told to read (main/importfile.js): every refusal, said 
     check(F.say(MF.ENGINES, { error: "dexicon did not stop" }));
     check(F.say(MF.IMPORT_OPEN, { items: ["1 AtomiX swap still in flight (the app holds what is needed to claim or refund it): 0xabc", "AtomiX could not be asked whether a swap is in flight. Wait a moment and try again."].join("\n• ") }));
     for (const m of [MF.CHECK_FAILED, MF.CHECK_FAILED_BACK, MF.FAILED, MF.FAILED_BACK, MF.NOT_STARTED, MF.NOT_STARTED_BACK]) check(F.say(m, { why: "MegaMMR import failed : java.io.EOFException .. RESTART Minima before retrying" }));
+    for (const m of [MF.CHECK_UNANSWERED, MF.CHECK_UNANSWERED_BACK]) check(F.say(m, { why: "the node showed no progress for 30 minutes" }));
+    for (const m of [MF.OOM_SAID, MF.OOM_BACK]) check(F.say(m, { why: "java.lang.OutOfMemoryError: Java heap space", heap: "6144" }));
+    for (const m of [MF.TIP_REFUSED, MF.TIP_REFUSED_BACK]) check(F.say(m, { why: MF.CHANGED_WHY }));
     for (const m of [MF.TIP_REFUSED, MF.TIP_REFUSED_BACK]) for (const why of [MF.AHEAD_WHY, MF.BEHIND_WHY]) check(F.say(m, { why: F.say(why, { chaintip: "1000002", tip: "2431000" }) }));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   for (const c of MS.codes().filter(c => /^(IMPORT|MEGAFILE)_/.test(c))) assert.ok(seen.has(c), "never said by main/importfile.js or main/megammrfile.js: " + c);

@@ -7,6 +7,18 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.395] — The MegaMMR file import, second review's minors: engines held before open work is read, the file fingerprinted, truthful messages, the other apps' loops held, the Web Wallet points to the import; a broken MegaMMR said once per node start
+
+- **Order**: the trading engines are held first, then open work is read (nothing new can start in between), then the stop guard; a refusal lets them go.
+- **The file's size, modification time and inode** are taken before the node checks it and compared before the import: "This file was not imported: it was changed while the node checked it (choose it again)."
+- **Messages say what happened**: a check that ended without an answer says the node did not finish checking (not that it refused the file); an out-of-memory error (in the reply, or the node's own uncaught line) says so, with the memory it had and what to raise ("set Parlons Node memory higher and press Apply and restart the node"); a coin-proof failure is cut at " @ " (the reason, not the coin's JSON); FAILED on a node that already kept a MegaMMR adds that Resync node also empties that MegaMMR (megammrsync clears it), so a file must be imported again afterwards.
+- **The import's skip question is its own** ("Import without these checks?": the engines stay stopped until the import has finished; the wallet is not replaced), never "Replace the wallet…"; Freeze says "A MegaMMR file import is running, and Dexicon's engines are stopped for it", not "The wallet is being replaced"; main's log line for the skip no longer says the wallet was replaced.
+- **Mail, miniMall, Vestr, Future Cash Next and P2P Chance** are stopped when the import holds the engines and their start sites refuse during the import and while its marker is set; they start again at the first node status after.
+- **The Web Wallet's "Enable MegaMMR & restart node"** (which switched on an EMPTY MegaMMR) is gone: its gate says to import a MegaMMR file and its button opens Resync from a MegaMMR file. `mcd:wwEnableMegammr` and its preload entry are removed.
+- NITs: "Your MEGAMMR/Cascade is BROKEN" is believed only as MinimaLogger's own line; its notice is said once per node start (bootTs, kept after a halt), not once per window.
+- Not done, on purpose: the reviewer's "about twice the room" for a re-import on a node that keeps its own MegaMMR. The owner's measured import (0.19.393) was that case (the node had a 663,414-coin MegaMMR loaded) and peaked at 5.5 GB for 1.5 GB: four times the file covers it, twice that would refuse a file the owner has just imported on 6 GB.
+- Tests: scripts/importfile-test.cjs (3 new, 3 updated; fail on 0.19.394); scripts/megafile-guard-test.cjs (main.js hands the flow every dependency it reads: written after a mid-line comment hid fs, totalmem and platform in this very change before the gate caught it elsewhere); scripts/mainsaid-test.cjs; apps-screens, inflight, dexicon-host, casino-glue pins; zh / ru / uk.
+
 ## [0.19.394] — A MegaMMR file from another chain is refused by its tip, or found out after the import; the trading engines wait until the node's own blocks are on the new chain and it is at the network's tip
 
 - **Before anything is touched** the node's own chain is recorded: its tip, the block 3 back (a tip can be orphaned) and the block 300 back (final), with their ids (`block`, `txpow block:n`). Not readable: refused ("status could not be read"), nothing changed.

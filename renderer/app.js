@@ -206,7 +206,7 @@ function onStatus(s) {
   if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); futureCashReset(); if (activeView === "futurecash") renderActive(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
-  if (s.megammrBroken && !megaBrokenSaid) { megaBrokenSaid = true; megammrBrokenNotice(); }
+  if (s.megammrBroken && s.bootTs && megaBrokenSaid !== s.bootTs && megaBrokenSeen() !== String(s.bootTs)) { megaBrokenSaid = s.bootTs; megaBrokenSeen(String(s.bootTs)); megammrBrokenNotice(); }   // once per node start, whichever window
   paintMegaBar(s);
   if (activeView === "backup" && BK_PAGE === "megafile") paintImportProgress(s);   // every step of a MegaMMR file import, on its own screen
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
@@ -570,16 +570,19 @@ function resyncCommand(o) {
 // store is damaged) must not be blocked for ever: the main process says so in the refusal, the user is told what
 // going on means, and the main process checks again before it leaves the Dexicon check out (mcd:dxSkipCheck).
 // Resolves true when the caller may try once more.
-async function offerWithoutDexicon(e) {
+async function offerWithoutDexicon(e, importing) {
   // 0.18.137: also AtomiX or PandaPools that cannot be checked, and the warning about this wallet's own open pools
   // decided by the CODES of what the main process said (renderer/mainsaid.js), never by its words, which may be on screen translated
   const why = ipcRaw(e), has = (code) => MainSaid.has(why, code), unchecked = has("REPLACE_SKIP_HINT"), pools = has("REPLACE_CONFIRM_HINT");
   if (!unchecked && !pools) return false;
-  let warning; try { warning = MainSaid.say(await api.dxSkipWarning()); } catch (err) { return false; }
+  // a MegaMMR file import replaces no wallet: its own question, with what it refused on, and what going on means for it
+  if (importing) { if (!await showConfirm(t("Import without these checks?"), ipcError(e) + "\n\n" + t(IMPORT_SKIP_NOTE), t("Go on without the check"), true)) return false; }
+  let warning; if (!importing) try { warning = MainSaid.say(await api.dxSkipWarning()); } catch (err) { return false; }
   const dexOnly = unchecked && !pools && !["RP_AX_STORE", "RP_AX_STUCK", "RP_PP_STORE", "RP_PP_STUCK"].some(has);
-  if (!await showConfirm(dexOnly ? t("Go on without checking Dexicon?") : pools && !unchecked ? t("Replace the wallet these pools belong to?") : t("Replace the wallet without these checks?"), warning, dexOnly ? t("Go on without the check") : pools && !unchecked ? t("I have its 24 words: go on") : t("Go on without the check"), true)) return false;
+  if (!importing && !await showConfirm(dexOnly ? t("Go on without checking Dexicon?") : pools && !unchecked ? t("Replace the wallet these pools belong to?") : t("Replace the wallet without these checks?"), warning, dexOnly ? t("Go on without the check") : pools && !unchecked ? t("I have its 24 words: go on") : t("Go on without the check"), true)) return false;
   try { await api.dxSkipCheck(); return true; } catch (err) { toast(ipcError(err), "err"); return false; }
 }
+const IMPORT_SKIP_NOTE = N_("If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted.");
 // The wallet under the app changed (a restored seed or backup): every identity derived from the old seed is
 // dropped and nothing the old wallet said stays on screen.
 // The stores themselves were already set aside by the MAIN process, while the node was stopped (main.js
@@ -656,7 +659,7 @@ function renderBackup() {
     const btn = $(btnId), st = $("bkStatus"); btn.disabled = true; btn.textContent = label + "…"; st.textContent = "";
     try {
       const attempt = async () => { if (built.exec) { const j = await built.exec(); if (!j || j.status !== true) throw new Error((j && j.error) || "the node refused the restore"); } else await cmd(built.cmd); };
-      try { await attempt(); } catch (e) { if (!await offerWithoutDexicon(e)) throw e; await attempt(); }
+      try { await attempt(); } catch (e) { if (!await offerWithoutDexicon(e, !!built.importing)) throw e; await attempt(); }
       CFG = await api.saveConfig({ megammrHost: built.host });
       if (built.resetsWallet) await walletReplaced();
       // The node shut itself down at the end and the main process started it again, through every start check.
@@ -708,7 +711,7 @@ function renderBackup() {
       // the main process switches a light node to MegaMMR mode first, imports, and restarts (main.js mcd:importMegammr)
       // the window's config is read again whatever happened: a failed import may have put the MegaMMR setting back
       const exec = async () => { let j; try { j = await api.importMegammr(f); } finally { CFG = await api.getConfig().catch(() => CFG); } return j; };   // a MegaMMR the restarted node finds broken is said from its status (onStatus)
-      run("bkGo", t("Import"), { host: CFG.megammrHost, exec }, t("Import this MegaMMR file?"),
+      run("bkGo", t("Import"), { host: CFG.megammrHost, exec, importing: true }, t("Import this MegaMMR file?"),
       t("Minima will replace this node's chain with the one in {f}.\n\n• Import only a file from a source you trust. The node checks that the file is whole and holds together, not that it is the real Minima chain: a wrong or crafted file shows a different chain and different balances.\n• A light node is switched to MegaMMR mode first and restarted, and stays in MegaMMR mode. Turn MegaMMR off goes back, and deletes the MegaMMR file.\n• Your wallet and seed phrase are not touched. Your coins are read again from the file.\n• Any transaction still waiting to be mined is dropped.\n• The node carries on from the last block in the file and catches up from its peers by itself, as after any restart. The older the file, the longer that takes.\n• The node restarts at the end.", { f: f }), t("Import")); };
     return;
   }
@@ -756,7 +759,9 @@ const MEGAMMR_OFF_WARNING = N_("The node restarts as a light node.\n\n• Its Me
 /** The node's boot said its MegaMMR does not end where its chain begins (main/node-manager.js megammrBroken): once per launch, from its
  *  status, whether it stopped (without -mobile it stops at every start) or goes on. The Node tab keeps saying it, with the button. */
 const MEGAMMR_BROKEN_NOTE = N_("This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"). Your wallet, keys and funds are not touched.\n\nPress Turn MegaMMR off: the MegaMMR file is deleted and the node starts again as a light node. To have a MegaMMR again afterwards, import a MegaMMR file (Backup & Recovery, Resync from a MegaMMR file).");
-let megaBrokenSaid = false;
+let megaBrokenSaid = 0;
+/** The node start whose broken MegaMMR was said (a window opened again on the same start does not say it again): kept per viewer, best effort. */
+function megaBrokenSeen(v) { try { if (v === undefined) return localStorage.getItem("megaBrokenSaid") || ""; localStorage.setItem("megaBrokenSaid", v); } catch (e) { /* not kept: said by this window once */ } return ""; }
 /** What the node is doing for a MegaMMR file import, said in the window's language from its last log line (main/megammrfile.js STEP, or
  *  the flow's own "app:<stage>"). Numbers are shown as the node wrote them. Anything else: the node's own words. */
 function importStage(step) {
@@ -1288,13 +1293,9 @@ async function renderWebWallet() {
 
 function renderWwGate(body) {
   body.innerHTML = wwCard(`<h1 class="ww-h1">${th("Minima Web Wallet is unavailable!")}</h1><p class="ww-p">${th("A -megammr node is required to use this Wallet.")}</p><hr class="ww-hr">
-    <p class="ww-p">${th("The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.")}</p>
-    <button class="ww-btn" id="wwEnableBtn">${th("Enable MegaMMR & restart node")}</button>`);
-  el("wwEnableBtn").addEventListener("click", async () => {
-    const b = el("wwEnableBtn"); b.disabled = true; b.textContent = t("Restarting node…");
-    try { await api.wwEnableMegammr(); toast(t("MegaMMR enabled. The node is restarting"), "ok"); }
-    catch (e) { toast(t("Could not enable MegaMMR"), "err"); b.disabled = false; b.textContent = t("Enable MegaMMR & restart node"); }
-  });
+    <p class="ww-p">${th("The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Import a MegaMMR file to get it: the import switches this node to MegaMMR mode and fills it. A MegaMMR switched on without a file starts empty and does not know older coins.")}</p>
+    <button class="ww-btn" id="wwEnableBtn">${th("Import a MegaMMR file")}</button>`);
+  el("wwEnableBtn").addEventListener("click", () => { BK_PAGE = "megafile"; selectTab("backup"); });   // the one MegaMMR switch-on: Resync from a MegaMMR file (main/megammrfile.js)
 }
 
 function renderWwUnlock(body) {

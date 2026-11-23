@@ -312,7 +312,6 @@ contextBridge.exposeInMainWorld("mcd", {
   wwKeyuses: (address) => ipcRenderer.invoke("mcd:wwKeyuses", address),
   wwAckKeyuses: (address, count) => ipcRenderer.invoke("mcd:wwAckKeyuses", address, count),
   wwSend: (opts) => ipcRenderer.invoke("mcd:wwSend", opts),
-  wwEnableMegammr: () => ipcRenderer.invoke("mcd:wwEnableMegammr"),
   onWebWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:webwallet", h); return () => ipcRenderer.removeListener("mcd:webwallet", h); },
 
   // pushes

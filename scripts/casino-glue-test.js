@@ -79,7 +79,8 @@ const starts = () => sent.filter(c => /(^|;)\s*send\b/.test(c) || (/^txnoutput\b
   for (const enabled of [false, true]) {
     let started = 0;
     let watched = 0;
-    const c = vm.createContext({ node: { state: "running" }, require: () => ({ load: () => ({ casinoEnabled: enabled }) }), casino: { startLoop() { started++; }, watch() { watched++; } } });
+    const c = vm.createContext({ node: { state: "running" }, loopsPaused: () => false,   // 0.19.395: not during a MegaMMR file import
+      require: () => ({ load: () => ({ casinoEnabled: enabled }) }), casino: { startLoop() { started++; }, watch() { watched++; } } });
     vm.runInContext(gate + ";startCasinoIfEnabled();startCasinoIfEnabled();", c);
     assert(started === (enabled ? 1 : 0), "main.js: casinoEnabled " + enabled + " → the loop " + (enabled ? "starts once" : "does NOT start"));
     assert(watched === (enabled ? 0 : 1), "main.js: casinoEnabled " + enabled + " → " + (enabled ? "no watch" : "one read-only watch instead"));

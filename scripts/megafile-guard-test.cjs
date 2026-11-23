@@ -68,3 +68,11 @@ test("M1: the import says it is running in the node's status, and the window dis
   assert.ok(/data-bk="\$\{r\[0\]\}"\$\{nodeBusyNow\(\) && !\/\^\(chat\|mail\|create\)\$\/\.test\(r\[0\]\) \? busyAttr\(\)/.test(app), "Backup & Recovery: Restore, Resync, the import, Rebuild, Turn MegaMMR off");
   assert.ok(/if \(wasBusy !== nodeBusyNow\(\) && activeView === "backup" && BK_PAGE === ""\) renderBackup\(\);/.test(app), "the rows follow it");
 });
+
+test("main.js gives main/megammrfile.js everything it reads (a comment placed mid-line once hid fs, totalmem and platform)", () => {
+  const src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS);
+  let props = null;
+  const walk = (n) => { if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === "megafile" && n.initializer && ts.isCallExpression(n.initializer)) props = n.initializer.arguments[0].properties.map(p => p.name.getText(sf)); ts.forEachChild(n, walk); };
+  walk(sf);
+  for (const k of ["node", "config", "status", "call", "imports", "mayStop", "held", "runResync", "work", "holdEngines", "releaseEngines", "fs", "totalmem", "platform", "log", "sleep", "upMs"]) assert.ok(props && props.includes(k), "megafile is given " + k + ": " + props);
+});

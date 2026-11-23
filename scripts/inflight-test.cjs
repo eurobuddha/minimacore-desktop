@@ -159,7 +159,7 @@ test("main: Restart, Stop, Reclaim, the node kind, the Web Wallet's MegaMMR swit
   const ts = require("typescript"), src = read("main/main.js"), sf = ts.createSourceFile("main.js", src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.JS), calls = {};
   const walk = (n) => { if (ts.isCallExpression(n) && n.expression.getText(sf) === "ipcMain.handle" && ts.isStringLiteral(n.arguments[0])) calls[n.arguments[0].text] = n.getText(sf); ts.forEachChild(n, walk); };
   walk(sf);
-  const names = ["mcd:nodeRestart", "mcd:nodeStop", "mcd:nodeReclaim", "mcd:setNodeKind", "mcd:wwEnableMegammr", "mcd:chatApplyBackup"];
+  const names = ["mcd:nodeRestart", "mcd:nodeStop", "mcd:nodeReclaim", "mcd:setNodeKind", "mcd:chatApplyBackup"];   // the Web Wallet's MegaMMR switch is gone (0.19.395): it points to Resync from a MegaMMR file
   for (const allow of [false, true]) for (const name of names) {
     const did = [], acks = [], actions = [], h = {};
     const env = { ipcMain: { handle: (n, f) => { h[n] = f; } }, mayStop: async (ack, action) => { acks.push(ack); actions.push(action); if (!allow) throw new Error("The node keeps running: nothing was stopped."); }, saveConfigPatch: () => did.push("save"),

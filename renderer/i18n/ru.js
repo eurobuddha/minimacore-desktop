@@ -295,11 +295,7 @@
   "Minima Web Wallet": "Minima Web Wallet",
   "Minima Web Wallet is unavailable!": "Minima Web Wallet недоступен!",
   "A -megammr node is required to use this Wallet.": "Для этого кошелька нужен узел с -megammr.",
-  "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.": "Web Wallet находит кошелёк только по его секретному ключу, поэтому этот узел должен хранить полный MegaMMR, чтобы выдавать монеты и доказательства для адреса этого кошелька. Включение MegaMMR перезапускает узел, и его данные со временем растут. Это разовое изменение.",
-  "Enable MegaMMR & restart node": "Включить MegaMMR и перезапустить узел",
   "Restarting node…": "Перезапуск узла…",
-  "MegaMMR enabled. The node is restarting": "MegaMMR включён. Узел перезапускается",
-  "Could not enable MegaMMR": "Не удалось включить MegaMMR",
   "Login with your secret key.": "Войдите с помощью секретного ключа.",
   "Enter a secret key": "Введите секретный ключ",
   "Secret key": "Секретный ключ",
@@ -3176,11 +3172,7 @@
     "Minima Web Wallet",
     "Minima Web Wallet is unavailable!",
     "A -megammr node is required to use this Wallet.",
-    "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.",
-    "Enable MegaMMR & restart node",
     "Restarting node…",
-    "MegaMMR enabled. The node is restarting",
-    "Could not enable MegaMMR",
     "Login with your secret key.",
     "Enter a secret key",
     "Secret key",
@@ -5657,7 +5649,6 @@
   "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.": "Этот импорт заменяет цепочку узла и останавливает торговые движки до своего окончания, а работа, которой они нужны, ещё не завершена:\n\n• {items}\n\nНичего не изменено. Дождитесь их завершения или отзовите их, затем попробуйте снова.",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.": "Узел прочитал весь файл и отклонил его: {why}. Ничего не импортировано, цепочка узла не тронута. Используйте полный файл MegaMMR, экспортированный узлом, которому вы доверяете.",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.": "Узел прочитал весь файл и отклонил его: {why}. Ничего не импортировано, цепочка узла не тронута. Узел перезапущен как был (MegaMMR выключен). Используйте полный файл MegaMMR, экспортированный узлом, которому вы доверяете.",
-  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "Импорт прервался на полпути ({why}). Узел перезапущен. Кошелёк и средства не тронуты: ключи в кошельке, монеты в цепочке. Пока узел не синхронизирован заново, баланс может показывать меньше, чем у вас есть: используйте «Синхронизация узла», чтобы перестроить цепочку с узла MegaMMR.",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "Импорт прервался на полпути ({why}). Узел перезапущен как лёгкий узел, как было раньше. Кошелёк и средства не тронуты: ключи в кошельке, монеты в цепочке. Пока узел не синхронизирован заново, баланс может показывать меньше, чем у вас есть: используйте «Синхронизация узла», чтобы перестроить цепочку с узла MegaMMR."
 }, { review: [
   "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.",
@@ -5671,7 +5662,6 @@
   "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.",
-  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node."
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
@@ -5763,4 +5753,29 @@
   "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)",
   "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.",
   "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.": "Импорт прервался на полпути ({why}). Узел перезапущен. Кошелёк и средства не тронуты: ключи в кошельке, монеты в цепочке. Пока узел не синхронизирован заново, баланс может показывать меньше, чем у вас есть: используйте «Синхронизация узла», чтобы перестроить цепочку с узла MegaMMR. «Синхронизация узла» также очищает MegaMMR этого узла (megammrsync его стирает): затем снова импортируйте файл MegaMMR, чтобы он был полным.",
+  "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Import a MegaMMR file to get it: the import switches this node to MegaMMR mode and fills it. A MegaMMR switched on without a file starts empty and does not know older coins.": "Web Wallet находит кошелёк только по его секретному ключу, поэтому этот узел должен хранить полный MegaMMR, чтобы выдавать монеты и доказательства для адреса этого кошелька. Чтобы получить его, импортируйте файл MegaMMR: импорт переводит узел в режим MegaMMR и заполняет его. MegaMMR, включённый без файла, пуст и не знает старых монет.",
+  "Import a MegaMMR file": "Импортировать файл MegaMMR",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted.": "Узел не закончил проверку файла ({why}). Ничего не импортировано, цепочка узла не затронута. Узел перезапущен.",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "Узел не закончил проверку файла ({why}). Ничего не импортировано, цепочка узла не затронута. Узел перезапущен как был (MegaMMR выключен).",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.": "Узлу не хватило памяти при чтении этого файла MegaMMR ({why}). Ничего не импортировано и не сброшено. Узел перезапущен. У него было {heap} МБ: в «Настройках» увеличьте «Память узла Parlons» и нажмите «Применить и перезапустить узел», затем повторите.",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.": "Узлу не хватило памяти при чтении этого файла MegaMMR ({why}). Ничего не импортировано и не сброшено. Узел перезапущен как лёгкий узел, как и был. У него было {heap} МБ: в «Настройках» увеличьте «Память узла Parlons» и нажмите «Применить и перезапустить узел», затем повторите.",
+  "A MegaMMR file import is running, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished.": "Идёт импорт файла MegaMMR, и движки Dexicon для него остановлены. Dexicon можно будет заморозить, когда импорт закончится.",
+  "it was changed while the node checked it (choose it again)": "он изменился, пока узел его проверял (выберите его снова)",
+  "Import without these checks?": "Импортировать без этих проверок?",
+  "If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted.": "Если продолжить, торговые движки будут остановлены до конца импорта, и то, что не удалось проверить, в это время не отслеживается. Ваш кошелёк не заменяется. Продолжайте, только если так остаётся и после перезапуска приложения."
+}, { review: [
+  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.",
+  "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Import a MegaMMR file to get it: the import switches this node to MegaMMR mode and fills it. A MegaMMR switched on without a file starts empty and does not know older coins.",
+  "Import a MegaMMR file",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted.",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.",
+  "A MegaMMR file import is running, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished.",
+  "it was changed while the node checked it (choose it again)",
+  "Import without these checks?",
+  "If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted."
 ] });

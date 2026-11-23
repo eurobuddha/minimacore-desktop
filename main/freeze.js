@@ -38,6 +38,7 @@
  * The list is kept in the app's config (frozenApps) and honoured at startup: a frozen app's loop is never started
  * (every start site in main.js goes through start(id)), and Dexicon's engines are held before the node is up.
  */
+const PAUSED = ["mail", "minimall", "vestr"];
 const FREEZABLE = ["mail", "ethwallet", "futurecash", "explorer", "vestr", "entropy", "keyuses", "faucet", "minimall", "webwallet", "dexicon", "chat"];
 const NEVER = { core: "Minima Core is the node and the wallet. It cannot be frozen.", parlons: "Parlons is part of the node itself: its account runs inside it. It cannot be frozen. Hide takes it out of the drawer." };
 const clean = (list) => [...new Set((Array.isArray(list) ? list : []).filter(id => FREEZABLE.includes(id)))];
@@ -90,6 +91,9 @@ function create(o) {
   const isFrozen = (id) => frozen.has(id);
   const list = () => [...frozen];
   const replacing = () => { try { return !!(o.replacing && o.replacing()); } catch (e) { return true; } };
+  const replacingWhat = () => { try { return o.replacing && o.replacing(); } catch (e) { return true; } };   // "import": a MegaMMR file import holds them (main.js), not a wallet replacement
+  /** The other apps' loops (mail, minimall, vestr) are not started while o.paused() (a MegaMMR file import, or its unfinished marker: main.js). */
+  const paused = (id) => { try { return !!(o.paused && PAUSED.includes(id) && o.paused()); } catch (e) { return true; } };
   const starting = {}, failed = new Set();   // id -> a start still running; ids whose last start failed
   /** Run the app's start, once at a time (a freeze waits for it, below). Failed: remembered. */
   function begin(id) {
@@ -107,7 +111,7 @@ function create(o) {
    *  while Dexicon was still frozen, or held nothing (a plain resync): then they are released here. Releasing twice does nothing. */
   function settle() { if (!owed || replacing()) return; owed = false; if (!frozen.has("dexicon")) begin("dexicon"); }
   /** A start site in main.js: runs the app's start unless it is frozen, already starting, or failed since the node started. → whether it was asked. */
-  function start(id) { if (frozen.has(id) || failed.has(id)) return false; begin(id); return true; }
+  function start(id) { if (frozen.has(id) || failed.has(id) || paused(id)) return false; begin(id); return true; }
   /** The node stopped: a start that failed is tried again with the next node. */
   function nodeStopped() { failed.clear(); }
   /** At startup: whatever is frozen and already has something to stop is stopped (Dexicon's hold, before the node is up). */
@@ -124,7 +128,7 @@ function create(o) {
       if (on) {
         if (starting[id]) await starting[id];       // a start still running ends first: its timer is then there to be stopped
         if (id === "dexicon") {
-          if (replacing()) throw new Error("The wallet is being replaced, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished.");
+          if (replacing()) throw new Error(replacingWhat() === "import" ? "A MegaMMR file import is running, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished." : "The wallet is being replaced, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished.");
           let why, gated = false;
           try { if (e && e.gate) { gated = true; await e.gate(); } why = dexiconBlockers(await timed(o.dexiconWork(), o.readMs || READ_MS)); }
           catch (err) { why = [err === LATE ? "what is in flight could not be read in time" : "what is in flight could not be read"]; }

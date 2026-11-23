@@ -295,11 +295,7 @@
   "Minima Web Wallet": "Minima Web Wallet",
   "Minima Web Wallet is unavailable!": "Minima Web Wallet 不可用！",
   "A -megammr node is required to use this Wallet.": "使用此钱包需要 -megammr 节点。",
-  "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.": "Web Wallet 仅凭秘密密钥访问钱包，因此此节点必须保留完整的 MegaMMR，才能提供该钱包地址的币和证明。启用 MegaMMR 会重启节点，其数据会随时间增长。这是一次性更改。",
-  "Enable MegaMMR & restart node": "启用 MegaMMR 并重启节点",
   "Restarting node…": "正在重启节点…",
-  "MegaMMR enabled. The node is restarting": "MegaMMR 已启用。节点正在重启",
-  "Could not enable MegaMMR": "无法启用 MegaMMR",
   "Login with your secret key.": "使用您的秘密密钥登录。",
   "Enter a secret key": "输入秘密密钥",
   "Secret key": "秘密密钥",
@@ -3176,11 +3172,7 @@
     "Minima Web Wallet",
     "Minima Web Wallet is unavailable!",
     "A -megammr node is required to use this Wallet.",
-    "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Enabling MegaMMR restarts the node and grows its data over time. It is a one-time change.",
-    "Enable MegaMMR & restart node",
     "Restarting node…",
-    "MegaMMR enabled. The node is restarting",
-    "Could not enable MegaMMR",
     "Login with your secret key.",
     "Enter a secret key",
     "Secret key",
@@ -5644,7 +5636,6 @@
   "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.": "此次导入会替换节点的链，并在完成之前停止交易引擎，而仍有需要它们的工作未完成：\n\n• {items}\n\n未做任何更改。请等待这些完成或撤回它们，然后重试。",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.": "节点读取了整个文件并拒绝了它：{why}。没有导入任何内容，节点的链没有被更改。请使用由您信任的节点导出的完整 MegaMMR 文件。",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.": "节点读取了整个文件并拒绝了它：{why}。没有导入任何内容，节点的链没有被更改。节点已按之前的状态重新启动（MegaMMR 关闭）。请使用由您信任的节点导出的完整 MegaMMR 文件。",
-  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "导入在中途失败（{why}）。节点已重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.": "导入在中途失败（{why}）。节点已按之前的状态作为轻节点重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。"
 }, { review: [
   "This computer has {ram} MB of memory. The node would need {heap} MB of it for this MegaMMR file, which leaves too little for everything else, so it cannot be imported on this computer. Nothing was changed.",
@@ -5658,7 +5649,6 @@
   "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.",
   "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.",
-  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.",
   "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node."
 ] });
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
@@ -5750,4 +5740,29 @@
   "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)",
   "Catching up after the MegaMMR import. The trading apps start again once the node is at the network's tip and its own earlier blocks are found on the new chain.",
   "This MegaMMR file is from a different chain: the node's own earlier blocks are not on it, or it does not catch up with the network. Your funds are safe. The trading apps stay stopped. Turn MegaMMR off, then Resync node."
+] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.": "导入在中途失败（{why}）。节点已重新启动。您的钱包和资金没有被更改：您的密钥在钱包中，您的代币在链上。在节点重新同步之前，它显示的余额可能少于您实际持有的：请使用“重新同步节点”从 MegaMMR 节点重建链。“重新同步节点”也会清空此节点的 MegaMMR（megammrsync 会清除它）：之后请再次导入 MegaMMR 文件，使其完整。",
+  "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Import a MegaMMR file to get it: the import switches this node to MegaMMR mode and fills it. A MegaMMR switched on without a file starts empty and does not know older coins.": "Web Wallet 仅凭秘密密钥访问钱包，因此此节点必须保留完整的 MegaMMR，才能提供该钱包地址的币和证明。请导入 MegaMMR 文件来获得它：导入会把此节点切换到 MegaMMR 模式并将其填满。不导入文件而直接开启的 MegaMMR 是空的，不知道较早的币。",
+  "Import a MegaMMR file": "导入 MegaMMR 文件",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted.": "节点未完成对文件的检查（{why}）。没有导入任何内容，节点的链也未被改动。节点已重启。",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).": "节点未完成对文件的检查（{why}）。没有导入任何内容，节点的链也未被改动。节点已按之前的状态重启（MegaMMR 关闭）。",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.": "节点在读取此 MegaMMR 文件时内存不足（{why}）。没有导入或重置任何内容。节点已重启。它有 {heap} MB：请在“设置”中把 Parlons 节点内存调高，并点击“应用并重启节点”，然后重试。",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.": "节点在读取此 MegaMMR 文件时内存不足（{why}）。没有导入或重置任何内容。节点已按之前的状态作为轻节点重启。它有 {heap} MB：请在“设置”中把 Parlons 节点内存调高，并点击“应用并重启节点”，然后重试。",
+  "A MegaMMR file import is running, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished.": "MegaMMR 文件导入正在进行，Dexicon 的引擎因此已停止。导入结束后才能冻结 Dexicon。",
+  "it was changed while the node checked it (choose it again)": "它在节点检查期间被更改了（请重新选择）",
+  "Import without these checks?": "不经这些检查就导入？",
+  "If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted.": "如果继续，交易引擎会一直停止到导入结束，无法检查的内容在此期间不会被监视。你的钱包不会被替换。只有在重启应用后仍是这样时才继续。"
+}, { review: [
+  "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.",
+  "The Web Wallet reaches a wallet from its secret key alone, so this node must keep the full MegaMMR to serve the coins and proofs of that wallet's address. Import a MegaMMR file to get it: the import switches this node to MegaMMR mode and fills it. A MegaMMR switched on without a file starts empty and does not know older coins.",
+  "Import a MegaMMR file",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted.",
+  "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.",
+  "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.",
+  "A MegaMMR file import is running, and Dexicon's engines are stopped for it. Dexicon can be frozen once that has finished.",
+  "it was changed while the node checked it (choose it again)",
+  "Import without these checks?",
+  "If you go on, the trading engines stay stopped until the import has finished, and what could not be checked is not watched meanwhile. Your wallet is not replaced. Go on only if this stays like this after the app was restarted."
 ] });

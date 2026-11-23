@@ -39,7 +39,14 @@ const ENGINES = "The trading engines could not be stopped ({error}), so nothing 
 const IMPORT_OPEN = "This import replaces the node's chain and stops the trading engines until it has finished, while work that needs them is still open:\n\n• {items}\n\nNothing was changed. Let these finish or withdraw them, then try again.";
 const CHECK_FAILED = "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. Use a complete MegaMMR file exported by a node you trust.";
 const CHECK_FAILED_BACK = "The node read the whole file and refused it: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off). Use a complete MegaMMR file exported by a node you trust.";
-const FAILED = "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.";
+const FAILED = "The import failed part-way ({why}). The node was restarted. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node. Resync node also empties this node's MegaMMR (megammrsync clears it): import a MegaMMR file again afterwards to have it whole.";
+// the node's check ended without an answer (it stopped, or showed no progress): not a refusal of the file
+const CHECK_UNANSWERED = "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted.";
+const CHECK_UNANSWERED_BACK = "The node did not finish checking the file ({why}). Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).";
+// the node ran out of memory reading the file, before anything was reset (an OutOfMemoryError in its reply or its log)
+const OOM = /OutOfMemoryError|Java heap space|too large for this device's memory|Heap nearly exhausted/;
+const OOM_SAID = "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.";
+const OOM_BACK = "The node ran out of memory reading this MegaMMR file ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. It had {heap} MB: in Settings, set Parlons Node memory higher and press Apply and restart the node, then try again.";
 // a failure before the node printed "Streaming IBD..": nothing was reset, so nothing is owed (no Resync)
 const NOT_STARTED = "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted. Your wallet and funds were not touched.";
 const NOT_STARTED_BACK = "The import stopped before the node's chain was touched ({why}). Nothing was imported or reset. The node was restarted as a light node, as it was before. Your wallet and funds were not touched.";
@@ -58,6 +65,7 @@ const SHOWN_LINES = 8;
 const DEEP = 300, NEAR = 3, AHEAD = 100, BEHIND = 30 * 24 * 3600 / 50, FRESH_MS = 30 * 60 * 1000, STUCK_MS = 30 * 60 * 1000;
 const AHEAD_WHY = "its chain reaches block {chaintip}, but this node is at block {tip}, so it is from another chain, or this node is not at the network's tip yet (wait until it is, then try again)";
 const BEHIND_WHY = "its chain ends at block {chaintip}, more than 30 days of blocks behind this node's block {tip} (use a recent MegaMMR file)";
+const CHANGED_WHY = "it was changed while the node checked it (choose it again)";
 const TIP_REFUSED = "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched.";
 const TIP_REFUSED_BACK = "This file was not imported: {why}. Nothing was imported, and the node's chain was not touched. The node was restarted as it was before (MegaMMR off).";   // the node's last lines on the import's screen
 const FAILED_BACK = "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.";
@@ -150,14 +158,15 @@ function create(d) {
       const c = d.config.load(), kind = node.kind(), ram = d.totalmem(), heapMb = F.importHeapMb(kind, c.heapMb, ram);
       const room = F.roomProblem({ kind, size: d.fs.statSync(file).size, heapMb, ramBytes: ram, freeDiskBytes: freeDisk(node.dataDir()) });
       if (room) throw new Error(room);
-      // The engines are stopped for the whole import (up to an hour): refused, as a restore is, while a swap, a take or pool work is open
-      const items = await d.work();
-      if (items && items.length) throw new Error(F.say(IMPORT_OPEN, { items: items.join("\n• ") }));
-      await d.mayStop();
+      // The engines are stopped for the whole import: held FIRST, then what is open is read (nothing new can start in between, as Freeze
+      // does), and refused, as a restore is, while a swap, a take or pool work is open
+      try { await d.holdEngines(); } catch (e) { await d.releaseEngines(); throw new Error(F.say(ENGINES, { error: brief(e) })); }
+      let items;
+      try { items = await d.work(); if (items && items.length) throw new Error(F.say(IMPORT_OPEN, { items: items.join("\n• ") })); await d.mayStop(); }
+      catch (e) { await d.releaseEngines(); throw e; }
       const was = (c.params || {}).megammr;
       // A MegaMMR node started before its memory setting was changed has the old heap: it is restarted first, so the room counted above is real
       const stale = on && kind !== "minima" && node.heapMbNow !== heapMb;
-      try { await d.holdEngines(); } catch (e) { await d.releaseEngines(); throw new Error(F.say(ENGINES, { error: brief(e) })); }
       try {
         setMegammr(true);   // always, before any restart: the restart after the import must keep the MegaMMR
         const turnedOn = !on;
@@ -181,17 +190,25 @@ function create(d) {
         const before = await chainAnchors();
         if (!before) { if (turnedOn) { setMegammr(was); await node.restart(); } throw new Error(STATUS_UNKNOWN); }
         let target = "";
+        const print = fingerprint(d.imports.confirm("megammr", shown));   // the file as the node is about to read it: compared again right before the import
         stage("check");
         const wc = watch();
         const chk = await followed(() => d.call(F.megammrCheckCommand(d.imports.confirm("megammr", shown), d.platform)), wc, (w) => w.checked)
           .then(r => { if (r && r.status === true) target = d.imports.confirm("megammr", shown); return r; })
           .catch(e => ({ status: false, error: brief(e) })).finally(() => wc.stop());
         if (!chk || chk.status !== true || !target) {
-          const why = brief(chk && chk.error);
+          const why = brief(chk && chk.error).split(" @ ")[0];   // "INVALID Coin proof! @ {the coin's JSON}": the reason, not the coin
           d.log("[app] MegaMMR file import: the file was refused (" + why + "); nothing imported" + (turnedOn ? ", MegaMMR set back as it was and the node restarted" : ""));
           if (turnedOn) setMegammr(was);
           if (turnedOn || (chk && chk.unanswered) || node.state !== "running") await node.restart();
+          if (wc.oom || OOM.test(why)) throw new Error(F.say(turnedOn ? OOM_BACK : OOM_SAID, { why, heap: String(heapMb) }));
+          if (chk && chk.unanswered) throw new Error(F.say(turnedOn ? CHECK_UNANSWERED_BACK : CHECK_UNANSWERED, { why }));
           throw new Error(F.say(turnedOn ? CHECK_FAILED_BACK : CHECK_FAILED, { why }));
+        }
+        if (fingerprint(target) !== print) {   // replaced or rewritten while the node read it: what it checked is not what it would import
+          d.log("[app] MegaMMR file import: refused, the file was changed while the node checked it" + (turnedOn ? "; MegaMMR set back as it was and the node restarted" : ""));
+          if (turnedOn) { setMegammr(was); await node.restart(); }
+          throw new Error(F.say(turnedOn ? TIP_REFUSED_BACK : TIP_REFUSED, { why: CHANGED_WHY }));
         }
         // M4: the file's chain against this node's tip (the integrity reply: chaintip = its cascade's tip + its blocks). Not answered (followed
         // to its end): not known, and the anchors after the import decide alone.
@@ -228,6 +245,7 @@ function create(d) {
           setMarker(null);
           if (turnedOn) setMegammr(was);
           await node.restart();
+          if (wi.oom || OOM.test(why)) throw new Error(F.say(turnedOn ? OOM_BACK : OOM_SAID, { why, heap: String(heapMb) }));
           throw new Error(F.say(turnedOn ? NOT_STARTED_BACK : NOT_STARTED, { why }));
         }
         // Failed after the reset: the node answers, but its chain is gone (network, timers and miner stopped). Restarted at once, as a light
@@ -316,9 +334,11 @@ function create(d) {
     setMarker(null); await d.releaseEngines();
   }
 
+  /** size, modification time and inode: a file replaced or rewritten between the check and the import differs in one of them */
+  const fingerprint = (p) => { try { const st = d.fs.statSync(p); return [st.size, st.mtimeMs, st.ino].join(":"); } catch (e) { return "unreadable"; } };
   const freeDisk = (dir) => { try { const st = d.fs.statfsSync(dir); return st.bavail * st.bsize; } catch (e) { return null; } };
   return { importMegammr, megammrOff, resynced, verify, marker, exclusive, busy: () => !!busy, busyWhat: () => busy };
 }
 
 module.exports = { create, BUSY, STATUS_UNKNOWN, ENGINES, IMPORT_OPEN, CHECK_FAILED, CHECK_FAILED_BACK, FAILED, FAILED_BACK, NOT_STARTED, NOT_STARTED_BACK, STEP, LOGGER, STALL_MS,
-  AHEAD_WHY, BEHIND_WHY, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, AHEAD, BEHIND, FRESH_MS, STUCK_MS };
+  CHECK_UNANSWERED, CHECK_UNANSWERED_BACK, CHANGED_WHY, OOM_SAID, OOM_BACK, AHEAD_WHY, BEHIND_WHY, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, AHEAD, BEHIND, FRESH_MS, STUCK_MS };
