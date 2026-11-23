@@ -87,3 +87,20 @@ test("PandaPools glue: an unanswered txnpost is pending, never a refusal; a neve
     assert.ok(/if \(rp && rp\.status === false && !isPending\(rp\)\) PoolInputClaims\.release/.test(require("fs").readFileSync(require("path").join(__dirname, "..", "main", "pandapools", "poolmgr.js"), "utf8")));
   } finally { fail = null; api.stopLoop(); }
 });
+
+// 0.18.326: a txnpost that was sent and is answered only after the wallet identity changed (invalidate bumps the epoch) is pending, never a
+// bare {status:false}: that freed the claims of a transaction that may have been broadcast
+test("PandaPools glue: a txnpost answered after an identity change is pending; another command answered then is a plain failure", async () => {
+  const api = require("../main/pandapools.js"); api._setDataDir(DIR);
+  let release = null;
+  api._setRunner((c) => c === "block" ? Promise.resolve({ status: true, response: { block: 0 } }) : c === "checkmode" ? Promise.resolve({ status: true, response: { writemode: true, dblocked: false } })
+    : /^txn(post|sign)/.test(c) ? new Promise((r) => { const prev = release; release = () => { if (prev) prev(); r({ status: false, error: "late" }); }; }) : Promise.resolve({ status: true, response: {} }));
+  await api.init();
+  const mds = api._ctx().MDS, posted = new Promise((r) => mds.cmd("txnpost id:pp2", r)), signed = new Promise((r) => mds.cmd("txnsign id:pp2 publickey:auto", r));
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    await api.invalidate(); release();
+    const p = await posted; assert.equal(p.pending, true, "sent before the change: may be broadcast"); assert.match(p.error, /^the node did not answer txnpost/);
+    assert.deepEqual(await signed, { status: false });
+  } finally { api.stopLoop(); }
+});

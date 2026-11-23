@@ -65,8 +65,11 @@ function buildMds() {
       // txnpost with no answer (0.18.324): the request may have reached the node, so it is NOT a refusal. {status:false} made poolmgr free the
       // posted inputs ("nothing was broadcast") for a transaction that may be in the mempool; pending:true keeps them held. Only a post that
       // never reached the node (main/rpc.js marks it notSent: refused before sending, ECONNREFUSED, a wrong RPC password) is a plain failure.
-      runner(command).then(function (r) { if (cb) cb(epoch===contextEpoch?r:{status:false}); }, function (e) { if (!cb) return;
-        if (/^\s*txnpost\b/i.test(String(command)) && !(e && e.notSent === true)) { cb({ status: false, pending: true, error: "the node did not answer txnpost, so the transaction may have been posted: its inputs stay held until the chain shows what happened" }); return; }
+      // An answer that arrives after the wallet identity changed (epoch) is not handed on, but a txnpost was SENT: it is pending too (0.18.326),
+      // never a bare {status:false}, which would free the claims of a transaction that may have been broadcast.
+      var isPost = /^\s*txnpost\b/i.test(String(command)), POST_UNKNOWN = { status: false, pending: true, error: "the node did not answer txnpost, so the transaction may have been posted: its inputs stay held until the chain shows what happened" };
+      runner(command).then(function (r) { if (!cb) return; if (epoch===contextEpoch) { cb(r); return; } cb(isPost ? POST_UNKNOWN : {status:false}); }, function (e) { if (!cb) return;
+        if (isPost && !(e && e.notSent === true)) { cb(POST_UNKNOWN); return; }
         cb({ status: false }); }); },
     sql: function(q,cb){if(epoch!==contextEpoch){if(cb)cb({status:false});return;}storage.sql(q,cb);},
     persistRecovery: function(cb) { cb(epoch===contextEpoch&&storage.flushChecked()); },

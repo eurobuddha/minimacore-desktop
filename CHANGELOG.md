@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.326] — PandaPools: a txnpost answered after a wallet identity change stays pending
+
+- main/pandapools.js: an answer that arrives after `invalidate()` (a seed restore or wallet change bumps the epoch) was handed to the engine as a bare `{status:false}`, the engine's "refused, nothing was broadcast", which frees the posted inputs' claims. For a `txnpost` that request was sent: it now answers `{status:false, pending:true, error:"the node did not answer txnpost, …"}` like an unanswered post (0.18.324). Other commands answered then stay a plain failure.
+- Test: scripts/pandapools-queue.test.cjs (in test:pandapools); fails on 0.18.325.
+
 ## [0.18.325] — PandaPools engine 0.6.51 re-vendored
 
 - main/pandapools/{poolmgr,service,input-claims,runtime-guard}.js copied byte-for-byte from pandapools-mds 0.6.51 (git `349034920fb93210d02e77f7d3f5257995ccfe23`, branch security/2026-11-07); the other 15 engine files were already identical. scripts/pandapools-parity.manifest.json updated with `--update`; scripts/pandapools-parity-check.cjs passes against the donor.
