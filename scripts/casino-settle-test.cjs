@@ -305,32 +305,94 @@ test("the module sends only its own command shapes: anything else, a ; chain or 
   assert.equal((await S._run("block")).status, true);
 });
 
-test("a FORGED phase-1 coin never makes the wallet show the secret of an offer that is still open", async () => {
-  const leaked = (n) => n.texts.some(t => t.includes(HS.slice(2)));
-  { // dust forgery (not bet x payout): nothing at all is built, by the pass
-    const n = standin(), o = coin(n, 1, "0.07", offer()), f = coin(n, 2, "0.000001", taken()); use(n, houseSecret);
-    assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.deepEqual(n.built(), []); assert.equal(leaked(n), false);
-    const row = (await S.list()).rows.find(r => r.coinid === f.coinid); assert.match(row.problem, /the pot is not bet x payout/); assert.equal(row.manualOk, true);
-    // the user's own click on it: the open offer is cancelled, the secret still not shown
-    const r = await S.settle(f.coinid); assert.deepEqual([r.action, r.coinid], ["cancel", o.coinid]); assert.equal(leaked(n), false);
+// 0.18.337 (review of 0.18.330, CRITICAL 1 and MINOR 6): the open-offer rule. What holds a reveal is an open offer of this wallet
+// with the same secret that could REALLY be taken and holds at least this wallet's stake in the bet; it holds it for a bounded
+// time; and the block pass never cancels anything.
+const leaked = (n) => n.texts.some(t => t.includes(HS.slice(2)));
+const cancels = (n) => n.ran.filter(p => /^txnoutput .* storestate:false$/.test(p) && !n.ran.some(q => q.includes("port:13"))).length;
+
+test("a forged, UNSPENDABLE open offer that copies this wallet's key and commit does not hold the reveal of a real taken offer (the reviewer's two probes)", async () => {
+  const probes = {
+    "states 1, 3, 4, 5 and 7 absent (the contract throws on every spend of it)": (n) => coin(n, 2, "0.07", { 0: K1, 2: HC, 6: "0" }, { created: 5000 - 1 }),
+    "a token whose own script answers FALSE": (n) => coin(n, 2, "0.07", offer(), { created: 5000 - 1, tokenid: hx("77"), tokenScriptFalse: true }),
+    "a complete MINIMA offer with a stake this app never wrote (dust)": (n) => coin(n, 2, "0.000001", offer(), { created: 5000 - 1 }),
+    "a complete offer that holds less than this wallet's stake in the bet": (n) => coin(n, 2, "0.01", offer({ 5: "0.01" }), { created: 5000 - 1 }),
+    "state 0 is not a key of this wallet": (n) => coin(n, 2, "0.07", offer({ 0: XK }), { created: 5000 - 1 }),
+    "state 6 is not there": (n) => coin(n, 2, "0.07", without(offer(), 6), { created: 5000 - 1 })
+  };
+  for (const [name, forge] of Object.entries(probes)) {
+    const n = standin(), real = coin(n, 1, "0.14", taken(), { created: 5000 - 100 }), f = forge(n); use(n, houseSecret);
+    const r = await S.pass();
+    assert.deepEqual(r.done.map(d => [d.action, d.coinid]), [["reveal", real.coinid]], name + ": the real offer is revealed in the first pass");
+    for (let b = 0; b < 40; b++) { n.mine(); await S.pass(); }
+    assert.equal(signs(n), 1, name + ": one signature, the reveal; none for the forged coin"); assert.deepEqual(n.verdicts, [true], name);
+    assert.ok(!n.ran.some(p => /^txn/.test(p) && p.includes(f.coinid)), name + ": the forged coin is in no transaction");
     clean(n);
   }
-  { // a forgery that paid the whole pot: the OPEN OFFER is cancelled first; the secret is shown only once that offer is spent
-    const n = standin(), o = coin(n, 1, "0.07", offer()), f = coin(n, 2, "0.14", taken()); use(n, houseSecret);
-    const r = await S.pass();
-    assert.deepEqual(r.done.map(d => [d.action, d.coinid]), [["cancel", o.coinid]]); assert.equal(leaked(n), false, "no reveal while the offer is on chain");
-    assert.ok(!n.built().some(p => p.includes("port:12")));
-    await S.pass(); n.tip += 3; await S.pass(); assert.equal(leaked(n), false, "still unmined: still no reveal");
-    n.mine(); assert.equal(o.spent, true, "the offer is back in the wallet");
-    assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", f.coinid]]);   // nothing left to protect: the forger's own stake is now a fair bet
-    assert.equal(leaked(n), true); clean(n);
+});
+
+test("a real open offer with the same secret and terms holds the reveal, the pass NEVER cancels it, and the wait is bounded: revealed anyway at 300 blocks left", async () => {
+  const n = standin(), o = coin(n, 1, "0.07", offer(), { created: 5000 - 400 }), t = coin(n, 2, "0.14", taken(), { created: 5000 - 100 }); const u = use(n, houseSecret);
+  for (let b = 0; b < 30; b++) { assert.deepEqual(await S.pass(), { done: [], failed: [] }); n.mine(); }
+  assert.equal(signs(n), 0, "nothing is signed: no reveal, and no cancel by the pass"); assert.equal(leaked(n), false); assert.equal(o.spent, undefined);
+  let row = (await S.list()).rows.find(r => r.coinid === t.coinid);
+  assert.equal(row.problem, "an open offer of this wallet with the same secret is still at the contract (coin " + o.coinid + ", 0.07 MINIMA). Revealing this bet shows that offer's secret to whoever takes it, so this bet waits. Cancel that offer now. This bet is revealed anyway when it is 1200 blocks old (it is 130) or 300 blocks are left (1371 are), because not revealing loses its pot for certain");
+  assert.equal(row.manualOk, false, "no button reveals it while the offer is there"); await assert.rejects(S.settle(t.coinid), /Cancel that offer now/); assert.equal(leaked(n), false);
+  assert.deepEqual((await S.list()).rows.find(r => r.coinid === o.coinid).action, "cancel", "the offer has its Cancel button");
+  // the user is away. 1199 blocks old (302 left of its 1500): still waiting. 1200 old: revealed, and the row said why
+  n.tip = t.created + 1199; assert.equal((await S.list()).rows.find(r => r.coinid === t.coinid).blocksLeft, 302); assert.deepEqual(await S.pass(), { done: [], failed: [] });
+  n.tip += 1; const r = await S.pass();
+  assert.deepEqual(r.done.map(d => [d.action, d.coinid]), [["reveal", t.coinid]]); assert.equal(leaked(n), true);
+  n.mine(); assert.deepEqual(n.verdicts, [true]); assert.equal(o.spent, undefined, "the offer was never touched");
+  assert.ok(u.notes.some(m => /^Sent the reveal/.test(m)));
+  { // an offer of this wallet with a shorter timeout of its own (800), same terms: 301 left waits, 300 left is revealed
+    const k = standin(), o3 = coin(k, 1, "0.07", offer({ 7: "800" })), t3 = coin(k, 2, "0.14", taken({ 7: "800" }), { created: 5000 }); use(k, houseSecret);
+    k.tip = 5000 + 500; assert.equal((await S.list()).rows.find(r => r.coinid === t3.coinid).blocksLeft, 301); assert.deepEqual(await S.pass(), { done: [], failed: [] });
+    k.tip += 1; assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", t3.coinid]]);
+    assert.match((await S.list()).rows.find(r => r.coinid === t3.coinid).note, /sent at block 5501/); k.mine(); assert.deepEqual(k.verdicts, [true]); assert.equal(o3.spent, undefined);
   }
-  { // the forgery names ANOTHER key of this wallet, and the node's key list comes back short (without the offer's key): still no reveal
+  // the user cancels in time instead: the reveal follows as soon as the offer is seen spent
+  const m = standin(), o2 = coin(m, 1, "0.07", offer()), t2 = coin(m, 2, "0.14", taken()); use(m, houseSecret);
+  await S.pass(); assert.equal((await S.cancelAll()).done.length, 1); await S.pass(); assert.equal(leaked(m), false, "the cancel is only sent: still no reveal");
+  m.mine(); assert.equal(o2.spent, true); assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", t2.coinid]]);
+  clean(n); clean(m);
+});
+
+test("a forged dust bet never makes the pass cancel an offer, and is not revealed while a real offer holds more than it: listed, with \"cancel that offer\"", async () => {
+  { // the reviewer's probe: bet 0.000001, payout 1 (the pot IS bet x payout), the commit of a real open offer
+    const n = standin(), o = coin(n, 1, "0.07", offer()), f = coin(n, 2, "0.000001", taken({ 4: "1", 5: "0.000001" })); use(n, houseSecret);
+    for (let b = 0; b < 30; b++) { assert.deepEqual(await S.pass(), { done: [], failed: [] }); n.mine(); }
+    assert.deepEqual(n.built(), [], "nothing is built: no cancel, no reveal"); assert.equal(leaked(n), false); assert.equal(o.spent, undefined);
+    const row = (await S.list()).rows.find(r => r.coinid === f.coinid);
+    assert.equal(row.problem, "an open offer of this wallet with the same secret is still at the contract (coin " + o.coinid + ", 0.07 MINIMA). Revealing this bet shows that offer's secret to whoever takes it, so this bet waits. Cancel that offer now. This bet is not revealed while that offer is there");
+    assert.equal(row.manualOk, false); await assert.rejects(S.settle(f.coinid), /Cancel that offer now/); assert.equal(signs(n), 0);
+    n.tip += 2000; assert.deepEqual(await S.pass(), { done: [], failed: [] }, "however old it gets"); assert.equal(leaked(n), false);
+    clean(n);
+  }
+  { // dust that is not bet x payout, beside a real open offer: nothing by the pass, nothing by a click on it
+    const n = standin(); coin(n, 1, "0.07", offer()); const f = coin(n, 2, "0.000001", taken()); use(n, houseSecret);
+    assert.deepEqual(await S.pass(), { done: [], failed: [] }); await assert.rejects(S.settle(f.coinid), /Cancel that offer now/); assert.deepEqual(n.built(), []); assert.equal(leaked(n), false);
+  }
+  { // dust with a stake (payout 2), smaller than the real offer: it waits; with no user it is revealed when it is 1200 blocks old, never earlier, whatever timeout the forger wrote
+    const n = standin(), o = coin(n, 1, "0.07", offer()), f = coin(n, 2, "0.000002", taken({ 5: "0.000001", 7: "3" }), { created: 5000 - 50 }); use(n, houseSecret);
+    assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal((await S.list()).rows.find(r => r.coinid === f.coinid).blocksLeft, 0, "its own timeout has passed: that does not hurry the reveal");
+    n.tip = f.created + 1199; assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal(leaked(n), false);
+    n.tip += 1; assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", f.coinid]]); assert.equal(o.spent, undefined); assert.equal(cancels(n), 0);
+  }
+  { // alone (no open offer): a bet with no stake of this wallet is not revealed by itself; the button may
+    const n = standin(), f = coin(n, 2, "0.000001", taken({ 4: "1", 5: "0.000001" })); use(n, houseSecret);
+    assert.deepEqual(await S.pass(), { done: [], failed: [] }); const row = (await S.list()).rows[0];
+    assert.match(row.problem, /this wallet has no stake in it \(the pot is the player's own bet\): it is not revealed automatically/); assert.equal(row.manualOk, true); assert.ok(f);
+  }
+});
+
+test("the offer's key is asked for by itself when the key list is short; a node that cannot say holds the reveal; a stranger's offer holds nothing", async () => {
+  { // the bet names ANOTHER key of this wallet, and the node's key list comes back short (without the offer's key): still no reveal
     const n = standin({ shortKeys: [K2] }), o = coin(n, 1, "0.07", offer({ 0: K1 })), f = coin(n, 2, "0.14", taken({ 0: K2 })); use(n, houseSecret);
-    const r = await S.pass();
-    assert.equal(leaked(n), false); assert.deepEqual(r.done.map(d => [d.action, d.coinid]), [["cancel", o.coinid]]);
-    assert.ok(n.ran.includes("keys publickey:" + K1), "the offer's key is asked for by itself");
-    assert.ok(f); clean(n);
+    assert.deepEqual(await S.pass(), { done: [], failed: [] });
+    assert.equal(leaked(n), false); assert.ok(n.ran.includes("keys publickey:" + K1), "the offer's key is asked for by itself");
+    assert.match((await S.list()).rows.find(r => r.coinid === f.coinid).problem, new RegExp("coin " + o.coinid + ", 0\\.07 MINIMA\\)\\. .* This bet is revealed anyway when it is 1200 blocks old \\(it is 10\\), because"));
+    clean(n);
   }
   { // the same, and the node cannot say whose the offer's key is: nothing is revealed, and it is listed
     const n = standin({ shortKeys: [K2] }), o = coin(n, 1, "0.07", offer({ 0: K1 })), f = coin(n, 2, "0.14", taken({ 0: K2 })); use(n, houseSecret);
@@ -338,9 +400,10 @@ test("a FORGED phase-1 coin never makes the wallet show the secret of an offer t
     assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal(leaked(n), false);
     assert.match((await S.list()).rows.find(r => r.coinid === f.coinid).problem, new RegExp("coin " + o.coinid + "\\) and the node could not say"));
   }
-  { // a stranger's phase-0 coin that merely copies the commit is not this wallet's offer: it does not block a real reveal
-    const n = standin(), x = coin(n, 1, "0.07", offer({ 0: XK, 1: XA })), c = coin(n, 2, "0.14", taken()); use(n, houseSecret);
-    assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", c.coinid]]); assert.ok(!n.ran.some(p => p.includes(x.coinid)));
+  { // a stranger's phase-0 coin that merely copies the commit is not this wallet's offer: it holds nothing, and its key is asked for once
+    const n = standin(), x = coin(n, 1, "0.07", offer({ 0: XK, 1: XA })), y = coin(n, 3, "0.07", offer({ 0: XK, 1: XA })), c = coin(n, 2, "0.14", taken()); use(n, houseSecret);
+    assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", c.coinid]]); assert.ok(!n.ran.some(p => /^txn/.test(p) && (p.includes(x.coinid) || p.includes(y.coinid))));
+    await S.list(); await S.list(); assert.equal(n.ran.filter(p => p === "keys publickey:" + XK).length, 1);
   }
 });
 

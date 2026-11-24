@@ -14,16 +14,27 @@
  *    8-11 freely), and the node runs what follows a ";" as another command. Every value is checked to an exact shape BEFORE it
  *    is used; a command is built from checked values only, is ONE command, passes main/cmdverb.js refuse, and must match one of
  *    the shapes in SHAPES or it is not sent. A coin with any other value is left alone and listed with its whole coin id.
- *  - THE SECRET OF AN OFFER THAT IS STILL OPEN IS NEVER SHOWN. A reveal puts the house secret on chain. Anyone can forge a
- *    phase-1 coin that copies the key and commit of a live offer; revealing for it would let the forger take the real offer with
- *    a pick he knows wins. The covenant lets a phase-0 offer be spent only by its owner's signature or by a real take, so an
- *    offer has been taken (or cancelled) exactly when no unspent phase-0 coin carries its commit. The reveal is therefore made
- *    only when the SAME confirmed coin scan holds no phase-0 coin with that commit and one of this wallet's keys; while one
- *    exists, that phase-0 coin is cancelled first (safe in both readings: it is this wallet's own money or a forger's gift),
- *    and the reveal waits until it is gone. The scan is the confirmed chain, never the mempool: a take that is only in the
- *    mempool can still be replaced by one with another pick. Besides, a taken offer of this app always holds bet x payout
- *    (stake bet x (payout - 1) plus the taker's bet, forced by the covenant): any other amount is a forgery and is not
- *    revealed automatically (it would cost a key use per forged dust coin).
+ *  - THE OPEN-OFFER RULE (0.18.337; the rule of 0.18.330 let one forged coin stop a real reveal for ever, and made the block
+ *    pass cancel an offer without a click). A reveal puts the house secret on chain, and an offer that is still open with
+ *    the same secret could then be taken with a pick that wins. So a reveal WAITS while this wallet has an open offer with the
+ *    same commit, but only an offer that could really be taken and that is worth protecting, and only for a bounded time:
+ *      what holds a reveal: a phase-0 coin whose states 0-7 are all there and readable (a missing one makes the contract throw
+ *        on a take as on any spend: such a coin can never be taken, so it protects nothing), state 0 a key the NODE says is this
+ *        wallet's, the same commit, the SAME token as the bet and MINIMA or MxUSD (another token's own script may refuse every
+ *        spend), an amount that is exactly the stake its own terms give (bet x (payout - 1), what this app wrote), and at least
+ *        this wallet's stake in the bet (a smaller one: not revealing would lose more than that offer holds). Nothing else.
+ *      for how long: until the bet is HOLD_AGE blocks old; or, when the offer has the bet's own terms (states 0-5 and 7 equal:
+ *        the timeout is then this wallet's own, not a stranger's), until REVEAL_ANYWAY_LEFT blocks are left. Then the bet is
+ *        revealed although the offer is still there.
+ *      why it is revealed anyway: not revealing loses this wallet's stake in the bet FOR CERTAIN at the timeout. Revealing
+ *        exposes the open offer, which is lost only if someone takes it before it is cancelled, and which a hostile taker can
+ *        win in any case, secret or no secret (the contract's take does not require states 9 and 10; a take without one can
+ *        never be revealed and is claimed at the timeout). The certain loss decides.
+ *      the block pass NEVER cancels: an open offer is cancelled by the user's click only. The bet that waits is listed as not
+ *        settled automatically, with the offer's coin id and "cancel that offer now".
+ *    A bet in which this wallet has no stake (the pot is the bet: payout 1) is never revealed automatically. A taken offer of
+ *    this app always holds bet x payout (stake plus the taker's bet, forced by the covenant): any other amount is a forgery and
+ *    is not revealed automatically. The scan is the confirmed chain, never the mempool.
  *  - Outcome and payout are the covenant's own: SHA3(house secret ++ player secret), its first 4 bytes as a number, modulo
  *    the range, equal to the pick; winnings bet x payout, the rest to the house. Exact decimal arithmetic (BigInt), no rounding.
  *  - Every transaction's error path runs txndelete (family rule), and so does its success path. A posted transaction is
@@ -69,6 +80,8 @@ const AUTO_PER_DAY = 24;      // automatic signatures in any 24 hours
 const CLAIMS_PER_DAY = 12;    // of those, timeout claims stop here: the rest is kept for reveals and payouts, which have a deadline
 const DAY_MS = 86400000;
 const MANUAL_SWEEP = 50;      // "Cancel all": offers cancelled by one click
+const HOLD_AGE = 1200;            // a bet whose reveal waits for an open offer to be cancelled is revealed anyway at this age
+const REVEAL_ANYWAY_LEFT = 300;   // … or, when the offer has the bet's own terms, when this many blocks are left
 
 // ---- the shapes: the ONLY values that reach a command ----
 const HEX64 = /^0x[0-9A-Fa-f]{64}$/;                    // a key, an address or a commit this wallet relies on; a secret; a coin id
@@ -78,6 +91,8 @@ const DEC = /^\d{1,30}(?:\.\d{1,44})?$/;                // a plain decimal
 const INT = /^[1-9]\d{0,9}$/;                           // a positive whole number (range, payout)
 const BLOCKN = /^\d{1,12}$/;
 const copyable = (v) => typeof v === "string" && (HEXV.test(v) || DEC.test(v));
+/** The same value as the contract compares it: hex without regard to case, a number by its value. */
+const sameValue = (a, b) => typeof a === "string" && typeof b === "string" && ((HEXV.test(a) && HEXV.test(b) && a.toUpperCase() === b.toUpperCase()) || (DEC.test(a) && DEC.test(b) && decCmp(a, b) === 0));
 const TXID = "cs_[a-z]{5,7}_\\d{1,16}_\\d{1,6}";
 const HEXS = "0x[0-9A-Fa-f]{64}", DECS = "\\d{1,30}(?:\\.\\d{1,44})?";
 const SHAPES = [
@@ -180,6 +195,7 @@ function setSent(coinid, sent, txpowid) { const s = loadStore(), r = s.posted[co
 // ---- reading the node ----
 const up = (s) => String(s).toUpperCase();
 let known = new Set();   // every key the node has listed this session: one short `keys` answer does not make a coin a stranger's
+let strangers = new Set();   // keys the node said, asked one by one, are NOT this wallet's
 async function ask(cmd, what) {
   let r; try { r = await run(cmd); } catch (e) { throw new Error("The node did not answer (" + what + "): " + ((e && e.message) || e) + ". Nothing was done."); }
   if (!r || r.status !== true) throw new Error("The node could not be read (" + what + "). Nothing was done.");
@@ -211,9 +227,10 @@ async function scan() {
 /** Is this key the node's, asked for this one key (no list to be short)? An unreadable answer throws: never a guess. */
 async function isKey(pk) {
   if (known.has(up(pk))) return true;
+  if (strangers.has(up(pk))) return false;   // asked for by itself once already: a stranger's coins must not cost a question each, each pass
   const r = await ask("keys publickey:" + pk, "one key");
   const hit = !!(r && Array.isArray(r.keys) && r.keys.some(row => row && up(row.publickey) === up(pk)));
-  if (hit) known.add(up(pk));
+  if (hit) known.add(up(pk)); else if (r && Array.isArray(r.keys) && strangers.size < 5000) strangers.add(up(pk));
   return hit;
 }
 
@@ -238,8 +255,9 @@ const holds = (p, tip) => !!(p && p.sent && !p.done && tip - p.block < REPOST_AF
 /**
  * What this wallet may do with ONE coin at the contract. → null (not this wallet's: nothing is done, nothing is listed), or a row
  * { coinid, phase, role, amount, tokenid, token, age, blocksLeft, leftFor, action, auto, note, problem, manualOk, held, plan }.
- * `manual` is the user's own click: it lifts only the two checks that guard against paying for nothing (the pot is bet x payout;
- * the winnings address is this wallet's), never a shape check, the secret or the open-offer rule.
+ * `manual` is the user's own click: it lifts only the checks that guard against paying for nothing (the pot is bet x payout; this
+ * wallet has a stake; the winnings address is this wallet's; the token; the count of signatures), never a shape check, the secret
+ * or the open-offer rule.
  */
 async function judge(coin, ctx, manual) {
   const st = stateOf(coin); if (!st) return null;
@@ -303,22 +321,33 @@ async function judge(coin, ctx, manual) {
     // a taken offer of this app holds exactly bet x payout: anything else is a forgery (a dust coin must not cost a key use, or cancel an offer)
     const whole = INT.test(st.get(3)) && INT.test(st.get(4)) && V.isAmount(st.get(5)) && decCmp(amount, decMulInt(st.get(5), st.get(4))) === 0;
     if (!whole && !manual) return bad("the pot is not bet x payout, which a taken offer of this app always is: it is not revealed automatically", true);
-    // THE OPEN-OFFER RULE: never while a phase-0 coin of this wallet carries the same commit (the offer could still be taken).
+    // THE OPEN-OFFER RULE (the header says why): an open offer of this wallet with the same commit, one that could really be taken
+    // and holds at least this wallet's stake in the bet, makes the reveal WAIT, for a bounded time. The pass never cancels it.
+    const bet = st.get(5), stake = whole && decCmp(amount, bet) > 0 ? decSub(amount, bet) : "0";
+    let open = null;
     for (const o of ctx.coins) {
-      const os = o !== coin && stateOf(o); if (!os || phaseOf(os) !== 0 || up(os.get(2)) !== up(commit)) continue;
-      const ok0 = os.get(0); if (typeof ok0 !== "string" || !HEX64.test(ok0)) continue;
-      let mine; try { mine = up(ok0) === up(k0) || await isKey(ok0); } catch (e) { return bad("an open offer with the same commit is on chain (coin " + String(o.coinid) + ") and the node could not say whether its key is this wallet's: the secret is not shown"); }
-      if (!mine) continue;   // not this wallet's key: not its offer (an offer of this wallet always carries one of its keys)
-      if (!HEX64.test(String(o.coinid)) || !V.isTokenid(o.tokenid) || !V.isAmount(o.tokenid === "0x00" ? o.amount : o.tokenamount)) return bad("an open offer with the same commit is still on chain (coin " + String(o.coinid) + ") and cannot be read: the secret is not shown while it could be taken");
-      row.action = "unblock"; row.auto = true;
-      row.plan = { kind: "cancel", key: ok0, coinid: o.coinid, amount: o.tokenid === "0x00" ? o.amount : o.tokenamount, tokenid: o.tokenid };
-      row.note = "An open offer with the same commit is still on chain (coin " + o.coinid + "). It is cancelled first: the secret is not shown while that offer could still be taken.";
-      const op = ctx.posted[o.coinid]; if (holds(op, ctx.tip)) row.held = true;
-      return autoOnly();
+      if (o === coin) continue;
+      const os = stateOf(o); if (!os || phaseOf(os) !== 0 || !sameValue(os.get(2), commit)) continue;
+      if ([0, 1, 2, 3, 4, 5, 6, 7].some(n => !copyable(os.get(n))) || !HEX64.test(os.get(0)) || !HEX64.test(String(o.coinid))) continue;   // the contract would throw on a take: not an offer
+      if (o.tokenid !== tokenid || !(tokenid === "0x00" || up(tokenid) === up(MXUSD_TOKENID))) continue;
+      const oa = tokenid === "0x00" ? o.amount : o.tokenamount;
+      if (typeof oa !== "string" || !V.isAmount(oa) || !INT.test(os.get(3)) || !INT.test(os.get(4)) || !V.isAmount(os.get(5)) || decCmp(oa, decMulInt(os.get(5), BigInt(os.get(4)) - 1n)) !== 0) continue;   // not a stake this app wrote
+      if (decCmp(oa, stake) < 0) continue;   // it holds less than this wallet's stake in the bet: the bet comes first
+      let mine; try { mine = await isKey(os.get(0)); } catch (e) { return bad("an open offer with the same secret is at the contract (coin " + o.coinid + ") and the node could not say whether its key is this wallet's: the secret is not shown"); }
+      if (!mine) continue;   // not this wallet's key: not its offer
+      const twin = [0, 1, 2, 3, 4, 5, 7].every(n => sameValue(os.get(n), st.get(n)));
+      if (!open || (twin && !open.twin)) open = { coinid: o.coinid, amount: oa, twin };
     }
+    if (open) {
+      const anyway = whole && stake !== "0" && (row.age >= HOLD_AGE || (open.twin && left <= REVEAL_ANYWAY_LEFT));
+      if (!anyway) return bad("an open offer of this wallet with the same secret is still at the contract (coin " + open.coinid + ", " + open.amount + " " + row.token + "). Revealing this bet shows that offer's secret to whoever takes it, so this bet waits. Cancel that offer now"
+        + (whole && stake !== "0" ? ". This bet is revealed anyway when it is " + HOLD_AGE + " blocks old (it is " + row.age + ")" + (open.twin ? " or " + REVEAL_ANYWAY_LEFT + " blocks are left (" + left + " are)" : "") + ", because not revealing loses its pot for certain" : ". This bet is not revealed while that offer is there"));
+      row.warn = "An open offer of this wallet with the same secret was not cancelled (coin " + open.coinid + "). This bet is revealed anyway: not revealing loses its pot for certain. Revealing shows that offer's secret: cancel that offer now.";
+    }
+    if (stake === "0" && !manual) return bad("this wallet has no stake in it (the pot is the player's own bet): it is not revealed automatically", true);
     row.action = "reveal"; row.auto = true;
     row.plan = Object.assign({ kind: "reveal", key: k0, secret, states: [0, 1, 2, 3, 4, 5].map(n => [n, st.get(n)]).concat([[6, "2"]], [7, 8, 9, 10, 11].map(n => [n, st.get(n)])) }, base);
-    if (!row.held) row.note = "Taken: the house secret is to be revealed so the bet can be settled.";
+    if (!row.held) row.note = row.warn || "Taken: the house secret is to be revealed so the bet can be settled.";
     return autoOnly();
   }
 
@@ -469,7 +498,7 @@ function cancelAll() {
     return { done, failed };
   });
 }
-/** The block pass: reveals, payouts and timeout claims (and the cancel that must come before a reveal), nothing else; bounded. */
+/** The block pass: reveals, payouts and timeout claims, nothing else; bounded. It never cancels an offer. */
 function pass() {
   return locked(async () => {
     const { ctx, rows } = await work(r => r.auto, false), done = [], failed = [], start = sigsToday();
@@ -497,9 +526,9 @@ function startLoop() {
 }
 function stopLoop() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 /** A seed restore or wallet change: the keys seen so far belong to the old wallet. */
-function invalidate() { known = new Set(); secretCache.clear(); lastTip = null; }
+function invalidate() { known = new Set(); strangers = new Set(); secretCache.clear(); lastTip = null; }
 
 module.exports = {
-  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY,
+  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY, HOLD_AGE, REVEAL_ANYWAY_LEFT,
   _setClock: (fn) => { now = fn; }, _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run
 };
