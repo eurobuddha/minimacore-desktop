@@ -443,7 +443,7 @@ function makeHost(opts = {}) {
     abort.abort(); abort = new AbortController();   // queued signers of the dropped engine are never sent
     flush();
     ctx = null; sqlShim = null; serviceHandler = null; ready = false; initPromise = null; vmJsonParse = null; lastTip = 0; last = null;
-    frameTx = new Map(); budget = null; ownCache = null; intents = [];
+    frameTx = new Map(); budget = null; ownCache = null; lists = null; listsFresh = false; intents = [];
     busy = 0; posts = 0;   // the dropped engine's late answers are counted by nobody (its `end` still runs: see below)
     const R = registry(); if (R) R.releaseOwner("dexicon");   // its unfinished builds died with it; posted coins and live orders' coins stay held
   }
@@ -615,22 +615,33 @@ function makeHost(opts = {}) {
   // the balance until a seed restore. Refused when the script names one of this wallet's own keys (any 32-byte literal) or
   // IS one of our tracked scripts (a pool covenant: same text = same address). `keys` is kept 60 s and read again at once
   // when a simple row names a key it does not hold; either list unreadable → refused, nothing registered.
-  let ownKeys = null, ownKeysAt = 0;
-  const call = (q) => Promise.resolve().then(() => runner(q)).catch(() => null);
-  async function readKeys() {
-    ownKeys = null; const ks = await call("keys");
-    const kl = ks && ks.status === true && ks.response && Array.isArray(ks.response.keys) ? ks.response.keys : null;
-    if (kl && kl.length) { ownKeys = new Set(kl.map((k) => String((k && k.publickey) || "").toLowerCase()).filter(Boolean)); ownKeysAt = Date.now(); }
+  // ONE short-lived read of this wallet's own `scripts` and `keys` (0.19.437), shared by the page newscript guard and the signing check
+  // (frameCheck). A take sends up to 32 newscripts and each read `scripts` again. A whole read is kept LISTS_MS; it is dropped when the
+  // page itself reads `scripts` or `getaddress` (how a page can learn a key this wallet has just made), and read again when a simple row
+  // names a key the kept list does not hold. When a read fails, the last whole one serves for LISTS_STALE_MS, as the keys did before.
+  const LISTS_MS = 5000, LISTS_STALE_MS = 60000;
+  let lists = null, listsFresh = false;
+  async function ownLists(fresh, opts) {
+    if (!fresh && lists && listsFresh && Date.now() - lists.at <= LISTS_MS) return lists;
+    const scripts = await runner("scripts", opts), keys = await runner("keys", opts);
+    const whole = scripts && scripts.status === true && Array.isArray(scripts.response) && keys && keys.status === true && keys.response && Array.isArray(keys.response.keys) && keys.response.keys.length > 0;
+    if (whole) { lists = { scripts, keys, at: Date.now() }; listsFresh = true; return lists; }
+    return { scripts, keys, at: Date.now(), partial: true };
   }
   async function notOurScript(c) {
     const m = /script:"([^"]*)"/.exec(c), script = m ? m[1] : null;
     if (script == null) throw new Error("no script");
-    if (!ownKeys || Date.now() - ownKeysAt > 60000) await readKeys();
-    const sc = await call("scripts"), rows = sc && sc.status === true && Array.isArray(sc.response) ? sc.response : null;
-    if (ownKeys && rows && rows.some((r) => r && r.simple === true && /^0x[0-9A-Fa-f]{64}$/.test(String(r.publickey || "")) && !ownKeys.has(String(r.publickey).toLowerCase()))) await readKeys();
-    if (!ownKeys || !rows) throw new Error("this wallet's own keys and scripts could not be read, so no script is registered from the Dexicon page now");
-    for (const x of script.matchAll(/0x([0-9A-Fa-f]+)/g)) if (x[1].length === 64 && ownKeys.has(x[0].toLowerCase())) throw new Error("that script names one of this wallet's own keys (" + x[0] + "): registering it would hide your own coins");
-    const mine = rows.find((r) => r && r.track === true && r.script === script);
+    const read = async (fresh) => {
+      let L = null; try { L = await ownLists(fresh); } catch (e) { L = null; }
+      if ((!L || L.partial) && lists && Date.now() - lists.at <= LISTS_STALE_MS) L = lists;
+      if (!L || L.partial) return null;
+      return { rows: L.scripts.response, keys: new Set(L.keys.response.keys.map((k) => String((k && k.publickey) || "").toLowerCase()).filter(Boolean)) };
+    };
+    let w = await read(false);
+    if (w && w.rows.some((r) => r && r.simple === true && /^0x[0-9A-Fa-f]{64}$/.test(String(r.publickey || "")) && !w.keys.has(String(r.publickey).toLowerCase()))) w = await read(true);
+    if (!w || !w.keys.size) throw new Error("this wallet's own keys and scripts could not be read, so no script is registered from the Dexicon page now");
+    for (const x of script.matchAll(/0x([0-9A-Fa-f]+)/g)) if (x[1].length === 64 && w.keys.has(x[0].toLowerCase())) throw new Error("that script names one of this wallet's own keys (" + x[0] + "): registering it would hide your own coins");
+    const mine = w.rows.find((r) => r && r.track === true && r.script === script);
     if (mine) throw new Error("that script is one of this wallet's own (address " + mine.address + "): registering it again would hide your own coins");
   }
   // ---- the command bridge: what a Dexicon screen (the MiniDapp page's MDS) may ask for ----
@@ -641,6 +652,7 @@ function makeHost(opts = {}) {
     let fwd = c;   // what reaches the node: a transaction of the frame's goes under its own page-only id (below)
     const send = () => Promise.resolve().then(() => runner(fwd, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
     const verb = require("./cmdverb").verbs(c)[0];   // one reading only: dexCommand refused any other
+    if (verb === "scripts" || verb === "getaddress") listsFresh = false;   // the page may now know a key made since the kept read: the next guard reads again
     if (verb === "newscript") return notOurScript(c).then(send, (e) => { const why = (e && e.message) || String(e); log("REFUSED from the Dexicon page: `newscript` — " + why); return { status: false, error: "Refused by the app: " + why + ". Nothing was registered." }; });
     if (!/^txn/.test(verb) || verb === "txnview") return send();   // reads; txnview decodes hex and touches no transaction
     // ---- a transaction of the frame's (header of main/dexicon-signgate.js) ----
@@ -685,7 +697,7 @@ function makeHost(opts = {}) {
       if (!txn) return { ok: false, why: "the node could not show the transaction (" + ((t && (t.error || t.message)) || "no reply") + ")" };
       const rec = frameTx.get(id), b = budget && Object.assign({}, budget, { left: F.d(budget.left).plus(F.d(rec ? rec.counted : "0")).toFixed() });
       const orders = () => { try { return plain(ctx.RELAY ? ctx.RELAY.orders() : []); } catch (e) { return []; } };
-      const own = async (fresh) => { if (fresh || !ownCache) ownCache = signgate.ownAddresses(await runner("scripts", { signal }), await runner("keys", { signal })); return ownCache; };
+      const own = async (fresh) => { if (fresh || !ownCache) { const L = await ownLists(fresh, { signal }); ownCache = signgate.ownAddresses(L.scripts, L.keys); } return ownCache; };
       let v = signgate.check({ txn, own: await own(false), orders: orders(), budget: b, post, now: Date.now(), F });
       if (v.ok) return v;
       // A refusal may only mean that this side is behind: a new wallet address, or an order the page has heard of and

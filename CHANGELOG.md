@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.437] — A take's page newscripts read the wallet's scripts once, not once each
+
+- Independent review of 0.19.428 (MINOR 14), main/dexicon.js. The guard of 0.19.428 read the node's `scripts` for every page newscript (a take sends up to 32), though the signing check already reads the same lists.
+- One short-lived read of `scripts` and `keys` (5 s) now serves the newscript guard and the signing check. It is read again as soon as the page itself reads `scripts` or `getaddress` (the only ways a page can learn a key this wallet has just made), and whenever a simple row names a key the kept list does not hold. A read that fails falls back on the last whole one for up to 60 s, as the key list did; with none, nothing is registered, as before.
+- Test: scripts/dexicon-host.test.cjs (fails on 0.19.436: 32 reads).
+
 ## [0.19.436] — The Dexicon page's Activity read is let through; a forged fill record no longer keeps the Quit warning on
 
 - Independent review of 0.19.428 (MINOR 10), main/dexicon.js.

@@ -1619,3 +1619,27 @@ test("0.19.428: a page newscript never touches one of this wallet's own addresse
   const M2 = 'newscript script:"RETURN SIGNEDBY(0x' + "6B".repeat(32) + ')" trackall:false';
   r = await h2.host.command({ op: "cmd", command: M2 }); assert.equal(r.status, false); assert.match(r.error, /could not be read/); assert.ok(!h2.node.seen.includes(M2));
 });
+
+// 0.19.437 (independent review of 0.19.428, MINOR 14): every page newscript read `scripts` again (a take sends up to 32), though
+// the signing check already holds the same lists. One short-lived read now serves both; it is read again as soon as the page could
+// know a key made since (its own `scripts` or `getaddress`), and when a simple row names a key the kept list does not hold.
+test("0.19.437: 32 page newscripts read the wallet's scripts and keys once; a key the wallet makes meanwhile is still refused once the page can know it", async () => {
+  let extra = null;   // a key this wallet makes later: [key, address]
+  const { host, node } = await boot({ node: { on: (c) => (!extra ? null
+    : c === "keys" ? { status: true, pending: false, response: { keys: [{ publickey: node.KEY }, { publickey: extra[0] }] } }
+    : c === "scripts" ? { status: true, pending: false, response: [{ address: node.ADDRESS, script: "RETURN SIGNEDBY(" + node.KEY + ")", publickey: node.KEY, simple: true }, { address: extra[1], script: "RETURN SIGNEDBY(" + extra[0] + ")", publickey: extra[0], simple: true }] } : null) } });
+  const cmd = (command) => host.command({ op: "cmd", command }), count = (c) => node.seen.filter((x) => x === c).length;
+  const maker = (i) => 'newscript script:"RETURN SIGNEDBY(0x' + (0x1000 + i).toString(16).padStart(64, "0").toUpperCase() + ')" trackall:false';
+  const s0 = count("scripts"), k0 = count("keys");
+  for (let i = 0; i < 32; i++) { const r = await cmd(maker(i)); assert.equal(r.status, true, JSON.stringify(r)); }
+  assert.equal(count("scripts") - s0, 1, "one read of `scripts` for the 32 (it was 32)"); assert.equal(count("keys") - k0, 1);
+  for (let i = 0; i < 32; i++) assert.equal(count(maker(i)), 1, "each one registered");
+  // the wallet makes a new key; the page learns it the only way it can (its own `scripts` read) and tries to register it untracked
+  extra = ["0x" + "7C".repeat(32), "0x" + "7D".repeat(32)];
+  await cmd("scripts");
+  const OWN2 = 'newscript script:"RETURN SIGNEDBY(' + extra[0] + ')" trackall:false';
+  const r = await cmd(OWN2); assert.equal(r.status, false); assert.match(r.error, /names one of this wallet's own keys \(0x7C/); assert.equal(count(OWN2), 0, "never sent to the node");
+  // own key still refused from the kept read, and a failed read falls back on the last whole one
+  const OWN = 'newscript script:"RETURN SIGNEDBY(' + node.KEY + ')" trackall:false';
+  assert.equal((await cmd(OWN)).status, false); assert.equal(count(OWN), 0);
+});
