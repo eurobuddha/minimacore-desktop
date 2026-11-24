@@ -381,7 +381,8 @@ ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", asy
 ipcMain.handle("mcd:importMegammr", (_e, shown) => megafile.importMegammr(shown));
 node.on("status", (s) => { if (s && s.state === "running") megafile.verify().catch(() => {}); });   // after an import: its own blocks found on the new chain, at the network's tip (M4)
 ipcMain.handle("mcd:megammrOff", () => megafile.megammrOff());
-ipcMain.handle("mcd:megaKeep", () => megafile.keep());   // the banner's exit that destroys nothing (main/megammrfile.js keep)
+ipcMain.handle("mcd:megaKeep", async () => { const r = await megafile.keep(); node.acceptMegaNow("the user kept the node's chain as it is"); return r; });   // 0.19.432: the "looks incomplete" note goes with it
+ipcMain.handle("mcd:shutdownNotesOk", () => { node.acceptMegaNow("the user put the note away"); return true; });   // the note bar's OK (renderer/app.js paintNoteBar)   // megafile.keep: the banner's exit that destroys nothing (main/megammrfile.js keep)
 ipcMain.handle("mcd:megammrFileAge", (_e, shown) => { requireRunning(); return megafile.fileAge(shown); });   // a warning before the import, never a refusal
 ipcMain.handle("mcd:defaultDataFolder", () => config.defaultDataFolder());
 ipcMain.handle("mcd:pickFolder", async () => {

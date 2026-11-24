@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.432] — "Your MegaMMR looks incomplete" no longer stays for good after a deliberate change
+
+- Independent review of 0.19.428 (MINOR 5). The note compares the MegaMMR with the figures of the last clean stop (its coins, its file's size), and those figures were kept for as long as the MegaMMR was found short. After a deliberate resync, an import or "Keep MegaMMR on, empty" the MegaMMR is smaller on purpose, so "Your MegaMMR looks incomplete… import the MegaMMR file again" came back at every start with no way to end it.
+- main/node-manager.js acceptMegaNow: the figures (and the notes made from them, the "cut short" one included) are dropped when a resync, a restore or a MegaMMR import has run, when a banner's Keep is chosen ("Keep MegaMMR on, empty", "Keep the imported chain", "My balance is correct"), and when the note's OK is pressed. The next clean stop records the MegaMMR as it is then.
+- The note's OK now means that: it used to hide the note until the next start only.
+- Test: scripts/lifecycle-test.cjs (fails on 0.19.431: no such function, and its own older assertion shows the figures frozen at 663414).
+
 ## [0.19.431] — AtomiX: the background keep-alive never publishes a market as zero on a failed balance read (engine 0.1.71)
 
 - Independent review of 0.19.428 (MAJOR). **A correction to 0.19.422**: that entry said "a market is never published as zero because a balance read failed" and named "the desk's republish". It fixed only Save and Publish, the two calls this app makes. The engine's own keep-alive (main/atomix/service.js `getBalances`, every block and every minute) still read with `Number(...) || 0` and `usdt: e ? 0 : …`, and `AX.maker.keepAlive` published that zero: the market left every taker's book and a key use was spent, with no error, on versions 0.19.422 to 0.19.430 too.

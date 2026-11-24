@@ -857,7 +857,8 @@ function paintNoteBar(s) {
   bar.hidden = !lines.length; if (!lines.length) return;
   el("noteBarText").textContent = lines.map((l) => MainSaid.say(l)).join(" ");
   const ok = el("noteBarOk"); ok.hidden = !!saving.length; ok.textContent = t("OK");
-  ok.onclick = () => { noteBarOff = s.bootTs; bar.hidden = true; };
+  // OK takes the node as it is (0.19.432): main drops the figures the notes come from, so they do not come back at every start
+  ok.onclick = () => { noteBarOff = s.bootTs; bar.hidden = true; try { api.shutdownNotesOk().catch(() => {}); } catch (e) {} };
 }
 /** The banner's buttons main can do with the node stopped (keep and Turn MegaMMR off need no node; megaDismiss says the balance needs it). */
 const MEGA_NODELESS = [megammrOffNow, megaKeepAsk, megaOffResync, megaDismiss, megaKeepEmptyAsk];

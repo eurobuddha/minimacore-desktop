@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("mcd", {
   importMegammr: (file) => ipcRenderer.invoke("mcd:importMegammr", file),
   megammrOff: () => ipcRenderer.invoke("mcd:megammrOff"),
   megaKeep: () => ipcRenderer.invoke("mcd:megaKeep"),
+  shutdownNotesOk: () => ipcRenderer.invoke("mcd:shutdownNotesOk"),
   megammrFileAge: (file) => ipcRenderer.invoke("mcd:megammrFileAge", file),
   copyRpcPassword: () => ipcRenderer.invoke("mcd:copyRpcPassword"),
 

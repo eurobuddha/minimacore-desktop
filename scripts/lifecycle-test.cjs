@@ -270,6 +270,20 @@ test("the next start compares the MegaMMR with the last clean stop: its file siz
     // a clean stop now keeps the figures it is compared with: the warning stays until the MegaMMR is whole again
     m.recordStop({ signal: "", cut: false }, 61);
     assert.deepEqual(record().ref.coins, 663414); assert.equal(record().cut, null);
+    // 0.19.432 (review MINOR 5): the user takes the MegaMMR as it is (OK on the note, "Keep MegaMMR on, empty"), or a resync or an
+    // import has run: the old figures go, the note with them, and the next clean stop records the MegaMMR as it is now
+    m.acceptMegaNow("test"); assert.deepEqual(m.shutdownNotes, []); assert.equal(m.megaShort, false); assert.equal(record().ref, null);
+    m.recordStop({ signal: "", cut: false }, 61); assert.equal(record().ref.coins, 61, "the current figures are the new ones");
+    m.startNotes(); await m.megaCoinsCheck(); assert.deepEqual(m.shutdownNotes, [], "nothing said at the next start");
+    {
+      fs.writeFileSync(path.join(dataDir(), "minimacore-shutdown.json"), JSON.stringify({ cut: null, ref: { coins: 663414, size: 1610612736 } })); m.startNotes(); assert.equal(m.megaShort, true);
+      const was = { stop: m.stop, start: m.start }, calls = []; m.proc = { pid: 1 };
+      m.stop = async () => { calls.push("stop:" + m.megaShort + ":" + JSON.stringify(record().ref)); m.proc = null; }; m.start = async () => { calls.push("start"); };
+      m.rpc = async (c) => (/^megammrsync /.test(c) ? { status: true, response: {} } : c === "megammr" ? { status: true, response: { enabled: true, coins: 61 } } : {});
+      try { await m.runResync("megammrsync action:resync host:example.org:9001"); } finally { m.stop = was.stop; m.start = was.start; m.proc = null; }
+      assert.deepEqual(calls, ["stop:false:null", "start"], "a resync that ran: the old figures are gone before its stop records the new ones");
+      assert.deepEqual(m.shutdownNotes, []);
+    }
     // a whole MegaMMR at a later start: nothing said, and its own figures become the new ones
     fs.writeFileSync(mmr(), Buffer.alloc(1000)); fs.writeFileSync(path.join(dataDir(), "minimacore-shutdown.json"), JSON.stringify({ cut: null, ref: { coins: 10, size: 1000 } }));
     m.startNotes(); assert.deepEqual(m.shutdownNotes, []);

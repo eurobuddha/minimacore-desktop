@@ -749,6 +749,21 @@ class NodeManager extends EventEmitter {
     }
     try { fs.writeFileSync(path.join(this.dataDir(), SHUTDOWN_FILE), JSON.stringify(rec, null, 2)); } catch (e) { this.log("[app] how the node stopped could not be recorded: " + e.message); }
   }
+  /**
+   * The figures the MegaMMR is compared with are dropped, and what was said from them (0.19.432). They are the last clean stop's, and
+   * kept while the MegaMMR is found short, so after a DELIBERATE change (a resync, an import, "Keep MegaMMR on, empty") the note
+   * "Your MegaMMR looks incomplete… import the MegaMMR file again" stayed for good. Called when one of those is chosen, and when
+   * the user puts the note away (OK): the next clean stop then records the MegaMMR as it is.
+   */
+  acceptMegaNow(why) {
+    const rec = this.readShutdown(), had = !!rec.ref || !!rec.cut || this.megaShort || this.shutdownNotes.length > 0;
+    this.megaShort = false; this.shutdownNotes = [];
+    if (!had) return;
+    rec.ref = null; rec.cut = null;
+    try { fs.writeFileSync(path.join(this.dataDir(), SHUTDOWN_FILE), JSON.stringify(rec, null, 2)); } catch (e) { this.log("[app] how the node stopped could not be recorded: " + e.message); }
+    this.log("[app] the MegaMMR is taken as it is now (" + why + "): the figures of the last clean stop are dropped, and the next clean stop records new ones");
+    this.emit("status", this.snapshot());
+  }
   /** Before the node starts: was its last stop cut short, and is its MegaMMR file far smaller than at the last clean stop? Said, never acted on. */
   startNotes() {
     const rec = this.readShutdown(), notes = [];
@@ -857,6 +872,7 @@ class NodeManager extends EventEmitter {
         throw new Error("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.");
       }
       if (j && j.status === true) {
+        this.acceptMegaNow("a resync, a restore or a MegaMMR import has run");   // before the stop records what the MegaMMR holds
         await this.stop();
         if (w && !w.before) await legacy();   // node stopped, the old identity's stores set aside, only then started again
         await this.start();                   // w.before known: compared before the node is called "running" (walletSettle)
