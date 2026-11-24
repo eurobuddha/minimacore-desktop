@@ -102,6 +102,10 @@ let lastErr = "";
 
 // swappable node-command runner (tests use _setRunner, same as mail.js)
 let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+// 0.19.444 (review of 0.19.443): "delivered" and "read" receipts go out ONE at a time. Twenty messages drained from the mailbox
+// sent twenty receipts at once, each dialling a sender who had gone offline for 15 s: both of the Parlons Node's two places for minutes.
+let receiptQueue = Promise.resolve();
+function receipt(cmd) { receiptQueue = receiptQueue.then(() => nodeCmd(cmd)).catch(() => {}); return receiptQueue; }
 function _setRunner(fn) { runner = fn; }
 async function nodeCmd(cmd) {
   const r = await runner(oneCommand(cmd));   // ONE command each (main/rpc.js, 0.19.194)
@@ -266,7 +270,7 @@ async function pollOnce() {
         else if (c.auto && m.name && c.name !== m.name) store.addContact(msg.from, m.name, undefined, true);
         // tell the sender we stored it: their single tick becomes a double tick
         const rcpt = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "delivered" })), { ref: msgid }));
-        nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(rcpt)).catch(() => {});
+        receipt("keets action:send to:" + msg.from + " datahex:" + hexOf(rcpt));
         fresh++;
         lastName = m.name || (store.getContact(msg.from) || {}).name || msg.from;
         lastPreview = m.state === "image" ? "📷 Photo"
@@ -298,6 +302,7 @@ function startLoop() {
   pollOnce().catch(() => {});
 }
 function stopLoop() {
+  mediaForget();   // 0.19.444: what could not be fetched from the node that is going is asked for again from the next one
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (files) { try { files.close(); } catch (e) { /* transfers pause; their state is on disk */ } files = null; }
   myinfo = null;
@@ -340,29 +345,18 @@ function mediaDir() {
 // the app (a chat send, the balance, a trading engine's read) waited behind them until its own time ran out.
 // So: ONE fetch at the node at a time (the other place stays free), one request per photo however often it is asked
 // for, and a photo that could not be fetched is not asked for again for a while (2 minutes, doubling to 30).
-const MEDIA_RETRY_MS = 2 * 60 * 1000, MEDIA_RETRY_MAX_MS = 30 * 60 * 1000;
-const mediaInFlight = new Map(), mediaFailed = new Map();
+// 0.19.444 (review of 0.19.443): a photo already on this disk never waits in the queue; a sender whose drive just failed costs
+// ONE 30 s wait, not one per photo of the thread (the others are refused when their turn comes); only a failure of the PEER
+// is remembered (not a stopped node, a file too large, a full disk); a node restart forgets it all; and a click asks again at once.
+const MEDIA_RETRY_MS = 2 * 60 * 1000, MEDIA_RETRY_MAX_MS = 30 * 60 * 1000, MEDIA_DRIVE_DOWN_MS = 2 * 60 * 1000;
+const MEDIA_PEER_SIDE = /media unavailable|RPC timeout/;   // the sidecar found no peer in its 30 s, or the node's answer took longer than ours
+const MEDIA_LATER = "This photo could not be fetched just now (its sender may be offline). It is tried again later.";
+const mediaInFlight = new Map(), mediaFailed = new Map(), mediaDriveDown = new Map();
 let mediaQueue = Promise.resolve();
 const mediaNow = () => Date.now();
-/** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. */
-function fetchMedia(ref) {
-  if (typeof ref === "string" && mediaInFlight.has(ref)) return mediaInFlight.get(ref);
-  const failed = typeof ref === "string" ? mediaFailed.get(ref) : null;
-  if (failed && module.exports.mediaNow() < failed.until) return Promise.reject(new Error("This photo could not be fetched just now (its sender may be offline). It is tried again later."));
-  const run = mediaQueue.then(() => fetchMediaNow(ref));
-  mediaQueue = run.then(() => {}, () => {});   // the next one starts when this one has ended, whatever its end
-  const p = run.then((v) => { mediaFailed.delete(ref); return v; }, (e) => {
-    if (typeof ref === "string" && !/^bad media ref$/.test(String(e && e.message))) {
-      const wait = Math.min(MEDIA_RETRY_MAX_MS, failed ? failed.wait * 2 : MEDIA_RETRY_MS);
-      mediaFailed.set(ref, { until: module.exports.mediaNow() + wait, wait });
-      if (mediaFailed.size > 2000) mediaFailed.delete(mediaFailed.keys().next().value);
-    }
-    throw e;
-  }).finally(() => { mediaInFlight.delete(ref); });
-  if (typeof ref === "string") mediaInFlight.set(ref, p);
-  return p;
-}
-async function fetchMediaNow(ref) {
+function mediaForget() { mediaFailed.clear(); mediaDriveDown.clear(); }
+/** Where a keets:// photo or voice note is kept on disk, and its type. Throws "bad media ref". */
+function mediaPlace(ref) {
   // An inbound ref is attacker-adjacent data: no whitespace (would inject
   // command params) and the extension comes from an ALLOWLIST match, never a
   // raw slice (a crafted "extension" with ../ walked out of mediaDir).
@@ -378,18 +372,51 @@ async function fetchMediaNow(ref) {
              : ext === ".webm" ? "audio/webm"
              : ext === ".wav" ? "audio/wav"
              : "image/jpeg";
-  const f = path.join(mediaDir(), key + ext);
+  const drive = (ref.match(/^keets:\/\/([^\/?]+)/) || [])[1] || "";
+  return { f: path.join(mediaDir(), key + ext), mime, drive: drive.toLowerCase() };
+}
+/** The fetched file as a data url for the renderer. */
+function mediaData(place) {
+  const f = place.f;
+  // 16MB mesh files exist; a >8MB base64 data: URL stalls main + the DOM.
+  if (!fs.existsSync(f)) throw new Error("fetch failed");
+  if (fs.statSync(f).size > 8 * 1024 * 1024) throw new Error("media too large to inline");
+  if (fs.statSync(f).size === 0) { fs.unlinkSync(f); throw new Error("fetch failed"); }
+  return "data:" + place.mime + ";base64," + fs.readFileSync(f).toString("base64");
+}
+/** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. force: the user asked for it (a click). */
+function fetchMedia(ref, force) {
+  let place;
+  try { place = mediaPlace(ref); if (fs.existsSync(place.f) && fs.statSync(place.f).size > 0) return Promise.resolve(mediaData(place)); }   // on disk: no node, no queue
+  catch (e) { return Promise.reject(e); }
+  if (mediaInFlight.has(ref)) return mediaInFlight.get(ref);
+  const blocked = () => { const now = module.exports.mediaNow(), r = mediaFailed.get(ref), d = mediaDriveDown.get(place.drive); return (r && now < r.until) || (d && now < d); };
+  if (!force && blocked()) return Promise.reject(new Error(MEDIA_LATER));
+  // asked again when its turn comes: the photo before it may just have shown that this sender's drive cannot be reached
+  const run = mediaQueue.then(() => { if (!force && blocked()) throw new Error(MEDIA_LATER); return fetchMediaNow(ref, place); });
+  mediaQueue = run.then(() => {}, () => {});   // the next one starts when this one has ended, whatever its end
+  const p = run.then((v) => { mediaFailed.delete(ref); mediaDriveDown.delete(place.drive); return v; }, (e) => {
+    if (MEDIA_PEER_SIDE.test(String(e && e.message))) {
+      const now = module.exports.mediaNow(), was = mediaFailed.get(ref), wait = Math.min(MEDIA_RETRY_MAX_MS, was ? was.wait * 2 : MEDIA_RETRY_MS);
+      mediaFailed.set(ref, { until: now + wait, wait });
+      if (mediaFailed.size > 2000) mediaFailed.delete(mediaFailed.keys().next().value);
+      mediaDriveDown.set(place.drive, now + MEDIA_DRIVE_DOWN_MS);
+      if (mediaDriveDown.size > 500) mediaDriveDown.delete(mediaDriveDown.keys().next().value);
+    }
+    throw e;
+  }).finally(() => { mediaInFlight.delete(ref); });
+  mediaInFlight.set(ref, p);
+  return p;
+}
+async function fetchMediaNow(ref, place) {
+  const f = place.f;
   if (!fs.existsSync(f)) {
     // the file path is quoted (0.19.196, as released 0.18.188): the data folder of the app holds a space on a Mac,
     // and the node's parser takes a "quoted" value whole and drops the quotes
     if (/["\u0000-\u001f;]/.test(f)) throw new Error("The app's data folder name holds a character a node command cannot carry.");
     await nodeCmd("keets action:fetch url:" + ref + ' file:"' + f + '"');
   }
-  // 16MB mesh files exist; a >8MB base64 data: URL stalls main + the DOM.
-  if (!fs.existsSync(f)) throw new Error("fetch failed");
-  if (fs.statSync(f).size > 8 * 1024 * 1024) throw new Error("media too large to inline");
-  if (fs.statSync(f).size === 0) { fs.unlinkSync(f); throw new Error("fetch failed"); }
-  return "data:" + mime + ";base64," + fs.readFileSync(f).toString("base64");
+  return mediaData(place);
 }
 /** Publish a local image file to our media drive and send it as a photo message. */
 async function sendImageFile(to, filePath) {
@@ -507,7 +534,7 @@ function thread(pubkey) {
   if (latestIn && store.metaGet("receipt:" + pubkey) !== latestIn.msgid) {
     store.metaSet("receipt:" + pubkey, latestIn.msgid);
     const payload = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "read" })), { ref: latestIn.msgid }));
-    nodeCmd("keets action:send to:" + pubkey + " datahex:" + hexOf(payload)).catch(() => {});
+    receipt("keets action:send to:" + pubkey + " datahex:" + hexOf(payload));
   }
   return msgs;
 }
@@ -529,6 +556,6 @@ function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubke
 
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
   threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner, _setFileEngine,
-  fetchMedia, mediaNow, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity,
+  fetchMedia, mediaNow, mediaForget, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity,
   sendVoice, clearThread, deleteMessage, contacts,
   fileSend, fileOffer, fileRun, filePause, fileStatus, fileTransfers, fileRemove, fileKeep, fileShareAgain, fileSave };

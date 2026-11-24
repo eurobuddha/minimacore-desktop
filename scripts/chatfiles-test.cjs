@@ -779,38 +779,88 @@ test("0.19.238: Chat payments: the node checks the address first; 0 is refused; 
 // 0.19.443 (owner, 24 Nov 2026: "Send failed: RPC timeout" in a thread whose photos could not be fetched). Each such
 // photo holds a node command for 30 s, the thread asked for every photo again at each redraw, and the Parlons Node
 // answers two commands at a time: every other command of the app waited behind the fetches.
-test("0.19.443: photos are fetched ONE at a time, the same photo is asked for once, and a photo that failed is left alone for a while", async () => {
-  const chat = loadChat();
-  const ref = (n) => "keets://" + "ab".repeat(32) + "/chat/img-443-" + n + ".jpg";
-  let inFlight = 0, most = 0, started = 0; const releases = [];
+// 0.19.444 (review of 0.19.443): one wait per offline SENDER, a photo on disk never queues, only the peer's failures
+// are remembered, a click asks again at once, a node restart forgets, receipts go out one at a time.
+function mediaRig() {
+  const chat = loadChat(); chat.mediaForget();
+  const st = { inFlight: 0, most: 0, started: [], releases: [] };
+  const UNAVAILABLE = "media unavailable — no reachable peer completed the request in time";
   chat._setRunner((cmd) => new Promise((res) => {
-    started++; inFlight++; most = Math.max(most, inFlight);
-    releases.push((ok) => { inFlight--; if (ok) fs.writeFileSync(cmd.split(" file:")[1].replace(/^"|"$/g, ""), Buffer.from("jpeg")); res(ok ? { status: true, response: {} } : { status: false, error: "media unavailable — no reachable peer completed the request in time" }); });
+    st.started.push(cmd); st.inFlight++; st.most = Math.max(st.most, st.inFlight);
+    st.releases.push((how) => { st.inFlight--;
+      if (how === true) fs.writeFileSync(cmd.split(" file:")[1].replace(/^"|"$/g, ""), Buffer.from("jpeg"));
+      res(how === true ? { status: true, response: {} } : { status: false, error: how || UNAVAILABLE }); });
   }));
-  const tick = () => new Promise((r) => setImmediate(r));
+  const tick = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r)); };
   let now = 1_000_000; const realNow = chat.mediaNow; chat.mediaNow = () => now;
+  return { chat, st, tick, ahead: (ms) => { now += ms; }, done: () => { chat.mediaNow = realNow; chat.mediaForget(); } };
+}
+const drive = (c) => c.repeat(32), photo = (d, n) => "keets://" + drive(d) + "/chat/img-444-" + n + ".jpg";
+
+test("0.19.443/0.19.444: ONE fetch at the node at a time, one request per photo, and an offline sender costs one wait, not one per photo", async () => {
+  const { chat, st, tick, ahead, done } = mediaRig();
   try {
-    // five photos of one thread, each asked for twice (a redraw): one command at the node, five in all
-    const asks = [1, 2, 3, 4, 5].flatMap((n) => [chat.fetchMedia(ref(n)), chat.fetchMedia(ref(n))]).map((p) => p.then(() => "ok", (e) => String(e.message)));
-    await tick(); await tick();
-    assert.equal(started, 1, "the second waits for the first");
-    for (let i = 0; i < 5; i++) { await tick(); await tick(); assert.equal(inFlight, 1, "one at the node"); releases[i](i !== 1); await tick(); await tick(); await tick(); }
+    // a thread: five photos of an offline sender (drive a1) and three of one who is there (drive b2), each asked for twice (a redraw)
+    const refs = [1, 2, 3, 4, 5].map((n) => photo("a1", n)).concat([1, 2, 3].map((n) => photo("b2", n)));
+    const asks = refs.flatMap((r) => [chat.fetchMedia(r), chat.fetchMedia(r)]).map((p) => p.then(() => "ok", (e) => String(e.message)));
+    await tick();
+    assert.equal(st.started.length, 1, "the second waits for the first");
+    st.releases[0](false); await tick();                     // the first photo of a1: no reachable peer
+    assert.equal(st.started.length, 2, "the next command at the node is a b2 photo: a1's other four were refused in their turn, without the node");
+    assert.ok(st.started[1].includes(drive("b2")));
+    st.releases[1](true); await tick(); st.releases[2](true); await tick(); st.releases[3](true); await tick();
     const ends = await Promise.all(asks);
-    assert.equal(most, 1, "never two fetches in flight: the Parlons Node keeps a place for every other command");
-    assert.equal(started, 5, "one request per photo, however often it is asked for");
-    assert.deepEqual(ends.filter((x) => x === "ok").length, 8); assert.match(ends[2], /no reachable peer/); assert.equal(ends[2], ends[3]);
-    // the photo that failed is not asked for again at the next redraw …
-    await assert.rejects(chat.fetchMedia(ref(2)), /could not be fetched just now/);
-    assert.equal(started, 5, "nothing was sent to the node for it");
-    // … but it is after a while, and a second failure waits twice as long
-    now += 2 * 60 * 1000 + 1;
-    const again = chat.fetchMedia(ref(2)).catch((e) => String(e.message)); await tick(); await tick();
-    assert.equal(started, 6); releases[5](false); assert.match(await again, /no reachable peer/);
-    now += 2 * 60 * 1000 + 1; await assert.rejects(chat.fetchMedia(ref(2)), /could not be fetched just now/);
-    now += 2 * 60 * 1000 + 1; const third = chat.fetchMedia(ref(2)); await tick(); await tick(); releases[6](true);
+    assert.equal(st.most, 1, "never two fetches in flight: the Parlons Node keeps a place for every other command");
+    assert.equal(st.started.length, 4, "one 30 s wait for the offline sender (0.19.443: five), three fetches for the other");
+    assert.match(ends[0], /no reachable peer/); for (const e of ends.slice(2, 10)) assert.match(e, /could not be fetched just now/);
+    assert.deepEqual(ends.slice(10), ["ok", "ok", "ok", "ok", "ok", "ok"]);
+    // at the next redraw nothing of a1 is asked for …
+    await assert.rejects(chat.fetchMedia(photo("a1", 3)), /could not be fetched just now/); assert.equal(st.started.length, 4);
+    // … but a click asks at once, and when it works the sender's other photos are free again
+    const click = chat.fetchMedia(photo("a1", 3), true); await tick();
+    assert.equal(st.started.length, 5, "a click goes to the node"); st.releases[4](true);
+    assert.match(await click, /^data:image\/jpeg;base64,/);
+    const other = chat.fetchMedia(photo("a1", 4)); await tick(); assert.equal(st.started.length, 6, "the drive is no longer taken as down"); st.releases[5](true); await other;
+    // the photo that itself failed waits its own 2 minutes, then 4
+    await assert.rejects(chat.fetchMedia(photo("a1", 1)), /could not be fetched just now/);
+    ahead(2 * 60 * 1000 + 1);
+    const again = chat.fetchMedia(photo("a1", 1)).catch((e) => String(e.message)); await tick(); st.releases[6](false); assert.match(await again, /no reachable peer/);
+    ahead(2 * 60 * 1000 + 1); await assert.rejects(chat.fetchMedia(photo("a1", 1)), /could not be fetched just now/);
+    ahead(2 * 60 * 1000 + 1); const third = chat.fetchMedia(photo("a1", 1)); await tick(); st.releases[7](true);
     assert.match(await third, /^data:image\/jpeg;base64,/, "and it is shown once its sender is back");
-    assert.match(await chat.fetchMedia(ref(1)), /^data:image\/jpeg/, "a fetched photo comes from the disk: no command");
-    assert.equal(started, 7);
     await assert.rejects(chat.fetchMedia("keets://ab;quit"), /bad media ref/);
-  } finally { chat.mediaNow = realNow; }
+  } finally { done(); }
+});
+
+test("0.19.444: a photo already on disk never waits behind fetches; only the PEER's failures are remembered; a node restart forgets them", async () => {
+  const { chat, st, tick, done } = mediaRig();
+  try {
+    const first = chat.fetchMedia(photo("c3", 1)); await tick(); st.releases[0](true); await first;        // c3/1 is on disk now
+    const stuck = chat.fetchMedia(photo("d4", 1)).catch((e) => String(e.message)); await tick();           // a fetch that hangs at the node
+    assert.equal(st.inFlight, 1);
+    assert.match(await chat.fetchMedia(photo("c3", 1)), /^data:image\/jpeg/, "shown at once: no queue, no command (0.19.443 made it wait)");
+    assert.equal(st.started.length, 2);
+    st.releases[1]("connect ECONNREFUSED 127.0.0.1:17005"); assert.match(await stuck, /ECONNREFUSED/);    // the node was stopped: not the peer's fault
+    const retry = chat.fetchMedia(photo("d4", 1)); await tick();
+    assert.equal(st.started.length, 3, "asked for again at the next redraw: a stopped node is not remembered against the photo");
+    st.releases[2](false); await retry.catch(() => {});
+    await assert.rejects(chat.fetchMedia(photo("d4", 2)), /could not be fetched just now/);                // now the peer failed: remembered
+    chat.stopLoop();                                                                                        // the node is restarted
+    const fresh = chat.fetchMedia(photo("d4", 2)); await tick();
+    assert.equal(st.started.length, 4, "and forgotten with the node that could not reach it"); st.releases[3](true); await fresh;
+    assert.equal(st.most, 1);
+  } finally { done(); }
+});
+
+test("0.19.444: receipts for a mailbox full of messages go out one at a time (0.19.443: all at once, each dialling an offline sender)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "main", "chat.js"), "utf8");
+  assert.ok(/function receipt\(cmd\) \{ receiptQueue = receiptQueue\.then\(\(\) => nodeCmd\(cmd\)\)\.catch\(\(\) => \{\}\); return receiptQueue; \}/.test(src));
+  assert.equal((src.match(/\breceipt\("keets action:send to:"/g) || []).length, 2, "the delivered and the read receipt");
+  assert.ok(!/nodeCmd\("keets action:send to:" \+ (msg\.from|pubkey) \+ " datahex:" \+ hexOf\((rcpt|payload)\)\)\.catch/.test(src), "no receipt is fired without waiting any more");
+  // and the queue itself: three receipts, never two at the node
+  let inFlight = 0, most = 0; const rel = [];
+  const nodeCmd = () => new Promise((r) => { inFlight++; most = Math.max(most, inFlight); rel.push(() => { inFlight--; r(); }); });
+  const receipt = new Function("nodeCmd", "let receiptQueue = Promise.resolve();\n" + src.match(/function receipt\(cmd\) \{[^\n]*\}/)[0] + "\nreturn receipt;")(nodeCmd);
+  receipt("a"); receipt("b"); const last = receipt("c");
+  return (async () => { for (let i = 0; i < 3; i++) { for (let k = 0; k < 6; k++) await new Promise((r) => setImmediate(r)); assert.equal(inFlight, 1); rel[i](); } await last; assert.equal(most, 1); })();
 });

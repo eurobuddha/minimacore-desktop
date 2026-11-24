@@ -641,7 +641,7 @@ ipcMain.handle("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name)
 ipcMain.handle("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
 ipcMain.handle("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
 ipcMain.handle("mcd:chatStatus", () => chat.status());
-ipcMain.handle("mcd:chatMedia", (_e, ref) => chat.fetchMedia(ref));
+ipcMain.handle("mcd:chatMedia", (_e, ref, force) => chat.fetchMedia(ref, force === true));   // force: a click on the photo or on Play (0.19.444)
 ipcMain.handle("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
 ipcMain.handle("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
 ipcMain.handle("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));

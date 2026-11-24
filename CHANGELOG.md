@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.444] — Chat photos: one wait per offline sender, photos on disk at once, a click really retries; receipts one at a time
+
+- Independent review of 0.19.443 ("safe to install; it closes the measured stall, but only down to half capacity"). With one fetch at a time, a thread of N unfetchable photos still held one of the Parlons Node's two places for N × 30 s, and two things got worse: a photo already on disk waited in that queue, and "click to retry" did nothing for 2 to 30 minutes.
+- main/chat.js: a photo already on disk is returned at once, with no queue and no node command. When a sender's photo cannot be fetched, that sender's drive is taken as unreachable for 2 minutes and the other photos of that sender are refused in their turn without asking the node: one 30 s wait, not one per photo. Only a failure of the peer is remembered ("media unavailable", an answer that took too long), never a stopped node, a file too large or a disk problem. Stopping the node forgets all of it. A click on the photo, or on Play, asks again at once.
+- "Delivered" and "read" receipts go out one at a time: a mailbox drained of twenty messages sent twenty receipts at once, each dialling its sender for up to 15 s.
+- Tests: scripts/chatfiles-test.cjs (three; two fail on 0.19.443).
+- Not changed: the Parlons Node still answers two commands at a time. A contact who sends many photos from many different invented drives still costs 30 s each on one place.
+
 ## [0.19.443] — Chat: photos that cannot be fetched no longer hold up every other command ("Send failed: RPC timeout")
 
 - Owner, 24 Nov 2026, on 0.19.442: in a chat thread whose photos could not be fetched (their sender's device was off), sending a message failed with "RPC timeout", and the node's `status` did not answer either. Measured: each such photo holds one node command for 30 s (`keets action:fetch` waiting for a peer), the thread screen asked for every photo again at each redraw, and the Parlons Node answers only two commands at a time (its admin RPC has two worker threads). Two fetches in flight held both, and every other command of the app, the chat send, a balance, a trading engine's read, waited behind them until its own 30 s ran out.

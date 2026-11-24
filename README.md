@@ -113,7 +113,7 @@ else (the Node tab names it). `will-quit` / `process.exit` SIGKILL the child as 
 2026-09-07: a java left behind by a crashed launch held port 12001 and the H2 databases, and the next
 launch died with "Database may be already in use".
 
-## Going back to an older version (0.19.443)
+## Going back to an older version (0.19.444)
 Each node start records the app's version in `<data folder>/minimacore-writer.txt`, one line an app (its bundle id), and a copy
 OLDER than the version recorded for the same app does not start the node: an older copy can damage what a newer one wrote. Two apps
 of this family pointed at one data folder are not compared with each other. To go back to an older version on purpose: quit the app,

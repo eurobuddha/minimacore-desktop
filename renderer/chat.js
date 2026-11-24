@@ -316,7 +316,7 @@
     }
     if (player) { player.pause(); player = null; playingRef = ""; onChange(); }
     try {
-      const u = mediaCache[ref] || await D.api.chatMedia(ref);
+      const u = mediaCache[ref] || await D.api.chatMedia(ref, true);   // the user pressed Play: asked for now, whatever failed before
       mediaCache[ref] = u;
       player = new Audio(u); playingRef = ref;
       player.onended = () => { playingRef = ""; player = null; onChange(); };
@@ -368,12 +368,12 @@
     } else if (m.state === "image" && m.ref) {
       b.innerHTML = `<div class="chat-img chat-img--loading">${th("Loading photo…")}</div>${m.body ? `<div class="chat-bubble__body">${h(m.body)}</div>` : ""}${metaHtml(m)}`;
       const slot = b.firstChild;
-      const load = () => (mediaCache[m.ref] ? Promise.resolve(mediaCache[m.ref]) : D.api.chatMedia(m.ref)).then((u) => {
+      const load = (force) => (mediaCache[m.ref] ? Promise.resolve(mediaCache[m.ref]) : D.api.chatMedia(m.ref, force === true)).then((u) => {
         mediaCache[m.ref] = u;
         const img = document.createElement("img"); img.className = "chat-img"; img.src = u; img.alt = I18N.t("Photo");
         img.onclick = () => lightbox(u, m.body);
         slot.replaceWith(img);
-      }).catch(() => { slot.textContent = I18N.t("Photo — not available yet (click to retry)"); slot.onclick = load; });
+      }).catch(() => { slot.textContent = I18N.t("Photo — not available yet (click to retry)"); slot.onclick = () => { slot.textContent = I18N.t("Loading photo…"); load(true); }; });   // 0.19.444: the click really asks again
       load();
     } else if (m.state === "file" && m.ref) {
       b.innerHTML = `<div class="chat-bubble__body">${h(m.body)}</div><button type="button" class="chat-bubble__attach chat-bubble__attach--btn">${th("Open file transfer")}</button>${metaHtml(m)}`;

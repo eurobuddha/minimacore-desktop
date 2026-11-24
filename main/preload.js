@@ -150,7 +150,7 @@ contextBridge.exposeInMainWorld("mcd", {
   chatRenameContact: (pk, name) => ipcRenderer.invoke("mcd:chatRenameContact", pk, name),
   chatRemoveContact: (pk) => ipcRenderer.invoke("mcd:chatRemoveContact", pk),
   chatStatus: () => ipcRenderer.invoke("mcd:chatStatus"),
-  chatMedia: (ref) => ipcRenderer.invoke("mcd:chatMedia", ref),
+  chatMedia: (ref, force) => ipcRenderer.invoke("mcd:chatMedia", ref, force === true),
   chatSendPayment: (to, amount, token) => ipcRenderer.invoke("mcd:chatSendPayment", to, amount, token),
   // has this node found the payment a Mail or Chat message claims? "received" | "unverified" (main/payverify.js; reads only)
   payCheck: (txid, tokenid, amount, msgid) => ipcRenderer.invoke("mcd:payCheck", txid, tokenid, amount, msgid),   // msgid: a txid verifies only its first claiming message (0.19.238)
