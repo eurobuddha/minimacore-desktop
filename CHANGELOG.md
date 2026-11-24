@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.335] — the amber "warn" toast has a style
+
+- Review of 0.18.329 (finding 3 iii). `toast(msg, "warn")` says "sent, outcome unknown" (Vestr collect since 0.18.322, PandaPools since 0.18.331, the ETH sends) and a dozen cautions, and renderer/app.css had rules for `ok` and `err` only: a warn toast looked like plain news. `.toast.warn` is amber (border and text).
+- Test: scripts/panels-test.cjs: every toast kind the window uses has a rule; fails on 0.18.334.
+
 ## [0.18.334] — miniMall: the at-sight payment list drops a coin whose order is paid, keeps a part payment, and holds only a well-formed proof
 
 - Review of 0.18.329 (finding 3 ii), main/shop.js and main/shop-store.js, the list of payment coins kept at sight since 0.18.320 (`unmatchedPay`, 500 at most).

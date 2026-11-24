@@ -436,3 +436,13 @@ test("PandaPools create: the opening price says MxUSD/MINIMA; the MEXC market li
   assert.equal((src.match(/USDT\/MINIMA/g) || []).length, 1, "only the MEXC market line");
   assert.ok(src.includes('" USDT/MINIMA (MEXC)"'));
 });
+
+// 0.18.335 (review of 0.18.329, finding 3 iii): toast(msg, "warn") is how "sent, outcome unknown" is said (Vestr collect, PandaPools,
+// the ETH sends), and there was no .toast.warn rule: it looked like plain news. Every kind a toast is given has a rule.
+test("every toast kind the window uses has a style: warn is amber", () => {
+  const css = fs.readFileSync(path.join(R, "app.css"), "utf8"), kinds = new Set();
+  for (const f of fs.readdirSync(R).filter((x) => x.endsWith(".js"))) for (const m of fs.readFileSync(path.join(R, f), "utf8").matchAll(/toast\([^\n]*?,\s*"(ok|err|warn|[a-z]+)"\s*(?:,[^)\n]*)?\)/g)) kinds.add(m[1]);
+  assert.ok(kinds.has("warn") && kinds.has("ok") && kinds.has("err"), [...kinds].join(","));
+  for (const k of kinds) assert.ok(new RegExp("\\.toast\\." + k + " \\{").test(css), "no .toast." + k + " rule in app.css");
+  assert.match(css, /\.toast\.warn \{ border-color: var\(--amber\); color: var\(--amber\); \}/);
+});
