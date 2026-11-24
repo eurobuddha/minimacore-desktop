@@ -375,6 +375,9 @@ function holdUnmatched(c) {
   const list = Array.isArray(mem.meta.unmatchedPay) ? mem.meta.unmatchedPay : [];
   if (list.some(x => x && x.coinid === id)) return;
   const st = (p) => { const s = (Array.isArray(c.state) ? c.state.find(x => x && String(x.port) === String(p)) : c.state && c.state[p]); return s && typeof s === "object" ? s.data : s; };
+  // only a coin whose port-2 proof is well-formed (0.18.334): no proof at all (a payment to an order without a secret), or 0x and 64 hex
+  // digits as a Shop writes it. Anything else in port 2 proves no order and only took a place in the list.
+  const proof = st(2); if (proof != null && proof !== "" && !(typeof proof === "string" && /^0x[0-9a-fA-F]{64}$/.test(proof))) return;
   const state = {}; for (const p of [1, 2]) { const v = st(p); if (typeof v === "string") state[p] = v; }
   list.push({ coinid: id, created: c.created, amount: c.amount, tokenamount: c.tokenamount, tokenid: c.tokenid, state, held: true });
   while (list.length > UNMATCHED_MAX) list.shift();

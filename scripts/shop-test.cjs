@@ -1690,3 +1690,34 @@ test("a payment seen before its order is read and spent before the order is read
   for (let i = 0; i < m.store.UNMATCHED_MAX + 3; i++) m.store.holdUnmatched({ coinid: "0xCC" + i.toString(16).padStart(4, "0"), created: 1, amount: "1", tokenid: "0x00", state: { 1: "0x41" } });
   const kept = m.store.unmatched(); assert.equal(kept.length, m.store.UNMATCHED_MAX); assert.equal(kept[0].coinid, "0xCC0003");
 });
+
+// 0.18.334 (review of 0.18.329, finding 3 ii): the at-sight list drops a coin whose order is already paid, keeps a part payment ("DUST")
+// too, and holds only a coin whose port-2 proof is well-formed (none, or 0x and 64 hex digits)
+test("the at-sight list: a coin whose order is paid is dropped, a part payment is kept across a spend and a restart, a malformed proof is not held", async () => {
+  // a second coin with the reference, seen before the order was read: once the order is paid by the first it is no longer kept
+  { const t = await javaSetup("held-paid"); t.st.msg = [await t.seal("ORD-P", 1009)];
+    const p1 = t.pay("ORD-P", 1010), p2 = Object.assign(t.pay("ORD-P", 1011), { coinid: "0xFB" + "2".repeat(62) }); t.st.pay = [p1, p2];
+    t.st.mode = "refuse"; await walk(t, 1011, 1013);
+    assert.deepEqual(t.m.store.unmatched().map(x => x.coinid).sort(), [p1.coinid, p2.coinid].sort(), "both kept at sight, ids whole");
+    t.st.mode = "ok"; await walk(t, 1014, 1020);
+    assert.equal(t.m.store.order("ORD-P").paid, true); assert.equal(t.m.store.order("ORD-P").paidAmount, "1", "paid once, by the first coin");
+    assert.deepEqual(t.m.store.unmatched(), [], "the second coin is not kept for good: its order is paid"); }
+  // a part payment too small to count on its own ("DUST": under 1% of what is due): kept on disk, so the wallet spending it and a restart
+  // do not lose it before the coin that completes it (it was gathered in memory only, and only while the node still listed it)
+  { const t = await javaSetup("held-dust"); t.st.msg = [await t.seal("ORD-D", 1009)]; await walk(t, 1010, 1011);
+    assert.ok(t.m.store.order("ORD-D"), "the order is read first");
+    const main = Object.assign(t.pay("ORD-D", 1012), { amount: "0.99" }), part = Object.assign(t.pay("ORD-D", 1013), { coinid: "0xFB" + "4".repeat(62), amount: "0.005" });
+    t.st.pay = [main, part]; await walk(t, 1012, 1014);
+    assert.equal(t.m.store.order("ORD-D").paid, false); assert.equal(t.m.store.order("ORD-D").paidAmount, "0.99");
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(DIR, "shop.json"), "utf8")).meta.unmatchedPay?.map(x => [x.coinid, x.amount]), [[part.coinid, "0.005"]], "the part payment is kept at sight in shop.json, its id whole; the counted coin is not");
+    part.spent = true; main.spent = true; const m = await t.reopen();
+    const top = Object.assign(t.pay("ORD-D", 1016), { coinid: "0xFC" + "3".repeat(62), amount: "0.005" }); t.st.pay = [main, part, top]; await walk(t, 1016, 1022);
+    const o = m.store.order("ORD-D"); assert.equal(o.paid, true, "0.99 + 0.005 (spent, kept) + 0.005 pay the order"); assert.equal(o.paidAmount, "1.000", "added exactly, each coin once");
+    assert.deepEqual(m.store.unmatched(), [], "nothing kept once the order is paid"); }
+  // only a well-formed proof is held
+  { const t = await javaSetup("held-proof"), S = t.m.store, c = (n, state) => ({ coinid: "0xDD" + String(n).padStart(62, "0"), created: 1, amount: "1", tokenid: "0x00", state });
+    const good = "0x" + "aB".repeat(32);
+    S.holdUnmatched(c(1, { 1: "0x41" })); S.holdUnmatched(c(2, { 1: "0x41", 2: good })); S.holdUnmatched(c(3, [{ port: 1, data: "0x41" }, { port: 2, data: good }]));
+    for (const [i, bad] of ["0x1234", "0x" + "ab".repeat(33), "zz", "[text]", good + " ", 7].entries()) { S.holdUnmatched(c(10 + i, { 1: "0x41", 2: bad })); S.holdUnmatched(c(20 + i, [{ port: 1, data: "0x41" }, { port: 2, data: bad }])); }
+    assert.deepEqual(S.unmatched().map(x => x.coinid), [c(1).coinid, c(2).coinid, c(3).coinid], "no proof, or 0x and 64 hex digits: held; anything else in port 2: not held"); }
+});

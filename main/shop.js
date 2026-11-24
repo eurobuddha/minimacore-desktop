@@ -494,7 +494,7 @@ async function scanPayments(depth) {
     setRef(ref);
     // the order this coin pays, by its proof in port 2 (0.18.297), and the orders with a secret it does not prove
     const pay = store.payee(ref, statePort(c, 2)), o = pay.order && !pay.order.paid ? pay.order : null;
-    if (pay.order) setRef(pay.order.ref);   // a coin given up on from here flags the order it would pay, another buyer's copy too (0.18.308)
+    if (pay.order) { setRef(pay.order.ref); if (pay.order.paid) store.dropUnmatched(String(id)); }   // a coin given up on from here flags the order it would pay, another buyer's copy too (0.18.308); its order is paid: no longer kept at sight (0.18.334: it stayed in the list for good)
     else store.holdUnmatched(c);   // no order read for it yet: kept at sight, so a spend before the order is read does not lose it (0.18.320)
     if (!o && !pay.unproven.length) return "";   // not marked seen: a payment that arrives before its order is matched once the order is in
     const pb = Number(c.created), known = Number.isSafeInteger(pb) && pb > 0;
@@ -515,7 +515,7 @@ async function scanPayments(depth) {
     if (!o.commit && o.orderBlock && known && pb < o.orderBlock - PAY_BEFORE_ORDER && !(o.problems || []).some(p => String(p).startsWith(OLDER_PAYMENT)))
       store.flagDuplicate(o.ref, "a payment with this order's reference is older than the order (payment coin " + String(id) + " at block " + pb + ", the order at block " + o.orderBlock + "): check by hand");
     const outcome = store.recordPayment(o.ref, coinAmount(c), c.tokenid || MINIMA_TOKEN, String(id), known ? pb : 0);   // its block: how long the order settles (0.18.300)   // the store counts each coin once, across restarts
-    if (outcome === "DUST") seenPayCoins.delete(id);   // judged again later, against what is then still due (0.18.185)
+    if (outcome === "DUST") { seenPayCoins.delete(id); store.holdUnmatched(c); }   // judged again later, against what is then still due (0.18.185); kept at sight too (0.18.334): a part payment the wallet spends, or a restart, no longer loses it before its top-up
     else store.dropUnmatched(String(id));   // judged against its order: no longer kept (0.18.320)
     if (outcome && outcome !== "ALREADY" && outcome !== "DUST") { changed = true; emitter.emit("incoming", { ref: o.ref, paid: outcome }); }
     return outcome || "";

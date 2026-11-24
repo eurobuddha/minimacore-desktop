@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.334] — miniMall: the at-sight payment list drops a coin whose order is paid, keeps a part payment, and holds only a well-formed proof
+
+- Review of 0.18.329 (finding 3 ii), main/shop.js and main/shop-store.js, the list of payment coins kept at sight since 0.18.320 (`unmatchedPay`, 500 at most).
+- A coin kept before its order was read stayed in the list for good once that order was paid by another coin (it was judged on every pass and never dropped): it is now dropped when its order is paid.
+- A part payment too small to count on its own ("DUST", under 1% of what is due) was gathered in memory only and only while the node still listed the coin: the wallet spending it, or a restart, lost it before the coin that completes it. It is now kept at sight like a payment seen before its order, and dropped once it is counted or the order is paid.
+- Only a coin whose port-2 proof is well-formed is held: no proof at all (a payment to an order without a secret), or 0x and 64 hex digits as a Shop writes it. Anything else in port 2 is not held.
+- Test: scripts/shop-test.cjs (in test:shop); fails on 0.18.333.
+
 ## [0.18.333] — AtomiX tab's Send: the gas warning is built before the confirm (0.18.332 was committed with test:panels red)
 
 - 0.18.332 put the "Network gas looks abnormally high" text inside the confirm's template, which pushed "This cannot be undone" past the window scripts/panels-test.cjs reads ("the irreversible-send confirm is intact"): 0.18.332 was committed with `npm run test:panels` failing (a mistake in how the gate's result was read; every other step passed). The text is now a `gasWarn` constant built before the dialog; what the user sees is the same. Do not build or release 0.18.332.
