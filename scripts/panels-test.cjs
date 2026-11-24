@@ -399,7 +399,7 @@ test("nothing that moves value changed in the AtomiX rewrite", () => {
   const src = fs.readFileSync(path.join(R, "atomix-ui.js"), "utf8");
   for (const call of ["api.axQuote(axSell, axAmt, axSlip)", "api.axSwap(q.quoteId)", "api.axMakerSave(cfg, collect())",
                       "api.axMakerWithdraw()", "api.axOtcPropose(", "api.axOtcDeal(", "api.axSendReview(asset, to, amt)",
-                      "api.axSend(asset, to, amt)", "api.axSwitchCurrency(key)"]) {
+                      "api.axSend(asset, to, amt, r.wei)", "api.axSwitchCurrency(key)"]) {   // axSend CHANGED on purpose (0.18.332): with the reviewed price
     assert.ok(src.includes(call), call + " is still here");
   }
   assert.ok(/const q = await api\.axQuote\([\s\S]{0,2200}await showConfirm\(title, msg[\s\S]{0,300}api\.axSwap\(q\.quoteId\)/.test(src),

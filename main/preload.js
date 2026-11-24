@@ -197,7 +197,7 @@ contextBridge.exposeInMainWorld("mcd", {
   axCoins: () => ipcRenderer.invoke("mcd:axCoins"),
   axSendMax: (asset) => ipcRenderer.invoke("mcd:axSendMax", asset),
   axSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:axSendReview", asset, to, amt),
-  axSend: (asset, to, amt) => ipcRenderer.invoke("mcd:axSend", asset, to, amt),
+  axSend: (asset, to, amt, reviewedWei) => ipcRenderer.invoke("mcd:axSend", asset, to, amt, reviewedWei),
   axMakerCfg: () => ipcRenderer.invoke("mcd:axMakerCfg"),
   axMakerPreview: (cfg, manual) => ipcRenderer.invoke("mcd:axMakerPreview", cfg, manual),
   axMakerSave: (cfg, manual) => ipcRenderer.invoke("mcd:axMakerSave", cfg, manual),
@@ -220,7 +220,7 @@ contextBridge.exposeInMainWorld("mcd", {
   ewRemoveToken: (addr) => ipcRenderer.invoke("mcd:ewRemoveToken", addr),
   ewSendMax: (asset) => ipcRenderer.invoke("mcd:ewSendMax", asset),
   ewSendReview: (asset, to, amt) => ipcRenderer.invoke("mcd:ewSendReview", asset, to, amt),
-  ewSend: (asset, to, amt, tier) => ipcRenderer.invoke("mcd:ewSend", asset, to, amt, tier),
+  ewSend: (asset, to, amt, tier, reviewedWei) => ipcRenderer.invoke("mcd:ewSend", asset, to, amt, tier, reviewedWei),
   ewExportKey: (typed) => ipcRenderer.invoke("mcd:ewExportKey", typed),   // the typed phrase; the main process checks it and asks the system where it can → { key, system }
   cmdKind: (command) => ipcRenderer.invoke("mcd:cmdKind", command),   // { kind: "seed"|"key"|"", chain, write } as the main process reads the text
   cmdGate: (command, typed) => ipcRenderer.invoke("mcd:cmdGate", command, typed),   // a command that shows a seed or a private key: the typed phrase (and the system's prompt) for that one command → { system, kind }

@@ -2668,7 +2668,7 @@ function ewConfirmSend(asset, sym, to, amt, fees, capped) {
   ov.onclick = e => { if (e.target.id === "ewCfOv") close(); };
   el("ewCfSend").onclick = async () => {
     const btn = el("ewCfSend"); btn.disabled = true; btn.textContent = "Sending…";
-    const s = await api.ewSend(asset, to, amt, tier).catch(e => ({ err: String(e.message || e) }));
+    const s = await api.ewSend(asset, to, amt, tier, fees && fees[tier] && fees[tier].wei).catch(e => ({ err: String(e.message || e) }));   // with the price shown (0.18.332)
     close();
     // uncertain = a network glitch mid-broadcast; warn (don't imply success OR clean failure), the user checks Etherscan
     if (s && s.uncertain) toast(s.err, "warn");

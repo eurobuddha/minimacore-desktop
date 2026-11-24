@@ -698,9 +698,9 @@ async function sendMax(asset) { return ethSendMax(axSendAsset(asset)); }
 async function sendReview(asset, to, amt) {
   const r = await ethSendReview(axSendAsset(asset), to, amt);
   if (!r || r.err) return { err: (r && r.err) || "Could not check this send — try again" };
-  return { fee: r.fees.med.fee, gwei: r.fees.med.gwei, capped: r.capped };
+  return { fee: r.fees.med.fee, gwei: r.fees.med.gwei, wei: r.fees.med.wei, capped: r.capped };
 }
-async function sendExecute(asset, to, amt) { return ethSendExecute(axSendAsset(asset), to, amt, "med"); }
+async function sendExecute(asset, to, amt, reviewedWei) { return ethSendExecute(axSendAsset(asset), to, amt, "med", reviewedWei); }
 
 // ---- maker (donor onSaveOrder/onPublish/onWithdraw; the vm service keep-alives whatever is saved) ----
 async function makerAvail(strict) { return require("./makeravail").makerAvailFrom(await balances(), !!strict); }
@@ -1033,6 +1033,26 @@ function ethGasScaledRpc(base, multPct) {
   };
 }
 
+// 0.18.332: what the engine SIGNS for a tier, and the price a send was reviewed at.
+// AX.ethtx.priced takes the proxy's two values: gp x 9/8, floored at baseFee x 9/8 + 0.2 gwei. With a low base fee the floor is above
+// the tier price (base fee 0.1 gwei: Low tier 0.2 gwei, signed 0.3125 gwei), and the preview showed the tier price. The preview now
+// shows ethSignedGp, the same arithmetic on the same two values.
+const ETH_BF_MAX = ETH_MAX_GAS_PRICE / 2n;   // the base fee the proxy hands the engine at most (its floor can never pass the ceiling)
+function ethSignedGp(g, multPct) {
+  const bf = (g.baseFee != null && g.baseFee > ETH_BF_MAX) ? ETH_BF_MAX : (g.baseFee || 0n);
+  const gp = (((ethTierGp(g.effBase, multPct) * 8n) / 9n) * 9n) / 8n, floor = bf > 0n ? (bf * 9n) / 8n + ETH_FLOOR_TIP : 0n;
+  return gp < floor ? floor : gp;
+}
+/** The send was confirmed at `reviewedWei` per gas; it is sent only when the price now is at most 10% above it. */
+function ethFeeRose(reviewedWei, nowWei) { return nowWei * 100n > reviewedWei * 110n; }
+/** The gas proxy with the quote just checked pinned in it: the engine signs THAT price, not a third quote taken after the check. */
+function ethPinnedRpc(base, g, multPct) {
+  const r = ethGasScaledRpc(base, multPct), bf = (g.baseFee != null && g.baseFee > ETH_BF_MAX) ? ETH_BF_MAX : (g.baseFee || 0n);
+  r.gasPrice = (cb) => cb(null, (ethTierGp(g.effBase, multPct) * 8n) / 9n);
+  r.baseFeePerGasOrZero = (cb) => cb(null, bf);
+  return r;
+}
+
 // --- send: native ETH or any listed/added ERC20, with a chosen fee tier (fund checks on RAW balances) ---
 function ethTokenBy(address) { const addr = lc(address); return ethTokensLoad().find(t => t.address === addr) || (addr === AX_SEND_USDT ? { symbol: "USDT", address: AX_SEND_USDT, decimals: 6 } : null); }   // USDT for the AtomiX tab's Send even when removed from the list
 // Reserve gas for the PRICIEST tier (High ×1.7) so Max — or any reviewed send — stays affordable at whatever tier
@@ -1084,8 +1104,8 @@ async function ethSendReview(asset, to, amt) {
   }
   const fees = {};
   for (const tier of ["low", "med", "high"]) {
-    const gp = ethTierGp(g.effBase, ethTierMult(tier));
-    fees[tier] = { fee: A.dec.formatUnits(gp * gasLimit, 18), gwei: A.dec.formatUnits(gp, 9) };
+    const gp = ethSignedGp(g, ethTierMult(tier));   // what the engine signs: max(tier price, baseFee x 9/8 + 0.2 gwei) (0.18.332)
+    fees[tier] = { fee: A.dec.formatUnits(gp * gasLimit, 18), gwei: A.dec.formatUnits(gp, 9), wei: gp.toString() };
   }
   return { ok: true, sym, decimals, fees, capped: g.capped };   // capped = RPC reported an absurd gas price (warn)
 }
@@ -1107,18 +1127,22 @@ function ethAmbiguousBroadcast(msg) {
 /** Broadcast the send at the chosen tier. Reuses AX.wallet.sendEth (ETH) or AX.ethtx.send (any ERC20) through the
  *  gas-scaled proxy rpc — so the F1 per-address nonce serializer is fully in force. NO timeout (a rejected-but-
  *  broadcasting send must not be retried into a double transfer). */
-async function ethSendExecute(asset, to, amt, tier) {
+async function ethSendExecute(asset, to, amt, tier, reviewedWei) {
   const A = AX();
   await ensureRpcOverride();
   const toClean = String(to == null ? "" : to).trim();                                 // F7: trim before any use
   if (!A.wallet.isEthAddr(toClean)) throw new Error("Invalid recipient address.");
   if (!ethAddrChecksumOk(A, toClean)) throw new Error("That address has an invalid checksum — double-check it.");   // F4
   if (!A.wallet.validDec(amt)) throw new Error("Invalid amount.");
+  // the price the user confirmed (0.18.332): the gas was quoted again here with nothing to compare it to
+  if (typeof reviewedWei !== "string" || !/^[1-9]\d{0,29}$/.test(reviewedWei)) throw new Error("Review this send first: its network fee was not shown. Nothing was sent.");
   const from = vmCtx().eth.address, priv = vmCtx().eth.privKey;
   if (ethSendInFlight.has(from)) return { err: "A send from this wallet is already in progress — wait for it to finish." };   // F1
   ethSendInFlight.add(from);
   try {
-    const proxy = ethGasScaledRpc(ctx.RPC, ethTierMult(tier));
+    const g = await ethGasNow(), mult = ethTierMult(tier), nowGp = ethSignedGp(g, mult);
+    if (ethFeeRose(BigInt(reviewedWei), nowGp)) return { err: "The network fee rose since you reviewed this send: " + A.dec.formatUnits(BigInt(reviewedWei), 9) + " gwei then, " + A.dec.formatUnits(nowGp, 9) + " gwei now (more than 10% higher). Nothing was sent. Review it again." };
+    const proxy = ethPinnedRpc(ctx.RPC, g, mult);   // signs the price just checked
     let tx;
     if (asset === "eth") {
       tx = await p(cb => A.wallet.sendEth(proxy, priv, from, toClean, amt, cb));
@@ -1231,7 +1255,7 @@ module.exports = {
   _ctx: () => ctx, _fire: fire,
   // pure helpers exposed for the ETH-wallet unit harness (scripts/ethwallet-unit.js) — no engine/ctx needed
   _ethtest: { ethPrivateHost, ethValidateRpc, ethDecodeSymbol, ethCleanSymbol, ethTierGp, ethTierMult, ethReserveGp,
-    ethGasScaledRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,
+    ethGasScaledRpc, ethSignedGp, ethFeeRose, ethPinnedRpc, ethCapGas, ethAmbiguousBroadcast, ethAddrChecksumOk, ethValidDecimals, hexToAscii, isEthAddr,
     ethTokensLoad, ethRpcLoad, ETH_FALLBACK_GP, ETH_FEE_MULT, ETH_MAX_GAS_PRICE },
   // test-only: reset the module-level ETH caches so a harness can drive a fresh userData dir per case
   _resetEthCaches: () => { ethTokenList = null; ethRpcOverride = null; ethRpcAppliedUrl = null; ethRpcRefused = null; ethUserHosts.clear(); },

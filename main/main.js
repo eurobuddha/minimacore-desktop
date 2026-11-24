@@ -582,7 +582,7 @@ ipcMain.handle("mcd:axWallet", () => atomix.wallet());
 ipcMain.handle("mcd:axCoins", () => atomix.coins());
 ipcMain.handle("mcd:axSendMax", (_e, asset) => atomix.sendMax(asset));
 ipcMain.handle("mcd:axSendReview", (_e, asset, to, amt) => atomix.sendReview(asset, to, amt));
-ipcMain.handle("mcd:axSend", (_e, asset, to, amt) => atomix.sendExecute(asset, to, amt));
+ipcMain.handle("mcd:axSend", (_e, asset, to, amt, reviewedWei) => atomix.sendExecute(asset, to, amt, reviewedWei));
 ipcMain.handle("mcd:axMakerCfg", () => atomix.makerCfg());
 ipcMain.handle("mcd:axMakerPreview", (_e, cfg, manual) => atomix.makerPreview(cfg, manual));
 ipcMain.handle("mcd:axMakerSave", (_e, cfg, manual) => atomix.makerSave(cfg, manual));
@@ -615,7 +615,7 @@ ipcMain.handle("mcd:ewAddToken", (_e, addr) => ethwallet.addToken(addr));
 ipcMain.handle("mcd:ewRemoveToken", (_e, addr) => ethwallet.removeToken(addr));
 ipcMain.handle("mcd:ewSendMax", (_e, asset) => ethwallet.sendMax(asset));
 ipcMain.handle("mcd:ewSendReview", (_e, asset, to, amt) => ethwallet.sendReview(asset, to, amt));
-ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier) => ethwallet.sendExecute(asset, to, amt, tier));
+ipcMain.handle("mcd:ewSend", (_e, asset, to, amt, tier, reviewedWei) => ethwallet.sendExecute(asset, to, amt, tier, reviewedWei));
 // The seed phrase for Settings' Reveal (0.18.165): the typed phrase and the system's prompt, both here (main/seedgate.js).
 ipcMain.handle("mcd:seedReveal", (_e, typed) => { requireRunning(); return require("./seedgate").revealSeedGated(typed, sysCheck, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 // The ETH key: the typed phrase and, where the system offers one, its own prompt, both here (main/ethwallet.js exportKeyGated).

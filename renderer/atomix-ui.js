@@ -844,8 +844,8 @@
       const r = await api.axSendReview(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
       if (r.err) { toast(r.err, "warn"); return; }
       close();
-      if (!await showConfirm("Review — Send " + (asset === "eth" ? "ETH" : "USDT"), `Send  ${amt} ${asset === "eth" ? "ETH" : "USDT"}\nTo  ${to}\n\nNetwork fee ≈ ${r.fee} ETH\nThis cannot be undone.`, "Send now", true)) return;
-      const s = await api.axSend(asset, to, amt).catch(e => ({ err: String(e.message || e) }));
+      if (!await showConfirm("Review — Send " + (asset === "eth" ? "ETH" : "USDT"), `Send  ${amt} ${asset === "eth" ? "ETH" : "USDT"}\nTo  ${to}\n\nNetwork fee ≈ ${r.fee} ETH${r.capped ? "\n\n⚠ Network gas looks abnormally high — your RPC endpoint may be faulty or hostile. Consider changing it in the ETH Wallet's settings before sending." : ""}\nThis cannot be undone.`, "Send now", true)) return;
+      const s = await api.axSend(asset, to, amt, r.wei).catch(e => ({ err: String(e.message || e) }));   // with the price shown (0.18.332)
       toast(s && s.err ? s.err : "✓ Sent — tx " + s.tx, s && s.err ? "warn" : "ok", (s && !s.err && s.tx) || null);   // the hash whole (0.18.323)
       if (activeView() === "atomix" && axView === "wallet") renderAxWallet();
     };

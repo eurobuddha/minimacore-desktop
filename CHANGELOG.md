@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.332] — ETH: a send keeps to the fee it was reviewed at, the preview is the price the engine signs, and the AtomiX tab's Send warns of abnormal gas
+
+- Review of 0.18.329 (finding 3 i). `ethSendExecute` quoted the gas again at confirm time with nothing to compare it to: the price shown in the dialog and the price signed could differ by any amount under the 5000 gwei ceiling. The review now hands the price of each tier on (`fees[tier].wei`), the send carries the one confirmed (`mcd:ewSend`, `mcd:axSend`), and when the price at confirm time is more than 10% above it nothing is sent: "The network fee rose since you reviewed this send: … Review it again." A send with no reviewed price is refused. The engine then signs the quote that was just checked (pinned in the gas proxy), not a third one.
+- The fee preview showed the tier price, while the vendored engine signs max(tier price, base fee x 9/8 + 0.2 gwei) (AX.ethtx `priced`). With a low base fee the floor is the higher of the two (base fee 0.1 gwei: Low tier 0.2 gwei shown, 0.3125 gwei signed). The preview now shows the signed price (`ethSignedGp`).
+- The AtomiX tab's Send confirm shows "Network gas looks abnormally high…" when the review says the gas price is at the ceiling (`capped`), as the ETH Wallet tab does.
+- Tests: scripts/ethwallet-unit.js (in test:ethwallet): the previewed price equals the engine's arithmetic on every tier and quote, the floor case, the 10% rule at its boundary, the pinned proxy, both channels carrying the reviewed price; fails on 0.18.331. Two lines CHANGED on purpose (the AtomiX tab's send passes the reviewed price): one in scripts/ethwallet-unit.js, one in scripts/panels-test.cjs.
+
 ## [0.18.331] — PandaPools: "posted, outcome unknown" is said as that, written to Activity, and holds the action
 
 - Review of 0.18.329 (finding 2). When the node does not answer a `txnpost` (or the post is pending), the engine keeps the posted inputs claimed and ends the action with `done.fail(PoolMgr.POST_UNKNOWN + …)`. The wrappers (main/pandapools.js swap, createPool, deposit, withdraw, migrate) turned that into a rejection: the window said "Swap failed: posted, outcome unknown…", and nothing was written to Activity (the record ran only on ok), for a transaction that may be in the mempool.

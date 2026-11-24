@@ -30,7 +30,7 @@ const addToken    = (addr) => atomix.ethAddToken(addr);
 const removeToken = (addr) => atomix.ethRemoveToken(addr);
 const sendMax     = (asset) => atomix.ethSendMax(asset);
 const sendReview  = (asset, to, amt) => atomix.ethSendReview(asset, to, amt);
-const sendExecute = (asset, to, amt, tier) => atomix.ethSendExecute(asset, to, amt, tier);
+const sendExecute = (asset, to, amt, tier, reviewedWei) => atomix.ethSendExecute(asset, to, amt, tier, reviewedWei);   // the price confirmed (0.18.332)
 
 /**
  * The key for the screen (0.18.152, from 0.19.108 / 0.19.120). Never handed over on a bare call: the caller must pass
