@@ -336,7 +336,7 @@ ipcMain.handle("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name)
 ipcMain.handle("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
 ipcMain.handle("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
 ipcMain.handle("mcd:chatStatus", () => chat.status());
-ipcMain.handle("mcd:chatMedia", (_e, ref) => { if (typeof ref !== "string" || ref.length > 620 || !/^keets:\/\/[A-Za-z0-9._~\/?=&%-]+$/.test(ref)) throw new Error("bad media ref"); return chat.fetchMedia(ref); });   // checked here too (0.18.327); chat.fetchMedia checks it whole
+ipcMain.handle("mcd:chatMedia", (_e, ref, force, sender) => { if (typeof ref !== "string" || ref.length > 620 || !/^keets:\/\/[A-Za-z0-9._~\/?=&%-]+$/.test(ref)) throw new Error("bad media ref"); return chat.fetchMedia(ref, force === true, sender); });   // checked here too (0.18.327); chat.fetchMedia checks it whole
 ipcMain.handle("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
 ipcMain.handle("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
 ipcMain.handle("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
@@ -492,7 +492,7 @@ shop.emitter.on("incoming", (info) => {
 });
 let mailStarted = false;
 node.on("status", (s) => { if (s.state === "running" && !mailStarted) { mailStarted = true; mail.startLoop(); shop.startLoop().catch(() => {}); } });
-node.on("status", (s) => { if (s.state === "running") chat.startLoop(); });
+node.on("status", chat.onNodeStatus);
 
 // PandaPools (AMM) — read model + actions; the AMM logic is the reused MDS core (main/pandapools/*).
 ipcMain.handle("mcd:ppPools", () => pandapools.pools());

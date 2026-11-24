@@ -88,8 +88,10 @@ test("a chat file path or a Vestr password with ';' is refused with a plain reas
   await chat.sendImageFile(TO, "/Users/me/My Pictures/cat.PNG").catch(() => {});
   assert.match(sent[0], /^keets action:publish path:\/chat\/img-\d+\.png file:"\/Users\/me\/My Pictures\/cat\.PNG"$/, "the path quoted, spaces and all; the extension checked");
   await assert.rejects(vestr.create({ tokenid: "0x00", amount: "1", beneficiary: "Mx" + "A".repeat(50), startMs: 1, endMs: 2, password: "pa;ss" }), /can't contain ; \(the node would read what follows as a second command\)/);
-  const src = rd("main/chat.js");
-  assert.ok(src.includes("' file:" + String.fromCharCode(34) + "' + f + '" + String.fromCharCode(34) + "'"), "fetch quotes its file path too");
+  const ref = "keets://" + "ab".repeat(32) + "/chat/check.png";
+  await assert.rejects(chat.fetchMedia(ref));   // the runner records the command without creating a file
+  const fetch = sent.find(command => command.startsWith("keets action:fetch "));
+  assert.match(fetch, /^keets action:fetch url:\S+ file:"[^"]+"$/, "the node receives one quoted file path");
 });
 
 // ---- 0.18.203: the Web Wallet's key-use counters are read strictly ----

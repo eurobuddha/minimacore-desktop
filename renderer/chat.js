@@ -297,14 +297,14 @@
     return hex.split("").map(c => parseInt(c, 16));
   }
 
-  async function toggleAudio(ref, onChange) {
+  async function toggleAudio(ref, onChange, sender) {
     if (player && playingRef === ref) {
       if (player.paused) player.play(); else player.pause();
       onChange(); return;
     }
     if (player) { player.pause(); player = null; playingRef = ""; onChange(); }
     try {
-      const u = mediaCache[ref] || await D.api.chatMedia(ref);
+      const u = mediaCache[ref] || await D.api.chatMedia(ref, true, sender);
       mediaCache[ref] = u;
       player = new Audio(u); playingRef = ref;
       player.onended = () => { playingRef = ""; player = null; onChange(); };
@@ -332,17 +332,17 @@
         drawWave(cv, levels, mine && player.duration ? player.currentTime / player.duration : 0);
       };
       requestAnimationFrame(paint);
-      const play = (e) => { e.stopPropagation(); toggleAudio(m.ref, paint); };
+      const play = (e) => { e.stopPropagation(); toggleAudio(m.ref, paint, m.incoming ? m.pubkey : undefined); };
       btn.onclick = play; b.querySelector(".chat-audio").onclick = play;
     } else if (m.state === "image" && m.ref) {
       b.innerHTML = `<div class="chat-img chat-img--loading">Loading photo…</div>${m.body ? `<div class="chat-bubble__body">${h(m.body)}</div>` : ""}${metaHtml(m)}`;
       const slot = b.firstChild;
-      const load = () => (mediaCache[m.ref] ? Promise.resolve(mediaCache[m.ref]) : D.api.chatMedia(m.ref)).then((u) => {
+      const load = (force = false) => (mediaCache[m.ref] ? Promise.resolve(mediaCache[m.ref]) : D.api.chatMedia(m.ref, force, m.incoming ? m.pubkey : undefined)).then((u) => {
         mediaCache[m.ref] = u;
         const img = document.createElement("img"); img.className = "chat-img"; img.src = u; img.alt = "Photo";
         img.onclick = () => lightbox(u, m.body);
         slot.replaceWith(img);
-      }).catch(() => { slot.textContent = "Photo — not available yet (click to retry)"; slot.onclick = load; });
+      }).catch(() => { slot.textContent = "Photo — not available yet (click to retry)"; slot.onclick = () => { slot.textContent = "Loading photo…"; load(true); }; });
       load();
     } else if (m.state === "payment") {
       const tok = m.tokname || "Minima";

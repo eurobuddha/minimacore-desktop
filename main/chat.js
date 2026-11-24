@@ -51,7 +51,11 @@ let statusDataDir = null;   // the node's VERSIONED data dir from `status` - the
                             // both sides anchor on one answer
 async function refreshCompanionsDir() {
   if (statusDataDir) return;
-  try { statusDataDir = (await nodeCmd("status")).data || null; } catch (e) { }
+  const generation = chatGeneration;
+  try {
+    const status = await nodeCmd("status");
+    if (generation === chatGeneration) statusDataDir = status.data || null;
+  } catch (e) { }
 }
 function companions() {
   try {
@@ -92,15 +96,69 @@ function fanout(msg, m) {
 const emitter = new EventEmitter();
 let pollTimer = null;
 const payAddrReplied = new Map();   // peer -> last auto-reply ms (10-min cooldown)
-let polling = false;
+let polling = null;
 let myinfo = null;      // { pubkey, drive } from `keets action:info`
 let lastErr = "";
 
 // swappable node-command runner (tests use _setRunner, same as mail.js)
-let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+let runner = (cmd, timeoutMs) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd, timeoutMs);
+
+// The bundled Parlons node has two RPC workers. All slow background chat work shares one slot.
+// KeetsAPI allows 5 s to connect plus 120 s for a sidecar reply. Keep the slot until the node
+// answers, including when an offline peer takes the full 30 s media deadline.
+const BACKGROUND_TIMEOUT_MS = 135000;
+const backgroundJobs = [];
+const pendingRead = new Map();
+const MAX_PENDING_RECEIPTS = 128;
+let backgroundBusy = false, chatGeneration = 0;
+let pendingDeliveries = 0, pendingAddressReplies = 0;
+
+async function drainBackground() {
+  if (backgroundBusy) return;
+  backgroundBusy = true;
+  try {
+    while (backgroundJobs.length) {
+      // A click also promotes an automatic download that is already waiting for its turn.
+      const priority = backgroundJobs.findIndex(job => job.entry && job.entry.force);
+      const [job] = backgroundJobs.splice(Math.max(priority, 0), 1);
+      try { job.resolve(await job.work()); } catch (e) { job.reject(e); }
+    }
+  } finally {
+    backgroundBusy = false;
+  }
+}
+
+function enqueueBackground(work, entry) {
+  return new Promise((resolve, reject) => {
+    backgroundJobs.push({ work, entry, resolve, reject });
+    drainBackground();
+  });
+}
+
+function deliveredReceipt(cmd) {
+  // Delivery ticks are best effort. A full queue must not delay storing, acknowledging or showing new messages.
+  if (pendingDeliveries >= MAX_PENDING_RECEIPTS) return;
+  pendingDeliveries++;
+  enqueueBackground(() => nodeCmd(cmd, BACKGROUND_TIMEOUT_MS))
+    .catch(() => {}).finally(() => { pendingDeliveries--; });
+}
+
+function readReceipt(peer, ref) {
+  const existing = pendingRead.get(peer);
+  if (existing) { existing.ref = ref; return; }
+  if (pendingRead.size >= MAX_PENDING_RECEIPTS) return;
+  const latest = { ref };
+  pendingRead.set(peer, latest);
+  enqueueBackground(async () => {
+    pendingRead.delete(peer);
+    store.metaSet("receipt:" + peer, latest.ref);
+    const payload = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "read" })), { ref: latest.ref }));
+    await nodeCmd("keets action:send to:" + peer + " datahex:" + hexOf(payload), BACKGROUND_TIMEOUT_MS);
+  }).catch(() => {});
+}
 function _setRunner(fn) { runner = fn; }
-async function nodeCmd(cmd) {
-  const r = await runner(oneCommand(cmd));   // ONE command each (main/rpc.js, 0.18.177)
+async function nodeCmd(cmd, timeoutMs) {
+  const r = await runner(oneCommand(cmd), timeoutMs);   // ONE command each (main/rpc.js, 0.18.177)
   const j = typeof r === "string" ? JSON.parse(r) : r;
   if (!j || j.status !== true) throw new Error((j && j.error) || "keets command failed");
   return j.response;
@@ -116,7 +174,10 @@ const isPeer = (k) => typeof k === "string" && PEER_KEY.test(k);
 // ---- identity -------------------------------------------------------------
 async function init() {
   if (myinfo) return myinfo;
-  myinfo = await nodeCmd("keets action:info");
+  const generation = chatGeneration;
+  const info = await nodeCmd("keets action:info");
+  if (generation !== chatGeneration) throw new Error("Chat node changed");
+  myinfo = info;
   return myinfo;
 }
 function myIdentity() {
@@ -128,14 +189,18 @@ function forgetIdentity() { myinfo = null; }
 
 // ---- inbox drain ----------------------------------------------------------
 async function pollOnce() {
-  if (polling) return;
-  polling = true;
+  const generation = chatGeneration;
+  if (polling === generation) return;
+  polling = generation;
   try {
     if (!myinfo) await init();
+    if (generation !== chatGeneration) return;
     await refreshCompanionsDir();
+    if (generation !== chatGeneration) return;
     const inbox = await nodeCmd("keets action:inbox");
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
+      if (generation !== chatGeneration) return;
       if (!msg || !isPeer(msg.from) || typeof msg.id !== "string" || !INBOX_ID.test(msg.id)) {   // 0.18.327: never pasted into a command
         console.error("[chat] an inbox entry whose sender or id is not plain was skipped: " + JSON.stringify(msg && { from: String(msg.from).slice(0, 200), id: String(msg.id).slice(0, 200) }));
         continue;
@@ -176,15 +241,18 @@ async function pollOnce() {
       }
       if (m.state === "payaddr-req") {
         await nodeCmd("keets action:ack id:" + msg.id);
+        if (generation !== chatGeneration) return;
         // contacts only: answering strangers links the chat identity to the wallet
         const last = payAddrReplied.get(msg.from) || 0;
-        if (store.getContact(msg.from) && Date.now() - last > 10 * 60 * 1000) {
+        if (store.getContact(msg.from) && Date.now() - last > 10 * 60 * 1000 && pendingAddressReplies < MAX_PENDING_RECEIPTS) {
           payAddrReplied.set(msg.from, Date.now());
-          try {
+          pendingAddressReplies++;
+          enqueueBackground(async () => {
             const ga = await nodeCmd("getaddress");
+            if (generation !== chatGeneration || !store.getContact(msg.from)) return;
             const payload = schema.chatEncodeTyped("", "", { state: "payaddr", addr: ga.miniaddress });
-            await nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(payload));
-          } catch (e) { /* node busy — they can re-request */ }
+            await nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(payload), BACKGROUND_TIMEOUT_MS);
+          }).catch(() => {}).finally(() => { pendingAddressReplies--; });
         }
         continue;
       }
@@ -212,7 +280,7 @@ async function pollOnce() {
         else if (c.auto && m.name && c.name !== m.name) store.addContact(msg.from, m.name, undefined, true);
         // tell the sender we stored it: their single tick becomes a double tick
         const rcpt = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "delivered" })), { ref: msgid }));
-        nodeCmd("keets action:send to:" + msg.from + " datahex:" + hexOf(rcpt)).catch(() => {});
+        deliveredReceipt("keets action:send to:" + msg.from + " datahex:" + hexOf(rcpt));
         fresh++;
         lastName = m.name || (store.getContact(msg.from) || {}).name || msg.from;
         lastPreview = m.state === "image" ? "📷 Photo"
@@ -224,16 +292,22 @@ async function pollOnce() {
       // ack ONLY after the durable store write — this module owns the inbox
       await nodeCmd("keets action:ack id:" + msg.id);
     }
+    if (generation !== chatGeneration) return;
     lastErr = "";
     if (fresh > 0) {
       emitter.emit("update");
       emitter.emit("incoming", { count: fresh, name: lastName, preview: lastPreview });
     }
   } catch (e) {
-    lastErr = e.message || "" + e;   // sidecar starting / node restarting — retry next tick
+    if (generation === chatGeneration) lastErr = e.message || "" + e;   // sidecar starting / node restarting — retry next tick
   } finally {
-    polling = false;
+    if (polling === generation) polling = null;
   }
+}
+
+function onNodeStatus(snapshot) {
+  if (snapshot.state === "running") startLoop();
+  else if (pollTimer) stopLoop();
 }
 
 function startLoop() {
@@ -242,6 +316,13 @@ function startLoop() {
   pollOnce().catch(() => {});
 }
 function stopLoop() {
+  chatGeneration++;
+  for (const job of backgroundJobs.splice(0)) job.reject(new Error("Chat node changed"));
+  pendingRead.clear();
+  payAddrReplied.clear();
+  mediaInFlight.clear();
+  mediaFailed.clear();
+  senderDown.clear();
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   myinfo = null;
   // a restarted node may run a different version = different data dir
@@ -277,8 +358,12 @@ function mediaDir() {
   fs.mkdirSync(d, { recursive: true });
   return d;
 }
-/** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. */
-async function fetchMedia(ref) {
+const MEDIA_RETRY_MS = 2 * 60 * 1000, MEDIA_RETRY_MAX_MS = 30 * 60 * 1000;
+const MAX_PENDING_MEDIA = 256;
+const MEDIA_LATER = "This photo could not be fetched just now (its sender may be offline). It is tried again later.";
+const mediaInFlight = new Map(), mediaFailed = new Map(), senderDown = new Map();
+
+function mediaPlace(ref) {
   // An inbound ref is attacker-adjacent data: no whitespace (would inject
   // command params) and the extension comes from an ALLOWLIST match, never a
   // raw slice (a crafted "extension" with ../ walked out of mediaDir).
@@ -293,18 +378,71 @@ async function fetchMedia(ref) {
              : ext === ".m4a" ? "audio/mp4"
              : ext === ".wav" ? "audio/wav"
              : "image/jpeg";
-  const f = path.join(mediaDir(), key + ext);
-  if (!fs.existsSync(f)) {
-    // the file path is quoted (0.18.188): the app's data folder holds a space ("Application Support"), and the node's
-    // parser takes a "quoted" value whole and drops the quotes
-    if (/["\u0000-\u001f\u007f;]/.test(f)) throw new Error("The app's data folder name holds a character a node command cannot carry.");
-    await nodeCmd("keets action:fetch url:" + ref + ' file:"' + f + '"');
+  return { file: path.join(mediaDir(), key + ext), mime };
+}
+
+function mediaData(file, mime) {
+  const size = fs.statSync(file).size;
+  if (size === 0) throw new Error("fetch failed");
+  if (size > 8 * 1024 * 1024) throw new Error("media too large to inline");
+  return "data:" + mime + ";base64," + fs.readFileSync(file).toString("base64");
+}
+
+function remember(map, key, value, limit) {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > limit) map.delete(map.keys().next().value);
+}
+
+async function fetchMedia(ref, force = false, sender) {
+  const { file, mime } = mediaPlace(ref);
+  const pending = mediaInFlight.get(ref);
+  if (pending) {
+    if (force === true) pending.force = true;
+    return pending.result;
   }
-  // 16MB mesh files exist; a >8MB base64 data: URL stalls main + the DOM.
-  if (!fs.existsSync(f)) throw new Error("fetch failed");
-  if (fs.statSync(f).size > 8 * 1024 * 1024) throw new Error("media too large to inline");
-  if (fs.statSync(f).size === 0) { fs.unlinkSync(f); throw new Error("fetch failed"); }
-  return "data:" + mime + ";base64," + fs.readFileSync(f).toString("base64");
+  if (fs.existsSync(file) && fs.statSync(file).size > 0) return mediaData(file, mime);
+
+  // The row identifies the sender. A drive named in a message can belong to anyone.
+  const peer = isPeer(sender) ? sender.toLowerCase().replace(/^0x/, "") : "";
+  const blocked = () => {
+    const now = Date.now(), failure = mediaFailed.get(ref);
+    return (failure && now < failure.until) || now < (senderDown.get(peer) || 0);
+  };
+  if (force !== true && blocked()) throw new Error(MEDIA_LATER);
+  // A long thread can request every photo in one redraw. Leave one place for a user's click.
+  const limit = force === true ? MAX_PENDING_MEDIA : MAX_PENDING_MEDIA - 1;
+  if (mediaInFlight.size >= limit) throw new Error("Chat media queue is full. Try again shortly.");
+  const generation = chatGeneration;
+  const entry = { force: force === true };
+  entry.result = enqueueBackground(async () => {
+    if (!entry.force && blocked()) throw new Error(MEDIA_LATER);
+    const part = file + "." + crypto.randomUUID() + ".part";
+    if (/["\u0000-\u001f\u007f;]/.test(part)) throw new Error("The app's data folder name holds a character a node command cannot carry.");
+    try {
+      await nodeCmd("keets action:fetch url:" + ref + ' file:"' + part + '"', BACKGROUND_TIMEOUT_MS);
+      if (generation !== chatGeneration) throw new Error("Chat node changed");
+      if (!fs.statSync(part).size) throw new Error("fetch failed");
+      fs.renameSync(part, file);
+      mediaFailed.delete(ref);
+      senderDown.delete(peer);
+      return mediaData(file, mime);
+    } catch (e) {
+      if (generation === chatGeneration && /media unavailable/.test(e.message)) {
+        const was = mediaFailed.get(ref), now = Date.now();
+        const wait = Math.min(MEDIA_RETRY_MAX_MS, was ? was.wait * 2 : MEDIA_RETRY_MS);
+        remember(mediaFailed, ref, { until: now + wait, wait }, 2000);
+        if (peer) remember(senderDown, peer, now + MEDIA_RETRY_MS, 500);
+      }
+      throw e;
+    } finally {
+      fs.rmSync(part, { force: true });
+    }
+  }, entry).finally(() => {
+    if (mediaInFlight.get(ref) === entry) mediaInFlight.delete(ref);
+  });
+  mediaInFlight.set(ref, entry);
+  return entry.result;
 }
 /** Publish a local image file to our media drive and send it as a photo message. */
 async function sendImageFile(to, filePath) {
@@ -397,9 +535,7 @@ function thread(pubkey) {
   // read receipt to the peer (blue ticks their side), deduped on the newest incoming id
   const latestIn = [...msgs].reverse().find(m => m.incoming);
   if (latestIn && isPeer(pubkey) && store.metaGet("receipt:" + pubkey) !== latestIn.msgid) {
-    store.metaSet("receipt:" + pubkey, latestIn.msgid);
-    const payload = JSON.stringify(Object.assign(JSON.parse(schema.chatEncodeTyped("", "", { state: "read" })), { ref: latestIn.msgid }));
-    nodeCmd("keets action:send to:" + pubkey + " datahex:" + hexOf(payload)).catch(() => {});
+    readReceipt(pubkey, latestIn.msgid);
   }
   return msgs;
 }
@@ -424,6 +560,6 @@ function capDecoded(m) {
   return out;
 }
 
-module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
+module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, onNodeStatus, pollOnce, send,
   threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner,
   fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity, _capDecoded: capDecoded, CHAT_CAP };

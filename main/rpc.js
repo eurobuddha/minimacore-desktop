@@ -40,7 +40,7 @@ const notSent = (e) => { e.notSent = true; return e; };
 function neverSent(e) { return !!(e && e.notSent === true); }
 
 /** Run one node command. Resolves with the parsed JSON reply (status may be false — caller inspects). */
-function rpcCall(port, secret, command) {
+function rpcCall(port, secret, command, timeoutMs = timeoutFor(command)) {
   return new Promise((resolve, reject) => {
     { const unsafe = V.refuse("", command); if (unsafe) { reject(notSent(new Error(unsafe))); return; } }   // 0.18.317: one command, under every caller (main/cmdverb.js refuse)
     const auth = "Basic " + Buffer.from("minima:" + secret).toString("base64");
@@ -61,7 +61,7 @@ function rpcCall(port, secret, command) {
       method: usePost ? "POST" : "GET",
       path: usePost ? "/" : path,
       headers,
-      timeout: timeoutFor(command),
+      timeout: timeoutMs,
       // Minima's lightweight Java RPC server emits response headers that Node's strict llhttp parser rejects
       // ("Invalid header value char"), so every call would fail to parse. Parse leniently, like curl. Safe:
       // localhost-only loopback to our own child process.

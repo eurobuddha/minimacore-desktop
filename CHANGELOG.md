@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.342] — KeetChat keeps a node worker available
+
+- Photo downloads and background read and delivery receipts use one RPC worker at a time. Redrawing a thread reuses a pending download. Cached media opens immediately.
+- When a sender is offline, automatic retries back off. Clicking the photo or pressing Play moves its retry ahead of waiting background work. Only complete downloads enter the cache.
+
 ## [0.18.341] — P2P Chance: the settle-only mode is taken out again; the casino is simply removed
 
 - Owner, 24 Nov 2026: "remove casino from minimaCore Desktop". 0.18.330–0.18.340 had added a settle-only mode (a dialog that cancelled, revealed, settled and claimed a wallet's open offers and bets at the removed casino's contract, signing by itself). Its review found it not safe to ship, and its hardening was never finished. It is removed: main/casino-settle.js, its tests, its window and its IPC channels are gone, and the app is back to the plain removal of 0.18.318 with its one-time notice.
