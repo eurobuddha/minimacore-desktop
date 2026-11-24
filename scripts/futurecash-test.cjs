@@ -79,6 +79,9 @@ function standIn(o = {}) {
     if ((m = /^coins relevant:true address:(0x[0-9A-Fa-f]+)$/.exec(c))) return { status: true, response: (n.at[U(m[1])] || []).filter(x => !x.spent) };
     if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])] || [].concat(n.wallet || [], Object.values(n.at).flat()).find(y => U(y.coinid) === U(m[1])); return { status: true, response: x && !x.spent ? [x] : [] }; }   // as the real node: a spent coin answers [] (TxPoWSearcher.searchCoins)
     if (c === "status") return { status: true, response: { locked: false } };
+    // `txpow address:` (core txpow.java → TxPoWSearcher.searchTxPoWviaAddress): the MINED txpows in the node's chain tree with a coin at
+    // that address, as an array (empty when there is none). n.chain holds them; a transaction only posted is not in it.
+    if ((m = /^txpow address:(\S+)$/.exec(c))) return { status: true, response: (n.chain || []).filter(tp => [].concat(tp.body.txn.inputs, tp.body.txn.outputs).some(x => FC.canon(x.address) === FC.canon(m[1]))) };
     return { status: false, error: "the stand-in does not know: " + c };
   }
   return { run, sent, n };
@@ -382,7 +385,11 @@ test("a spent coin answers []: a collect is proved by its output, a landed sweep
   h.node.n.wallet[0].spent = true;
   await h.e.pass(160); assert.equal(h.e._store().sweeps("SWEEP_POSTED").length, 1, "inside VERIFY_MAX: waiting");
   await h.e.pass(152 + 30);
-  assert.equal(h.e._store().sweeps("TAKEN").length, 1, "gone and not at the safe: the theft alarm");
+  assert.equal(h.e._store().sweeps("SWEEP_POSTED").length, 1, "0.19.435: one read is not the alarm");
+  await h.e.pass(152 + 32); assert.equal(h.e._store().sweeps("SWEEP_POSTED").length, 1, "nor a second read fewer than 3 blocks on");
+  await h.e.pass(152 + 33);
+  assert.ok(h.node.sent.includes("txpow address:" + SAFE_HEX), "the sweep's own transaction was looked for on chain first");
+  assert.equal(h.e._store().sweeps("TAKEN").length, 1, "gone, not at the safe, no transaction of ours on chain, read twice 3 blocks apart: the theft alarm");
   assert.ok(h.e.activity().some(l => /ALERT/.test(l.msg) && l.msg.includes(ID(52))));
 });
 
@@ -907,4 +914,93 @@ test("create refuses at once, naming the option, when a required option is missi
     assert.throws(() => FC.create(missing), new RegExp("option \"" + k + "\" is missing or not a function"), k + " missing");
     assert.throws(() => FC.create(Object.assign({}, ok, { [k]: "x" })), new RegExp("option \"" + k + "\""), k + " not a function");
   }
+});
+
+// ---- 0.19.435 (independent review of 0.19.428, MINOR 8 and 9): the theft alarm is final, so it is never raised on what a landed sweep
+// or a reorg also looks like; a landed collect whose coin was never seen ends; one output proves one collect ----
+/** An at-risk stake collected, its coin found at the payout and its sweep posted to a same-node safe; then the swept coin is no longer listed. */
+async function sweptAway(n, amount) {
+  const s = stake(n, PAY1, { mature: 100, amount }), g = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s] } });
+  await g.e.pass(150); g.node.n.at[FC.KNOWN_ADDRESS] = []; g.node.n.coins[ID(n)] = Object.assign({}, s, { spent: true });
+  g.node.n.wallet = [{ coinid: ID(n + 50), address: PAY1, amount, tokenid: "0x00", created: "151", spent: false }];
+  await g.e.pass(152);
+  assert.equal(g.e._store().sweeps("SWEEP_POSTED").length, 1); assert.equal(g.e._store().collect(ID(n)).note, ID(n + 50), "the collect keeps the coin it paid");
+  assert.ok(g.e.activity().some(l => l.msg.includes("posted as txpow (its id before mining):" + ID(999))), "the post's txpowid is kept in the log, whole");
+  g.e._store().kv.set(FC.K.SAFE_MODE, "samenode"); g.e._store().kv.set(FC.K.CLEAN_ADDR, JSON.stringify({ mx: SAFE_MX, hex: SAFE_HEX }));
+  g.node.n.wallet[0].spent = true;
+  return Object.assign(g, { s, coin: ID(n + 50) });
+}
+test("0.19.435: our own sweep landed and its coin at the safe was spent onward before any pass saw it: its transaction on chain proves it, no alarm", async () => {
+  const g = await sweptAway(4, "7");
+  // mined: the sweep's transaction (a mined txpow has another id than the one txnpost answered), and its output already spent again
+  g.node.n.chain = [{ txpowid: ID(4242), isblock: false, istransaction: true, header: { block: "153" }, body: { txn: { transactionid: ID(4243),
+    inputs: [{ coinid: g.coin, address: PAY1, amount: "7", tokenid: "0x00" }], outputs: [{ coinid: ID(71), address: SAFE_HEX, amount: "7", tokenid: "0x00" }] } } }];
+  await g.e.pass(160); assert.equal(g.e._store().sweeps("SWEEP_POSTED").length, 1, "inside VERIFY_MAX: waiting, as before");
+  await g.e.pass(182);
+  assert.equal(g.e._store().sweeps("TAKEN").length, 0, "no theft alarm (0.19.434 raised it here, for good)");
+  const row = g.e._store().sweepRow(g.coin); assert.equal(row.status, "SWEPT"); assert.equal(row.note, ID(71));
+  assert.ok(!g.e.activity().some(l => /ALERT/.test(l.msg)));
+  assert.ok(g.e.activity().some(l => l.msg.startsWith("The sweep's own transaction is on chain") && l.msg.includes(g.coin)));
+  // a transaction that spends our coin to ANOTHER address is not ours: still the alarm (after the second read)
+  const h = await sweptAway(5, "7");
+  h.node.n.chain = [{ txpowid: ID(4250), header: { block: "153" }, body: { txn: { transactionid: ID(4251), inputs: [{ coinid: h.coin, address: PAY1, amount: "7", tokenid: "0x00" }], outputs: [{ coinid: ID(72), address: STRANGER, amount: "7", tokenid: "0x00" }] } } },
+    { txpowid: ID(4252), header: { block: "153" }, body: { txn: { transactionid: ID(4253), inputs: [{ coinid: ID(900), address: STRANGER, amount: "7", tokenid: "0x00" }], outputs: [{ coinid: ID(73), address: SAFE_HEX, amount: "7", tokenid: "0x00" }] } } }];
+  h.node.n.wallet.push({ coinid: ID(73), address: SAFE_HEX, amount: "7", tokenid: "0x00", created: "140", spent: false });   // an older coin at the safe: not ours either
+  await h.e.pass(182); await h.e.pass(185);
+  assert.equal(h.e._store().sweeps("TAKEN").length, 1);
+});
+test("0.19.435: a reorg undid the collect: the stake is back in the contract, the sweep of a coin that no longer exists is dropped, no alarm", async () => {
+  const g = await sweptAway(6, "7");
+  g.node.n.wallet = []; delete g.node.n.coins[ID(6)]; g.node.n.at[FC.KNOWN_ADDRESS] = [g.s];   // the chain no longer holds the collect
+  await g.e.pass(182);
+  assert.equal(g.e._store().sweeps("TAKEN").length, 0, "no theft alarm (0.19.434 raised it)"); assert.equal(g.e._store().sweepRow(g.coin), null);
+  assert.ok(g.e.activity().some(l => l.msg.startsWith("A reorg undid the collect that made this coin") && l.msg.includes(g.coin)));
+  assert.ok(["DETECTED", "COLLECT_POSTED"].includes(g.e._store().collect(ID(6)).status), "the stake is the guardian's to collect again: " + g.e._store().collect(ID(6)).status);
+  // an equal stake that is merely still in the contract is NOT that: the sweep's own collect is told by the coin it recorded
+  const h = await sweptAway(7, "7");
+  h.node.n.at[FC.KNOWN_ADDRESS] = [stake(8, PAY1, { mature: 999999, amount: "7" })];
+  await h.e.pass(182); await h.e.pass(185);
+  assert.equal(h.e._store().sweeps("TAKEN").length, 1, "another stake of the same amount does not excuse it");
+});
+test("0.19.435: a sweep whose end the node cannot show is said as unverified, never as a theft: an unreadable txpow search, or one posted too long ago", async () => {
+  const g = await sweptAway(9, "7");
+  g.node.n.answer["txpow address:"] = async () => ({ status: false, error: "busy" });
+  await g.e.pass(182);
+  assert.equal(g.e._store().sweepRow(g.coin).status, "SWEPT"); assert.equal(g.e._store().sweepRow(g.coin).note, "unverified"); assert.equal(g.e._store().sweeps("TAKEN").length, 0);
+  const h = await sweptAway(10, "7");
+  await h.e.pass(152 + 601);   // the app was closed for longer than the chain tree reaches back
+  assert.equal(h.e._store().sweepRow(h.coin).note, "unverified"); assert.equal(h.e._store().sweeps("TAKEN").length, 0);
+  assert.ok(h.e.activity().some(l => l.msg.startsWith("Sweep spent — arrival unverified") && l.msg.includes(h.coin)));
+});
+test("0.19.435: a collect that landed, its coin spent before it was seen, ends after 120 blocks as \"collected, output not seen\" (it sat in DETECTED for good)", async () => {
+  const s1 = stake(11, PAY0, { mature: 140 });
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] }, coins: {} });
+  await e.collectNow(ID(11));
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(11)] = Object.assign({}, s1, { spent: true });   // mined; the node lists it no more; nothing is at the payout
+  await e.pass(151); assert.equal(e._store().collect(ID(11)).status, "COLLECT_POSTED_SAFE");
+  await e.pass(158); assert.equal(e._store().collect(ID(11)).status, "DETECTED");
+  assert.ok(!e.activity().some(l => l.msg.startsWith("Collect retry scheduled")), "nothing is left to retry, and it is not said");
+  assert.ok(e.activity().some(l => l.msg.startsWith("Collect posted and the stake is no longer listed, but its coin is not seen on the payout address yet: looked for until block 270 | stake:" + ID(11))));
+  await e.pass(230); assert.equal(e._store().collect(ID(11)).status, "DETECTED", "still looked for (a row that does not resolve is asked about every 30 blocks)");
+  await e.pass(270);
+  assert.equal(e._store().collect(ID(11)).status, "COLLECTED_UNFOUND");
+  assert.ok(e.activity().some(l => l.msg.startsWith("Collected, output not seen: the stake is gone from the contract") && l.msg.includes(ID(11)) && l.msg.includes(PAY0)));
+  // a stake a reorg removed that this app never posted a collect for is not that: it stays as it is
+  const s2 = stake(12, PAY0, { mature: 999999 }), b = await audited({ at: { [FC.KNOWN_ADDRESS]: [s2] } });
+  await b.e.pass(150); b.node.n.at[FC.KNOWN_ADDRESS] = []; await b.e.pass(151); await b.e.pass(400);
+  assert.equal(b.e._store().collect(ID(12)).status, "DETECTED");
+});
+test("0.19.435: one coin at a payout proves ONE collect: two stakes of the same amount to the same address are not both done by it", async () => {
+  const s1 = stake(13, PAY0, { mature: 140 }), s2 = stake(14, PAY0, { mature: 140 });
+  const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1, s2] }, coins: {} });
+  await e.collectNow(ID(13)); await e.collectNow(ID(14));
+  node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(13)] = Object.assign({}, s1, { spent: true }); node.n.coins[ID(14)] = Object.assign({}, s2, { spent: true });
+  node.n.wallet = [{ coinid: ID(63), address: PAY0, amount: "10", tokenid: "0x00", created: "151", spent: false }];   // ONE of the two has paid so far
+  await e.pass(151);
+  const st = () => [ID(13), ID(14)].map(id => e._store().collect(id).status);
+  assert.deepEqual(st().sort(), ["COLLECTED_SAFE", "COLLECT_POSTED_SAFE"], "one proven, the other still followed (both were COLLECTED_SAFE on 0.19.434)");
+  await e.pass(152); assert.deepEqual(st().sort(), ["COLLECTED_SAFE", "COLLECT_POSTED_SAFE"], "and the same coin does not prove the second at a later pass");
+  node.n.wallet.push({ coinid: ID(64), address: PAY0, amount: "10", tokenid: "0x00", created: "153", spent: false });
+  await e.pass(153); assert.deepEqual(st(), ["COLLECTED_SAFE", "COLLECTED_SAFE"]);
+  assert.deepEqual(e._store().collectNotes().map(n => n.note).sort(), [ID(63), ID(64)]);
 });

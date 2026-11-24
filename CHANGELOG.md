@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.435] — Future Cash Next: no false theft alarm, a landed collect ends, one coin proves one collect
+
+- Independent review of 0.19.428 (MINOR 8 and 9), main/futurecash.js. The theft alarm ("A collected stake … did NOT reach your safe address. Your old key may be compromised", status TAKEN) is final. It was raised on one read, and two harmless things look the same to that read: our own sweep landed and its coin at the same-node safe was spent onward before any pass saw it; or a reorg dropped the collect, so the coin being swept no longer exists.
+- Before the alarm, now: (1) the sweep's own transaction is looked for on chain (`txpow address:<the safe>`: a mined transaction that spends this coin and pays the safe this amount). It is found by the coin it spends, never by an id: the txpowid `txnpost` answers is the id before mining and matches no mined txpow (it is kept in the Activity log line of the post, whole). Found: the sweep ends as Secured. (2) If the collect that made the coin was undone (its stake is listed, unspent, in the contract again), the sweep is dropped and the stake is collected again. (3) Otherwise "gone and not ours" must be read twice, 3 blocks apart. (4) When the search cannot be read, or the sweep was posted more than 600 blocks ago (past what the node's chain tree shows), the end is said as "arrival unverified: please check it arrived", never as a theft.
+- A collect this app posted whose stake is no longer listed and whose coin was never seen at the payout ends 120 blocks after the collect as COLLECTED_UNFOUND, logged "Collected, output not seen…". It sat in DETECTED for good under "Collect retry scheduled", with nothing left to retry; that line is no longer written for a stake the node no longer lists.
+- One coin at a payout proves one collect: the coin is recorded on its collect (fc_collect.note, an existing column), and a coin recorded for another collect, or queued for a sweep, proves no second one (two stakes of the same amount to the same address were both ended by one coin).
+- Tests: scripts/futurecash-test.cjs, five new and one changed (the alarm now needs the second read); its stand-in node answers `txpow address:` as core does (all six fail on 0.19.434).
+
 ## [0.19.434] — On Windows the app's exit no longer ends the node unsaved
 
 - Independent review of 0.19.428 (MINOR 7). When the app closes with its node still running and not yet told to quit, it sent the node SIGTERM and logged "sent SIGTERM, so it saves and stops by itself". On Windows that call is TerminateProcess: the node ends at once, with no shutdown hook and nothing saved.

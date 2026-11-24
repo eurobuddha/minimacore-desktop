@@ -68,7 +68,7 @@ async function open(file, o = {}) {
     remove: (k) => { run("DELETE FROM fc_kv WHERE k=?", [k]); }
   };
   const rowC = (r) => ({ coinid: r.fc_coinid, payout: r.payout_address, tokenid: r.tokenid, amount: r.out_amount, status: r.status, matureBlock: Number(r.mature_block) || 0,
-    collectBlock: Number(r.collect_block) || 0, attempts: Number(r.attempts) || 0, atRisk: Number(r.at_risk) === 1 });
+    collectBlock: Number(r.collect_block) || 0, attempts: Number(r.attempts) || 0, atRisk: Number(r.at_risk) === 1, note: r.note == null || r.note === "" ? null : String(r.note) });
   const rowS = (r) => ({ coinid: r.coinid, address: r.address, tokenid: r.tokenid, amount: r.amount, status: r.status, note: r.note == null ? null : String(r.note),
     sweepBlock: Number(r.sweep_block) || 0, attempts: Number(r.attempts) || 0 });
   const marks = (n) => new Array(n).fill("?").join(",");
@@ -84,6 +84,10 @@ async function open(file, o = {}) {
     collects: (...st) => all("SELECT * FROM fc_collect WHERE status IN (" + marks(st.length) + ")", st).map(rowC),
     collect: (id) => { const r = one("SELECT * FROM fc_collect WHERE fc_coinid=?", [id]); return r ? rowC(r) : null; },
     claimForPost: (id, posted, tip) => run("UPDATE fc_collect SET status=?, collect_block=?, attempts=attempts+1, updated=? WHERE fc_coinid=? AND status=?", [posted, tip, now(), id, "DETECTED"]) > 0,
+    // note: the coin this collect paid to its payout, once seen (0.19.435): one output proves one collect, and a sweep finds its collect by it
+    setCollectNote: (id, out) => run("UPDATE fc_collect SET note=?, updated=? WHERE fc_coinid=?", [out, now(), id]),
+    collectNotes: () => all("SELECT fc_coinid, note FROM fc_collect WHERE note IS NOT NULL AND note<>''").map(r => ({ coinid: String(r.fc_coinid), note: String(r.note) })),
+    collectByNote: (out) => { const r = one("SELECT * FROM fc_collect WHERE lower(note)=lower(?)", [out]); return r ? rowC(r) : null; },
     setCollectStatus: (id, st) => run("UPDATE fc_collect SET status=?, updated=? WHERE fc_coinid=?", [st, now(), id]),
     deleteCollect: (id) => run("DELETE FROM fc_collect WHERE fc_coinid=?", [id]),
     // ---- fc_sweep ----
