@@ -141,7 +141,8 @@ function createWindow() {
   // receiver alive too; explicit Quit still closes it through the existing graceful shutdown.
   // Elsewhere closing the window quits the app: the quit is asked for while the window is still there, so the
   // Quit warning (before-quit) has a window to be answered in, and "Stay open" leaves it as it was.
-  win.on("close", e => { if (quitting) return; e.preventDefault(); if (process.platform === "darwin") win.hide(); else app.quit(); });
+  // While a Quit waits for the node to save (0.19.420), the window stays: it says so, and closing it would end the app under the node.
+  win.on("close", e => { if (quitting) { if (quitStopping) e.preventDefault(); return; } e.preventDefault(); if (process.platform === "darwin") win.hide(); else app.quit(); });
   win.on("closed", () => { win = null; });
 }
 
@@ -1120,9 +1121,9 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); else if (win) { win.show(); win.focus(); } });
 });
 
-// The node must never outlive the app: a normal quit goes through before-quit → node.stop() (graceful);
-// these two are the last resort for every other way out (uncaught exception, will-quit after a failed
-// stop). A SIGKILL of the app itself is what reclaimStaleNode() on the next start is for.
+// A normal quit goes through before-quit → node.stop(), which waits while the node saves. These two are for every other way
+// out: they never kill the node (0.19.420, node-manager killNow): one told to quit is left to finish, any other is sent SIGTERM,
+// and the next launch finds it through the pidfile and waits for it (reclaimStaleNode).
 app.on("will-quit", () => { try { clipSecret.clearNow(); } catch (e) {} try { node.killNow(); } catch (e) {} });   // a key still on the clipboard does not outlive the app
 process.on("exit", () => { try { node.killNow(); } catch (e) {} });
 
@@ -1137,7 +1138,9 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 //    in the Downloads folder, and the user installs it.)
 //  - Either way the node is then stopped through node.stop(): every engine first finishes what it has at the node,
 //    each within its own bound and 30 s in all (0.18.117), so a transaction posted in the last second is recorded.
-let quitting = false, quitAsking = false;
+let quitting = false, quitAsking = false, quitStopping = false;
+// A Quit that waits for the node to save shows the window, which says so (node-manager SAVING_NOTE): the app must not look hung.
+node.on("status", (s) => { if (quitStopping && s && s.stopNote && win && !win.isDestroyed()) win.show(); });
 const IMPORT_QUIT_EARLY = N_("The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.");
 const BUSY_QUIT_WARNING = N_("Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start.");
 const IMPORT_QUIT_RESTART = N_("The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.");
@@ -1177,8 +1180,10 @@ app.on("before-quit", (e) => {
     if (!go) return;
     // Always go through node.stop(), even with no node process: it also releases the router port mapping,
     // which can outlive the node (e.g. the node died on its own). Both halves are bounded, so quit stays fast.
-    quitting = true;
+    // node.stop() waits as long as the node is saving (0.19.420): a Quit, the system's included, never cuts its databases.
+    quitting = true; quitStopping = true;
     try { await node.stop(); } catch (err) {}
+    quitStopping = false;
     app.quit();
   })();
 });

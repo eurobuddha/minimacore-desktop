@@ -51,6 +51,18 @@ const CASCADE_BROKEN_HINT = "This node's chain files do not fit together (the no
 const BLOCK_BOOT_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Using NEW Block number as key uses keys!$/;
 const PARLONS = { version: /^\[parlons-node\] Parlons Node (\d+\.\d+\.\d+) /, up: "[parlons-node] account up: ", cape: "[parlons-node] Maxima cape up on port ",
   failed: ["[parlons-node] account layer FAILED to start: ", "[parlons-node] Maxima cape FAILED to start: "], refusing: "[parlons-node] REFUSING to start: " };
+// THE NODE HAS SAVED (0.19.420): core prints one of these only once its databases are written (Main.shutdown: "Shut down completed
+// OK.."; Main.NotifyMainListenerOfShutDown → ClearMainInstance: "Main Instance Cleared..", which megammrsync, restore, archive and
+// the rest of the commands that shut the node's insides down print too, after their saveAllDB). The whole line, MinimaLogger's prefix.
+const SAVED_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : (?:Shut down completed OK\.\.|Main Instance Cleared\.\.)$/;
+// How a stop waits (stop, reclaimStaleNode: waitGone). The node's `quit` runs Main.shutdown, which writes every database before it
+// answers: on a MegaMMR node that is megammr.mmr, 1.5 GB, deleted and written again (MiniFile.saveObjectDirect), and a cut file
+// loads without a word at the next start. So nothing is signalled while the node may still be saving: only after it has said it
+// saved, or after SILENCE with no output and no database file written. On 23 Nov 2026 the old 12 s SIGTERM cut a save and a 1.5 GB
+// MegaMMR came back as 49.1 MB. (Windows has no gentle signal: there, "SIGTERM" ends the process at once.)
+const STOP_TIMES = Object.freeze({ silenceMs: 10 * 60_000, termGraceMs: 2 * 60_000, killGraceMs: 30_000, afterSavedMs: 5_000, pollMs: 500, quitRetryMs: 2_000, noteAfterMs: 2_000 });
+const SAVING_NOTE = "The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.";
+const SHUTDOWN_FILE = "minimacore-shutdown.json";   // in the data folder: how the last stop ended, and the MegaMMR it left (recordStop)
 const CONT_MAX = 64;           // the most lines read as the continuation of one cut line (nodeLine)
 const LINE_MAX = 64 * 1024;   // a "line" the node never ends is cut here (it is then judged as the pieces it arrives in)
 const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
@@ -62,6 +74,9 @@ function tokenizeArgs(s) {
   while ((m = re.exec(s))) out.push(m[1] ?? m[2] ?? m[3]);
   return out;
 }
+
+/** Nothing listens on the node's RPC port (it is still booting, or already gone): a `quit` that certainly did not arrive. */
+const refusedErr = (e) => !!e && (e.code === "ECONNREFUSED" || /ECONNREFUSED|not listening/.test(String(e.message)));
 
 /** Bounded sleep. */
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -151,7 +166,10 @@ class NodeManager extends EventEmitter {
     this.wasMapped = false;
     this.lastNetRestart = 0;
     this.spawnFn = spawn;         // the one place java is launched from (scripts/keymode-test.cjs puts a stand-in here)
-    this.sys = { listeners, commandOf, alive, killPid, sleep };   // what is asked of the OS about other processes (scripts/flavor-test.cjs puts stand-ins here)
+    this.sys = { listeners, commandOf, alive, killPid, sleep, now: Date.now };   // what is asked of the OS about other processes (scripts/flavor-test.cjs puts stand-ins here)
+    this.stopTimes = STOP_TIMES;  // how long a stop waits before it signals (waitGone); the tests shorten them
+    this.stopNote = "";           // said while a stop waits for the node to save (SAVING_NOTE)
+    this.shutdownNotes = [];      // said from a start on: the last stop was cut short, the MegaMMR looks incomplete (startNotes, megaCoinsCheck)
     this.rpc = (cmd) => rpcCall(this.rpcPort(), config.rpcSecret(), cmd);   // this node's RPC (the tests put a stand-in here too)
     this.keyModeChecked = false;  // the running node's keys were read and are of the recorded mode (once per start)
     this.polled = false;          // this node start has answered a health poll: its boot is over (the boot line is believed only before)
@@ -418,14 +436,15 @@ class NodeManager extends EventEmitter {
       else try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
     } catch (e) { /* no pidfile */ }
     if (mine) {
-      this.log("[app] this app's node from an earlier launch is still running (pid " + mine + ") — stopping it before starting");
-      // `quit` goes to whoever answers on the RPC port: sent only when that IS the process just identified
-      if (S.listeners(this.rpcPort()).includes(mine)) { try { await Promise.race([this.rpc("quit"), S.sleep(8000)]); } catch (e) {} }
-      for (let i = 0; i < 16 && S.alive(mine); i++) await S.sleep(500);
-      if (S.alive(mine)) { S.killPid(mine, "SIGTERM"); for (let i = 0; i < 10 && S.alive(mine); i++) await S.sleep(500); }
-      if (S.alive(mine)) { S.killPid(mine, "SIGKILL"); for (let i = 0; i < 6 && S.alive(mine); i++) await S.sleep(500); }
+      this.log("[app] this app's node from an earlier launch is still running (pid " + mine + ") — stopping it before starting; it is waited for while it saves");
+      // `quit` goes to whoever answers on the RPC port: sent only when that IS the process just identified (asked again while it is not
+      // yet). Its output went to the launch that is gone, so what it writes in its databases folder is how it is seen to be saving.
+      const notListening = () => Promise.reject(Object.assign(new Error("not listening"), { code: "ECONNREFUSED" }));
+      const r = await this.waitGone({ alive: () => S.alive(mine), quit: () => (S.listeners(this.rpcPort()).includes(mine) ? this.rpc("quit") : notListening()),
+        signal: (sig) => S.killPid(mine, sig), progressAt: () => this.dbTouchedAt(), savedAt: () => 0 });
+      if (r.signal) this.recordStop(r, undefined);
       if (S.alive(mine)) return "could not stop this app's node left running by an earlier launch (pid " + mine + ")";
-      this.log("[app] stopped this app's node left running by an earlier launch (pid " + mine + ")");
+      this.log("[app] stopped this app's node left running by an earlier launch (pid " + mine + ")" + (r.signal ? ", with " + r.signal : ""));
     }
     for (const { port, what } of this.ports()) {
       let held = S.listeners(port).filter(pid => pid !== process.pid);
@@ -442,11 +461,19 @@ class NodeManager extends EventEmitter {
     return "";
   }
 
-  /** Last resort on the way out of the process: no waiting, no RPC — the node must not outlive us. */
+  /**
+   * On the way out of the process (will-quit, exit), with no time to wait. A normal quit has already stopped the node (main.js
+   * before-quit waits for stop()). A node still here is never killed (0.19.420: this SIGKILL cut a save): one that was told to
+   * quit, or signalled, is left to finish saving and exit by itself; any other is sent SIGTERM, which makes the node run its own
+   * shutdown (Minima.java's shutdown hook: Main.shutdown, every database saved). The pidfile stays, so the next launch finds it
+   * (reclaimStaleNode) and waits for it.
+   */
   killNow() {
     const p = this.proc;
-    if (p) { try { p.kill("SIGKILL"); } catch (e) {} this.proc = null; }
-    try { fs.unlinkSync(this.pidfilePath()); } catch (e) {}
+    if (!p) return;
+    if (!this.quitSent) { try { p.kill("SIGTERM"); } catch (e) {} }
+    this.log("[app] the app is closing with its node still running (pid " + p.pid + "): " + (this.quitSent ? "it was told to quit and is left to finish saving" : "sent SIGTERM, so it saves and stops by itself") + "; the next launch waits for it");
+    this.proc = null;
   }
 
   async start() {
@@ -477,7 +504,7 @@ class NodeManager extends EventEmitter {
     if (argvWhy) { this.lastError = argvWhy; this.log("[app] node NOT started: " + argvWhy); this.setState("error"); return; }
     // A fact of THIS launch, for the first-run seed step (main.js mcd:firstRunSeed, 0.19.220): did the data folder hold no
     // node data (nothing but a key-mode marker) when this launch first started the node? Read once, before java touches it.
-    if (this.freshAtFirstStart == null) { const d = this.dataDir(); let names = []; try { names = fs.readdirSync(d); } catch (e) { names = []; } this.freshAtFirstStart = !names.some(n => !n.startsWith(".") && n !== keymode.MARKER); }
+    if (this.freshAtFirstStart == null) { const d = this.dataDir(); let names = []; try { names = fs.readdirSync(d); } catch (e) { names = []; } this.freshAtFirstStart = !names.some(n => !keymode.appFile(n)); }
     // A block wallet's folder always says so before the node touches it: a folder changed to an empty one had no
     // marker, was read as classic on the next start (locked out), and a lost config would have started it classic.
     if (config.load().keyMode === "block") {
@@ -487,6 +514,7 @@ class NodeManager extends EventEmitter {
     this.setState("starting");
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
+    this.startNotes();   // how the last stop ended, and the MegaMMR it left, before the node reads it
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
@@ -500,7 +528,7 @@ class NodeManager extends EventEmitter {
       this.setState("error");
       return;
     }
-    this.proc = p;
+    this.proc = p; this.quitSent = false; this.savedAt = 0; this.lastOutAt = 0; this.megaChecked = false;
     if (this.walletCheck) this.walletCheck.final = true;   // megammrsync has ended with the old process: what this node holds is the result
     this.startedTs = Date.now();
     const cfg = config.load();
@@ -513,8 +541,9 @@ class NodeManager extends EventEmitter {
     // UTF-8 decoded across chunks (0.19.253, as released 0.18.200): a character split between two chunks was two replacement characters.
     const { StringDecoder } = require("string_decoder"), dec = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
     const text = (k, d) => (typeof d === "string" ? d : dec[k].write(d));
-    p.stdout.on("data", d => { const s = text("out", d); if (!this.proc || this.proc === p) this.nodeSaid("out", s); });
-    p.stderr.on("data", d => { const s = text("err", d); if (!this.proc || this.proc === p) this.nodeSaid("err", s); });
+    // every chunk is a sign of life for a stop that waits on the node (waitGone)
+    p.stdout.on("data", d => { const s = text("out", d); if (!this.proc || this.proc === p) { this.lastOutAt = this.now(); this.nodeSaid("out", s); } });
+    p.stderr.on("data", d => { const s = text("err", d); if (!this.proc || this.proc === p) { this.lastOutAt = this.now(); this.nodeSaid("err", s); } });
     // The unfinished last line of each stream is written out on "close", once both streams have ended (0.19.173). On
     // "exit" the pipes may still hold output: what came after it was kept back for a line end that never comes.
     p.on("close", () => {
@@ -540,27 +569,143 @@ class NodeManager extends EventEmitter {
     this.startHealth();
   }
 
-  /** Graceful stop: RPC quit (clean db close) → SIGTERM fallback. Resolves when the process is gone. */
+  /**
+   * Stop: RPC `quit` (the node saves every database, then exits), and wait for it while it saves (waitGone). Every stop of the
+   * node comes here: Stop, Restart, the node kind, a resync's and an import's restarts, a chat backup, Quit. Resolves when the
+   * process is gone (or, never seen on a real node, when even SIGKILL did not end it). A second stop while one runs waits for it.
+   */
   async stop() {
     await portmap.stop();                               // bounded (<~3s); re-mapped on the next start()
+    if (this.stopRun) return this.stopRun;
     if (!this.proc) { this.setState("stopped"); return; }
+    this.stopRun = this.stopInner().finally(() => { this.stopRun = null; });
+    return this.stopRun;
+  }
+  async stopInner() {
+    const p = this.proc, mega = this.health ? !!this.health.megammr : undefined;   // read before stopHealth() clears it
     this.setState("stopping");
     this.stopHealth();
     // The engines finish what they have at the node BEFORE it is told to quit (main.js onStopping; each wait is bounded
     // by its owner, and 30 s here in any case): a transaction posted in the node's last second is then recorded.
     if (typeof this.onStopping === "function") { try { await Promise.race([this.onStopping(), sleep(30_000)]); } catch (e) {} }
-    // Bounded, always. The interval used to clear ONLY when this.proc went null, so if neither signal reaped
-    // the child (an unkillable/zombie process, or kill() throwing EPERM) this promise never settled — and
-    // before-quit awaits it after preventDefault(), so the app hung on quit with no window to close.
-    const gone = new Promise(res => {
-      const t = setTimeout(() => { try { this.proc && this.proc.kill("SIGTERM"); } catch (e) {} }, 12_000);
-      const t2 = setTimeout(() => { try { this.proc && this.proc.kill("SIGKILL"); } catch (e) {} }, 25_000);
-      const deadline = setTimeout(() => { finish(); }, 35_000);
-      const iv = setInterval(() => { if (!this.proc) finish(); }, 300);
-      const finish = () => { clearTimeout(t); clearTimeout(t2); clearTimeout(deadline); clearInterval(iv); res(); };
-    });
-    try { await this.rpc("quit"); } catch (e) { /* fall through to signals */ }
-    await gone;
+    // what the MegaMMR holds now, kept for the next start's check (recordStop): null = no MegaMMR, undefined = not known
+    const coins = mega === false ? null : mega ? await this.megaCoins() : undefined;
+    this.log("[app] stopping the node: `quit` sent. It saves every database before it exits; it is waited for while it does (a MegaMMR takes a minute or two)");
+    // quitSent: the node may be saving because of us, so the app's own exit never signals it (killNow)
+    const r = await this.waitGone({ alive: () => this.proc === p, quit: () => { this.quitSent = true; return this.rpc("quit").catch((e) => { if (refusedErr(e)) this.quitSent = false; throw e; }); },
+      signal: (sig) => { this.quitSent = true; try { p.kill(sig); } catch (e) {} },
+      progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => this.savedAt || 0,
+      saving: () => { this.stopNote = SAVING_NOTE; this.emit("status", this.snapshot()); } });
+    this.stopNote = "";
+    this.recordStop(r, coins);
+    if (this.proc === p) this.log("[app] the node process (pid " + p.pid + ") did not end even after SIGKILL");
+    this.emit("status", this.snapshot());
+  }
+
+  /**
+   * Wait for a node process to end after it was told to quit. o = { alive(), quit() → promise, signal(sig), progressAt() → ms of
+   * its last output or database write, savedAt() → ms it said it had saved (0: not said), saving() → the wait is long enough to
+   * say so }. `quit` is sent once, and again every quitRetryMs while nothing listens (a node still booting); any other failure,
+   * a timeout above all, may be the node saving before it answers, so it is not sent again. Signals, only:
+   *  - SIGTERM afterSavedMs after the node said it has saved (megammrsync and the like save, then sit there): nothing is cut;
+   *  - SIGTERM after silenceMs with no output and no database write: the node is taken to be hung (this can cut a save);
+   *  - SIGKILL termGraceMs after a SIGTERM with no sign of life since; then killGraceMs more and it is given up.
+   * → { signal: "" | "SIGTERM" | "SIGKILL", cut: a signal was needed while the node had not said it had saved }.
+   */
+  async waitGone(o) {
+    const T = this.stopTimes, S = this.sys, t0 = this.now();
+    let quit = "", lastTry = -Infinity, termAt = 0, killAt = 0, said = false;
+    while (o.alive()) {
+      const now = this.now();
+      if (!quit && !termAt && o.quit && now - lastTry >= T.quitRetryMs) {
+        lastTry = now; quit = "sent";
+        Promise.resolve().then(o.quit).then(() => { quit = "answered"; }, (e) => { quit = refusedErr(e) ? "" : "unanswered"; });
+      }
+      if (!said && now - t0 >= T.noteAfterMs) { said = true; if (o.saving) o.saving(); }
+      const saved = o.savedAt(), quiet = now - Math.max(t0, o.progressAt() || 0, termAt, killAt);
+      if (!termAt && saved && now - Math.max(t0, saved) >= T.afterSavedMs) {
+        termAt = now; this.log("[app] the node has saved and has not exited by itself: SIGTERM"); o.signal("SIGTERM");
+      } else if (!termAt && quiet >= T.silenceMs) {
+        termAt = now; this.log("[app] the node has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes since it was told to quit: SIGTERM (it may not have saved everything)"); o.signal("SIGTERM");
+      } else if (termAt && !killAt && quiet >= T.termGraceMs) {
+        killAt = now; this.log("[app] the node did not end after SIGTERM: SIGKILL"); o.signal("SIGKILL");
+      } else if (killAt && now - killAt >= T.killGraceMs) break;
+      await S.sleep(T.pollMs);
+    }
+    const signal = killAt ? "SIGKILL" : termAt ? "SIGTERM" : "";
+    return { signal, cut: !!signal && !o.savedAt() };
+  }
+  now() { return (this.sys.now || Date.now)(); }
+
+  /** The newest change in the node's databases folders (<data>/<version>/databases), in ms; 0 when there is none to read. A save writes there. */
+  dbTouchedAt() {
+    let at = 0;
+    const d = this.dataDir();
+    let vers = []; try { vers = fs.readdirSync(d); } catch (e) { return 0; }
+    for (const v of vers) {
+      const db = path.join(d, v, "databases");
+      let names; try { names = fs.readdirSync(db); at = Math.max(at, fs.statSync(db).mtimeMs); } catch (e) { continue; }
+      for (const n of names) { try { at = Math.max(at, fs.statSync(path.join(db, n)).mtimeMs); } catch (e) {} }
+    }
+    return at;
+  }
+  /** The node's MegaMMR file (<data>/<version>/databases/megammr.mmr), or "". */
+  megammrFile() {
+    const d = this.dataDir();
+    let vers = []; try { vers = fs.readdirSync(d); } catch (e) { return ""; }
+    for (const v of vers) { const f = path.join(d, v, "databases", "megammr.mmr"); try { if (fs.statSync(f).isFile()) return f; } catch (e) {} }
+    return "";
+  }
+  /** How many coins the running node's MegaMMR holds (`megammr`, action info): a number, null when it keeps none, undefined when not known. */
+  async megaCoins() {
+    try {
+      const r = await Promise.race([this.rpc("megammr"), sleep(10_000).then(() => null)]), x = r && r.status === true && r.response;
+      if (!x) return undefined;
+      return x.enabled === true ? (Number.isFinite(Number(x.coins)) ? Number(x.coins) : undefined) : null;
+    } catch (e) { return undefined; }
+  }
+  readShutdown() { try { const j = JSON.parse(fs.readFileSync(path.join(this.dataDir(), SHUTDOWN_FILE), "utf8")); return j && typeof j === "object" ? j : {}; } catch (e) { return {}; } }
+  /**
+   * How a stop ended, in the data folder (SHUTDOWN_FILE). A stop that needed a signal before the node said it had saved is
+   * recorded as cut, and the next start says so. A clean stop records what the MegaMMR held (its coins, and the file's size) as
+   * the figures the next start compares with, unless this node start already found the MegaMMR short: those stay until it is whole.
+   */
+  recordStop(r, coins) {
+    const rec = this.readShutdown();
+    if (r.cut) {
+      rec.cut = { signal: r.signal, at: new Date().toISOString() };
+      this.log("[app] the node's shutdown was CUT SHORT (" + r.signal + " before it said it had saved): the next start says so");
+    } else {
+      rec.cut = null;
+      if (coins === null) rec.ref = null;
+      else if (typeof coins === "number" && !this.megaShort) {
+        const f = this.megammrFile(); let size = 0; try { size = f ? fs.statSync(f).size : 0; } catch (e) {}
+        rec.ref = { coins, size, at: new Date().toISOString() };
+      }
+      this.log("[app] the node stopped cleanly" + (r.signal ? " (it had saved; " + r.signal + " ended it)" : ""));
+    }
+    try { fs.writeFileSync(path.join(this.dataDir(), SHUTDOWN_FILE), JSON.stringify(rec, null, 2)); } catch (e) { this.log("[app] how the node stopped could not be recorded: " + e.message); }
+  }
+  /** Before the node starts: was its last stop cut short, and is its MegaMMR file far smaller than at the last clean stop? Said, never acted on. */
+  startNotes() {
+    const rec = this.readShutdown(), notes = [];
+    this.megaShort = false;
+    if (rec.cut && rec.cut.signal) notes.push("The node's last shutdown was cut short (" + rec.cut.signal + ") before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.");
+    const ref = rec.ref, f = ref && ref.size > 0 ? this.megammrFile() : "";
+    let size = 0; try { size = f ? fs.statSync(f).size : 0; } catch (e) {}
+    if (f && size < ref.size / 2) { this.megaShort = true; notes.push("Your MegaMMR looks incomplete (" + size + " bytes, was " + ref.size + " bytes): import the MegaMMR file again."); }
+    this.shutdownNotes = notes;
+    for (const n of notes) this.log("[app] " + n);
+  }
+  /** Once the node runs: is its MegaMMR far short of the coins it held at the last clean stop? Said, never acted on. */
+  async megaCoinsCheck() {
+    const ref = this.readShutdown().ref;
+    if (!ref || !(ref.coins > 0)) return;
+    const n = await this.megaCoins();
+    if (typeof n !== "number" || n >= ref.coins / 2) return;
+    this.megaShort = true;
+    const note = "Your MegaMMR looks incomplete (" + n + " coins, was " + ref.coins + "): import the MegaMMR file again.";
+    this.shutdownNotes = this.shutdownNotes.concat(note); this.log("[app] " + note); this.emit("status", this.snapshot());
   }
 
   /**
@@ -767,6 +912,7 @@ class NodeManager extends EventEmitter {
         // ...and, after a wallet-replacing megammrsync, is the wallet another one? (the old stores are set aside first)
         if (this.walletCheck && !(await this.walletSettle())) return;
         if (!this.proc || this.state === "stopping") return;
+        if (!this.megaChecked) { this.megaChecked = true; this.megaCoinsCheck().catch(() => {}); }   // once per start: the MegaMMR against the last clean stop
         if (this.state !== "running") this.setState("running");
         else this.emit("status", this.snapshot());
       } catch (e) { /* still booting or busy — keep the current state */ }
@@ -782,6 +928,7 @@ class NodeManager extends EventEmitter {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
              jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || (m ? "importing" : ""))(config.load().megammrImport), megafileBanner: this.megafileBanner || null, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
+             stopNote: this.state === "stopping" ? this.stopNote : "", shutdownNotes: this.shutdownNotes.slice(),
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
@@ -832,6 +979,9 @@ class NodeManager extends EventEmitter {
       return;
     }
     try { this.watchParlonsLine(l); } catch (e) {}
+    // The node says it has saved (SAVED_LINE): a stop may then end a process that does not exit by itself (waitGone).
+    // ponytail: believed from any point of the run; a peer able to print a whole node line could make a stop signal early.
+    if (this.proc && SAVED_LINE.test(l)) this.savedAt = this.now();
     // The node says so itself, as it opens its databases and before it loads the wallet: block mode is ON. For a
     // classic wallet that is the forbidden start, caught earlier than any RPC could answer. Believed ONLY as the whole
     // line core prints, and ONLY before this start's first answered health poll: a running node no longer prints it,
@@ -895,5 +1045,5 @@ class NodeManager extends EventEmitter {
 }
 
 module.exports = new NodeManager();
-module.exports.BLOCK_BOOT_LINE = BLOCK_BOOT_LINE;
+module.exports.BLOCK_BOOT_LINE = BLOCK_BOOT_LINE; module.exports.SAVED_LINE = SAVED_LINE; module.exports.SAVING_NOTE = SAVING_NOTE; module.exports.SHUTDOWN_FILE = SHUTDOWN_FILE;
 module.exports.MEGAMMR_BROKEN_HINT = MEGAMMR_BROKEN_HINT; module.exports.CASCADE_BROKEN_HINT = CASCADE_BROKEN_HINT;

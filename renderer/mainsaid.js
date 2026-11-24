@@ -206,6 +206,11 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["NODE_MEGAMMR_BROKEN", I18N.N_("This node's MegaMMR does not fit its chain (the node says \"Your MEGAMMR is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. Press Turn MegaMMR off on this Node tab: the MegaMMR file is deleted and the node starts again as a light node.")],
     ["NODE_CASCADE_BROKEN", I18N.N_("This node's chain files do not fit together (the node says \"Your Cascade is BROKEN\"), so the node stops at every start. Your wallet, keys and funds are not touched. In Startup Params, set Rescue node to a MegaMMR node (host:port, the one Resync node uses) and press Save, then press Start again: the node rebuilds its chain from that node and stops. Then press Start again once more.")],
     ["NODE_HINT_DB", I18N.N_("another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first")],
+    // ---- Stopping the node while it saves, and what a start says about the last stop (main/node-manager.js, 0.19.420) ----
+    ["NODE_SAVING", I18N.N_("The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.")],
+    ["NODE_CUT", I18N.N_("The node's last shutdown was cut short ({signal}) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.")],
+    ["NODE_MEGA_SIZE", I18N.N_("Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.")],
+    ["NODE_MEGA_COINS", I18N.N_("Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again.")],
     ["PARLONS_SOLO", I18N.N_("The Parlons Node is a mainnet node: a solo/private network needs the plain Minima node.")],
     ["PARLONS_DBPASSWORD", I18N.N_("The Parlons Node cannot take -dbpassword (a wallet DB password): keep the plain Minima node, or set up again without one.")],
     ["PARLONS_NO_JAR", I18N.N_("parlons-node.jar is not bundled in this build.")],

@@ -80,7 +80,7 @@ test("wiring: one gather for Shutdown and Quit; the quit is asked before the nod
   assert.match(main, /powerMonitor\.on\("shutdown", \(\) => \{ systemQuit\.mark\(\); \}\)/); assert.match(main, /w\.on\("session-end", \(\) => \{ systemQuit\.mark\(\); \}\)/);
   assert.match(main, /const systemQuit = inflight\.recently\(\);/); assert.ok(!/systemQuit = true|os: systemQuit,|\|\| systemQuit;/.test(main), "no flag that stays set for the session");
   assert.match(main, /buttons: \[lang\.t\("Quit anyway"\), lang\.t\("Stay open"\)\], defaultId: 1, cancelId: 1/, "Enter and Esc both stay open");
-  assert.match(main, /win\.on\("close", e => \{ if \(quitting\) return; e\.preventDefault\(\); if \(process\.platform === "darwin"\) win\.hide\(\); else app\.quit\(\); \}\);/, "off the Mac, closing the window asks through the same quit");
+  assert.match(main, /win\.on\("close", e => \{ if \(quitting\) \{ if \(quitStopping\) e\.preventDefault\(\); return; \} e\.preventDefault\(\); if \(process\.platform === "darwin"\) win\.hide\(\); else app\.quit\(\); \}\);/, "off the Mac, closing the window asks through the same quit; while a Quit waits for the node to save, it stays (0.19.420)");
   assert.match(main, /node\.onStopping = \(\) => Promise\.all\(\[dexicon\.stop\(\), atomix\.quiet\(10000\), pandapools\.quiet\(10000\)\]\);/, "the bounded drain every quit goes through (0.18.117)");
 });
 

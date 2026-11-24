@@ -1,7 +1,7 @@
 {
   "name": "minimacore-desktop",
   "productName": "minimaCore",
-  "version": "0.19.419",
+  "version": "0.19.420",
   "description": "Cross-platform (macOS/Windows/Linux) wrapper for the minimaCore node — runs the bundled minima.jar locally, with the native-styled self-custody wallet UI over the node's RPC.",
   "author": "eurobuddha",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "dist:mac:signed": "KEETS_REQUIRE_DEPS=1 node --test scripts/keets-test.cjs && APPLE_KEYCHAIN_PROFILE=minimadesk npm run dist:mac && scripts/notarize-dmg.sh && scripts/verify-mac.sh",
     "dist:win": "electron-builder --win",
     "dist:pandamonium": "node scripts/build-flavor.cjs pandamonium",
-    "test:flavor": "node --test scripts/flavor-test.cjs",
+    "test:flavor": "node --test scripts/flavor-test.cjs scripts/lifecycle-test.cjs",
     "dist:linux": "electron-builder --linux",
     "test:node-log": "node scripts/node-log-test.cjs",
     "test:loginitem": "node --test scripts/loginitem-test.cjs",

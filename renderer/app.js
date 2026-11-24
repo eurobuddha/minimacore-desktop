@@ -226,6 +226,7 @@ function onStatus(s) {
   if (activeView === "node") renderNode(s);
   if (s.megammrBroken && s.bootTs && megaBrokenSaid !== s.bootTs && megaBrokenSeen() !== String(s.bootTs)) { megaBrokenSaid = s.bootTs; megaBrokenSeen(String(s.bootTs)); megammrBrokenNotice(); }   // once per node start, whichever window
   paintMegaBar(s);
+  paintNoteBar(s);
   if (activeView === "backup" && BK_PAGE === "megafile") paintImportProgress(s);   // every step of a MegaMMR file import, on its own screen
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
@@ -846,6 +847,17 @@ function paintMegaBar(s) {
   const host = el("megaBarBtns"); host.textContent = "";
   btns.forEach(([label, fn], i) => { const x = document.createElement("button"); x.className = "btn btn--sm " + (i ? "btn--outline" : "btn--primary"); x.textContent = label; x.disabled = s.state !== "running" && !MEGA_NODELESS.includes(fn);   // main needs no node for these (megaDismiss says why it needs one)
     x.onclick = async () => { x.disabled = true; try { await fn(); } finally { x.disabled = false; } }; host.appendChild(x); });
+}
+/** What main says about saving (0.19.420): while a stop waits for the node to write its databases, and, from a start on, that the last
+ *  stop was cut short or the MegaMMR looks incomplete. Each sentence through MainSaid; the second kind can be put away for this node start. */
+let noteBarOff = 0;
+function paintNoteBar(s) {
+  const saving = s && s.state === "stopping" && s.stopNote ? [s.stopNote] : [], after = s && Array.isArray(s.shutdownNotes) && s.bootTs !== noteBarOff ? s.shutdownNotes : [];
+  const lines = saving.length ? saving : after, bar = el("noteBar");
+  bar.hidden = !lines.length; if (!lines.length) return;
+  el("noteBarText").textContent = lines.map((l) => MainSaid.say(l)).join(" ");
+  const ok = el("noteBarOk"); ok.hidden = !!saving.length; ok.textContent = t("OK");
+  ok.onclick = () => { noteBarOff = s.bootTs; bar.hidden = true; };
 }
 /** The banner's buttons main can do with the node stopped (keep and Turn MegaMMR off need no node; megaDismiss says the balance needs it). */
 const MEGA_NODELESS = [megammrOffNow, megaKeepAsk, megaOffResync, megaDismiss, megaKeepEmptyAsk];

@@ -56,8 +56,10 @@ function jarSupportsBlock(jarPath) {
 /** What a data folder already holds: "block" (its marker says so), "classic" (node data, no marker) or "" (nothing yet). */
 function folderKeyMode(dir) {
   try { if (fs.readFileSync(path.join(dir, MARKER), "utf8").trim() === "block") return "block"; } catch (e) { /* no marker */ }
-  try { return fs.readdirSync(dir).some(n => !n.startsWith(".") && n !== MARKER) ? "classic" : ""; } catch (e) { return ""; }
+  try { return fs.readdirSync(dir).some(n => !appFile(n)) ? "classic" : ""; } catch (e) { return ""; }
 }
+/** A file the APP keeps in the node's data folder (this marker, minimacore-shutdown.json, …), or a hidden one: never node data. */
+function appFile(n) { return n.startsWith(".") || n.startsWith("minimacore-"); }
 function markBlockFolder(dir) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, MARKER), "block\n");
@@ -189,4 +191,4 @@ function startProblem(o) {
   return "";
 }
 
-module.exports = { jarSupportsBlock, folderKeyMode, markBlockFolder, startFlags, startProblem, argvProblem, keysMode, nodeTokens, childEnv, readZipEntry, MARKER };
+module.exports = { jarSupportsBlock, folderKeyMode, appFile, markBlockFolder, startFlags, startProblem, argvProblem, keysMode, nodeTokens, childEnv, readZipEntry, MARKER };

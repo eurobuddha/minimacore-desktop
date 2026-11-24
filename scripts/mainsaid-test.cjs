@@ -158,6 +158,9 @@ test("node start, node kind, wallet replacement, config: each listed sentence is
     "The trading engines could not be stopped (busy), so the wallet was not replaced. Nothing was changed.", "timeout. The node did not answer, and it may still be resyncing: watch the Logs, and restart the node when it says it has finished.",
     "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.", "-blockaskeyuses cannot be set in the extra arguments. The wallet's key mode sets it.", "-rpc cannot be set in the extra arguments. The app sets it itself.", "Unknown key mode.",
     "The node in this version of the app cannot run a block key wallet.", "This wallet uses block key uses, and that node cannot run it.", "Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first."]) check(s);
+  // a stop while the node saves, and what the next start says about it (0.19.420)
+  for (const s of [require("../main/node-manager.js").SAVING_NOTE, "The node's last shutdown was cut short (SIGKILL) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.",
+    "Your MegaMMR looks incomplete (51490816 bytes, was 1610612736 bytes): import the MegaMMR file again.", "Your MegaMMR looks incomplete (61 coins, was 663414): import the MegaMMR file again."]) check(s);
   // the program on the port is a value: kept as it came
   I18N.set("ru"); assert.ok(MS.say("Port 9001 (the node's RPC) is in use by /usr/bin/java -jar x.jar (pid 77). minimaCore did not start its node and did not touch that program. Stop that program, or choose another base port in Startup Params.").includes("/usr/bin/java -jar x.jar")); I18N.set("en");
 });

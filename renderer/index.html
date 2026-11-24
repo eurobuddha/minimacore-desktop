@@ -76,6 +76,8 @@
       <div class="stopbar" id="stopBar" role="status" hidden><span>The node is stopped. Balances, swaps, pools, mail and chat are offline until it starts.</span><button class="btn btn--primary btn--sm" id="stopStart">Start node</button></div>
       <!-- An unfinished MegaMMR file import (main/megammrfile.js): its words and button are set by renderer/app.js paintMegaBar. -->
       <div class="stopbar" id="megaBar" role="alert" hidden><span id="megaBarText"></span><span class="megabar__btns" id="megaBarBtns"></span></div>
+      <!-- The node is saving while it stops, or its last stop was cut short (main/node-manager.js stopNote, shutdownNotes): set by renderer/app.js paintNoteBar. -->
+      <div class="stopbar" id="noteBar" role="status" hidden><span id="noteBarText"></span><button class="btn btn--outline btn--sm" id="noteBarOk" hidden>OK</button></div>
 
       <main class="main" id="main">
       <section class="view view--active" id="view-balances">

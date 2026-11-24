@@ -5934,3 +5934,14 @@
   "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.",
   "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.": "Вузол зберігає свої дані: з MegaMMR це може тривати хвилину-дві. Не завершуйте застосунок примусово.",
+  "The node's last shutdown was cut short ({signal}) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.": "Останнє завершення роботи вузла було перервано ({signal}) до того, як він усе зберіг. Якщо він зберігає MegaMMR, цей файл може бути неповним.",
+  "Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.": "Ваш MegaMMR, схоже, неповний ({size} байтів, було {was} байтів): імпортуйте файл MegaMMR знову.",
+  "Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again.": "Ваш MegaMMR, схоже, неповний (монет: {n}, було {m}): імпортуйте файл MegaMMR знову."
+}, { review: [
+  "The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.",
+  "The node's last shutdown was cut short ({signal}) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.",
+  "Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.",
+  "Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again."
+] });

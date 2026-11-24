@@ -5921,3 +5921,14 @@
   "This command holds \";\", a line break or a NUL character. The node runs what follows a \";\" as another command: send the commands one at a time. Nothing was sent.",
   "A command holding \";\", a line break or a NUL character was refused, so nothing was sent to the node. Text from outside this app may be trying to run a command of its own: if this repeats, stop the node and report it."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.": "节点正在保存数据：如果使用 MegaMMR，这可能需要一两分钟。请勿强制退出。",
+  "The node's last shutdown was cut short ({signal}) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.": "节点上次关闭时在保存完所有数据之前被中断（{signal}）。如果它保存了 MegaMMR，该文件可能不完整。",
+  "Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.": "您的 MegaMMR 似乎不完整（{size} 字节，之前为 {was} 字节）：请重新导入 MegaMMR 文件。",
+  "Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again.": "您的 MegaMMR 似乎不完整（{n} 个币，之前为 {m} 个）：请重新导入 MegaMMR 文件。"
+}, { review: [
+  "The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.",
+  "The node's last shutdown was cut short ({signal}) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.",
+  "Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.",
+  "Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again."
+] });

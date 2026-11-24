@@ -163,7 +163,8 @@ function manager(id, world) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flavor-node-")), b = build(id, { appData: dir, packaged: false });
   const cfg = b.load("config.js"); cfg.rpcSecret = () => "test-secret";
   const m = b.load("node-manager.js"), signals = [], rpc = [];
-  m.sys = { sleep: async () => {}, alive: (pid) => !!world.procs[pid], commandOf: (pid) => world.procs[pid] || "",
+  let clock = Date.now();   // a clock the stand-in sleep moves: reclaim waits minutes for a node that may be saving (0.19.420)
+  m.sys = { now: () => clock, sleep: async (ms) => { clock += ms; }, alive: (pid) => !!world.procs[pid], commandOf: (pid) => world.procs[pid] || "",
     listeners: (port) => Object.keys(world.ports).filter(p => Number(p) === port).map(p => world.ports[p]),
     killPid: (pid, sig) => { signals.push([pid, sig]); if (world.dieOn === sig || world.dieOn === "any") { delete world.procs[pid]; for (const p of Object.keys(world.ports)) if (world.ports[p] === pid) delete world.ports[p]; } } };
   m.rpc = async (c) => { rpc.push(c); if (c === "quit" && world.quitWorks) { const pid = world.ports[m.rpcPort()]; delete world.procs[pid]; for (const p of Object.keys(world.ports)) if (world.ports[p] === pid) delete world.ports[p]; } return { status: true }; };
@@ -233,7 +234,7 @@ test("reclaim never signals a foreign pid: only the pid in this profile's own pi
     }
   }
   const src = fs.readFileSync(path.join(ROOT, "main/node-manager.js"), "utf8"), fn = src.slice(src.indexOf("  async reclaimStaleNode() {"), src.indexOf("  /** Last resort on the way out"));
-  assert.equal((fn.match(/killPid\(/g) || []).length, 2); assert.ok(!/killPid\((?!mine,)/.test(fn), "every signal in reclaim goes to `mine`");
+  assert.equal((fn.match(/killPid\(/g) || []).length, 1); assert.ok(!/killPid\((?!mine,)/.test(fn), "every signal in reclaim goes to `mine`");   // one call site since 0.19.420 (waitGone decides when)
   assert.ok(!/-port |parlons\.node\.port/.test(fn), "a node is no longer called ours for the port it listens on");
 });
 
