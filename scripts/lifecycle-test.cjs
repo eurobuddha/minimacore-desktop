@@ -32,12 +32,12 @@ function fresh(times) {
   USERDATA = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-test-"));
   config.recordKeyMode("classic"); config.save({ setupDone: true, walletDone: true, nodeKind: "minima", basePort: 29500 });
   m.stopTimes = Object.assign({}, real.stopTimes, times || {});
-  m.keyModeAlert = ""; m.proc = null; m.state = "stopped"; m.stopRun = null; m.shutdownNotes = [];
+  m.keyModeAlert = ""; m.proc = null; m.state = "stopped"; m.stopRun = null; m.shutdownNotes = []; m.logs = [];
 }
-/** A start of node-manager whose "java" is the stand-in: argv after the script = the stand-in's own (saveMs, pieces, quiet, hang). */
-async function startStandin(saveMs, pieces, quiet, hang) {
+/** A start of node-manager whose "java" is the stand-in: argv after the script = the stand-in's own (saveMs, pieces, quiet, hang, forge). */
+async function startStandin(saveMs, pieces, quiet, hang, forge) {
   const seen = { lines: "", quits: 0, statuses: [] };
-  m.spawnFn = (_cmd, _args, opts) => { const c = spawn(process.execPath, [STANDIN, dataDir(), String(saveMs), String(pieces), quiet ? "1" : "0", hang ? "1" : "0"], opts); children.push(c); seen.child = c;
+  m.spawnFn = (_cmd, _args, opts) => { const c = spawn(process.execPath, [STANDIN, dataDir(), String(saveMs), String(pieces), quiet ? "1" : "0", hang ? "1" : "0", "0", forge || ""], opts); children.push(c); seen.child = c;
     c.stdout.on("data", (d) => { seen.lines += d; }); c.on("exit", (code, sig) => { seen.exit = { code, sig }; }); return c; };
   m.startHealth = () => {}; m.reclaimStaleNode = async () => "";
   // `quit` over RPC: the node runs its whole shutdown, then answers (the stand-in is told by SIGUSR2)
@@ -92,7 +92,7 @@ test("a node that has saved and sits there (megammrsync, restore, archive) is en
   fresh({ silenceMs: 60_000, afterSavedMs: 300 });
   const s = await startStandin(500, 2, false, false);
   try {
-    s.child.kill("SIGUSR1");
+    m.shutCmdAt = m.now(); s.child.kill("SIGUSR1");   // as runResync marks the command that shuts the node's insides down (0.19.429)
     for (let i = 0; i < 200 && !/Main Instance Cleared/.test(s.lines); i++) await wait(20);
     await wait(100);
     const t0 = Date.now(); await m.stop(); const took = Date.now() - t0;
@@ -100,6 +100,50 @@ test("a node that has saved and sits there (megammrsync, restore, archive) is en
     assert.equal(s.exit.code, 143); assert.equal(size(), 2 * PIECE);
     assert.equal(record().cut, null, "it had saved: a clean stop");
   } finally { s.off(); restore(); }
+});
+
+// 0.19.429 (review, MAJOR, RAN): core logs a peer's failing script as it came, line ends included, so a peer can make the node print a
+// whole "Main Instance Cleared.." line. It was believed from any point of the run: the next stop then sent SIGTERM afterSavedMs in,
+// while megammr.mmr was being written (the reviewer's probe: 10000 of 40000 bytes, recorded as clean).
+test("a \"saved\" line the node printed EARLIER in the run (a peer's script, logged with its line ends) does not make the next stop signal: the save is whole", { timeout: 60_000 }, async () => {
+  fresh({ silenceMs: 3_000, afterSavedMs: 300 });
+  const s = await startStandin(6_000, 12, true, false, "run");
+  try {
+    for (let i = 0; i < 100 && !/\nMinima @ [^\n]* : Main Instance Cleared\.\.\n/.test(s.lines); i++) await wait(20);
+    assert.match(s.lines, /Script FAIL input:0 RETURN FALSE \/\*\nMinima @ [^\n]* : Main Instance Cleared\.\.\n/, "the stand-in printed the forged line mid-run");
+    await wait(100); assert.ok(m.savedAt > 0, "the line was read as a whole node line (it is one)");
+    await m.stop();
+    assert.equal(size(), 12 * PIECE, "megammr.mmr is whole");
+    assert.deepEqual(s.exit, { code: 0, sig: null }, "the node exited by itself");
+    assert.ok(!m.logs.some((l) => /SIGTERM|SIGKILL/.test(l) && /^\[app\]/.test(l)), "no signal");
+    assert.equal(record().cut, null);
+  } finally { s.off(); restore(); }
+});
+
+test("a \"saved\" line printed while megammr.mmr is still being written for 20 s is not acted on: the file's own writes keep the stop waiting", { timeout: 90_000 }, async () => {
+  fresh({ silenceMs: 3_000, afterSavedMs: 1_500 });
+  const s = await startStandin(20_000, 40, true, false, "save");
+  try {
+    const t0 = Date.now(); await m.stop(); const took = Date.now() - t0;
+    assert.match(s.lines, /Saving all db\n[^\n]*Script FAIL input:0 RETURN FALSE \/\*\nMinima @ [^\n]* : Main Instance Cleared\.\.\n/, "the forged line came after `quit`, during the save");
+    assert.ok(took >= 19_000, "it waited for the save (" + took + " ms)");
+    assert.equal(size(), 40 * PIECE, "megammr.mmr is whole");
+    assert.deepEqual(s.exit, { code: 0, sig: null });
+    assert.ok(!m.logs.some((l) => /SIGTERM|SIGKILL/.test(l) && /^\[app\]/.test(l)), "no signal");
+    assert.equal(record().cut, null);
+  } finally { s.off(); restore(); }
+});
+
+test("waitGone: after \"saved\", SIGTERM waits for afterSavedMs with no output and no database write; that signal is not a cut", async () => {
+  fresh({ silenceMs: 60_000, afterSavedMs: 300, pollMs: 20, quitRetryMs: 1e9 });
+  // the node here is a stand-in for the loop alone: it said "saved" at once, went on writing for 600 ms, then sat there until signalled
+  const t0 = Date.now(), sigs = []; let gone = false;
+  const r = await m.waitGone({ alive: () => !gone, quit: async () => ({}), signal: (sig) => { sigs.push([sig, Date.now() - t0]); gone = true; },
+    progressAt: () => Math.min(Date.now(), t0 + 600), savedAt: () => t0 + 1 });
+  restore();
+  assert.equal(sigs.length, 1); assert.equal(sigs[0][0], "SIGTERM");
+  assert.ok(sigs[0][1] >= 880, "not before its last write + afterSavedMs (sent at " + sigs[0][1] + " ms; the old code sent it at 300 ms)");
+  assert.deepEqual(r, { signal: "SIGTERM", cut: false });
 });
 
 test("`quit` is sent again while the node is still booting (nothing on its RPC port yet), and the node then saves and exits", { timeout: 30_000 }, async () => {

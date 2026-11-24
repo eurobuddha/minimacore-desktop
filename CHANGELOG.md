@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.429] — A "saved" line from earlier in the run never makes a stop signal the node
+
+- Independent review of 0.19.428 (MAJOR, the reviewer ran it). Core logs a peer's failing script as it came, line ends included (TxPoWChecker "Script FAIL input:…"), so a peer can make the node print a whole `Minima @ … : Main Instance Cleared..` line. The app believed such a line from any point of the run: the NEXT stop then sent SIGTERM 5 s in, while megammr.mmr was being written (probe: 10000 of 40000 bytes), and recorded the stop as clean.
+- main/node-manager.js: a "saved" line counts for a stop only when it came AFTER that stop first sent `quit` (or a signal), or after a command that shuts the node's insides down was sent (runResync: megammrsync, restore, archive, a MegaMMR import). And the signal after "saved" also waits for 5 s with no output and no database write (a megammr.mmr being written keeps its own mtime fresh). A stop is recorded as clean only when its signal went on that quiet path, or the node said it had saved after the signal (its own shutdown hook).
+- Limit to know: a node that has saved and sits there (after megammrsync) but keeps printing more often than every 5 s is not signalled by this rule.
+- Tests: scripts/lifecycle-test.cjs, three new (all fail on 0.19.428: megammr.mmr 1000 of 12000 bytes; SIGTERM during the 20 s write; SIGTERM at 306 ms).
+
 ## [0.19.428] — A page newscript never touches one of this wallet's own addresses
 
 - Full review 23 Nov 2026 (MAJOR), the part 0.19.424 left owed; as DexiconPro 0.2.183. The node's `newscript` REPLACES its row for a script's address (simple:false, key 0x00, the caller's trackall). A page that had been taken over could register `RETURN SIGNEDBY(<one of our keys>)` untracked: our own address stopped being ours, and its coins left the balance until a seed restore.

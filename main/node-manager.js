@@ -535,7 +535,7 @@ class NodeManager extends EventEmitter {
       this.setState("error");
       return;
     }
-    this.proc = p; this.quitSent = false; this.savedAt = 0; this.lastOutAt = 0; this.megaChecked = false;
+    this.proc = p; this.quitSent = false; this.savedAt = 0; this.shutCmdAt = 0; this.lastOutAt = 0; this.megaChecked = false;
     if (this.walletCheck) this.walletCheck.final = true;   // megammrsync has ended with the old process: what this node holds is the result
     this.startedTs = Date.now();
     const cfg = config.load();
@@ -599,9 +599,16 @@ class NodeManager extends EventEmitter {
     const coins = mega === false ? null : mega ? await this.megaCoins() : undefined;
     this.log("[app] stopping the node: `quit` sent. It saves every database before it exits; it is waited for while it does (a MegaMMR takes a minute or two)");
     // quitSent: the node may be saving because of us, so the app's own exit never signals it (killNow)
-    const r = await this.waitGone({ alive: () => this.proc === p, quit: () => { this.quitSent = true; return this.rpc("quit").catch((e) => { if (refusedErr(e)) this.quitSent = false; throw e; }); },
-      signal: (sig) => { this.quitSent = true; try { p.kill(sig); } catch (e) {} },
-      progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => this.savedAt || 0,
+    // A "saved" line is THIS stop's only when it came after this stop first sent `quit` or a signal, or after a command that shuts the
+    // node's insides down was sent (runResync: megammrsync, restore, archive, a MegaMMR import): never one from earlier in the run
+    // (0.19.429: core logs a peer's failing script as it came, line ends included, so a peer can make the node print a whole such line).
+    let from = this.shutCmdAt || 0;
+    const mark = () => { if (!from) from = this.now(); };
+    const closed = new Promise((res) => { try { p.once("close", res); } catch (e) { res(); } });   // its last lines are read before the stop is judged
+    const r = await this.waitGone({ alive: () => this.proc === p, quit: () => { mark(); this.quitSent = true; return this.rpc("quit").catch((e) => { if (refusedErr(e)) this.quitSent = false; throw e; }); },
+      signal: (sig) => { mark(); this.quitSent = true; try { p.kill(sig); } catch (e) {} },
+      progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => (from && this.savedAt > from ? this.savedAt : 0),
+      settled: () => Promise.race([closed, sleep(2_000)]),
       saving: () => { this.stopNote = SAVING_NOTE; this.emit("status", this.snapshot()); } });
     this.stopNote = "";
     this.recordStop(r, coins);
@@ -611,17 +618,19 @@ class NodeManager extends EventEmitter {
 
   /**
    * Wait for a node process to end after it was told to quit. o = { alive(), quit() → promise, signal(sig), progressAt() → ms of
-   * its last output or database write, savedAt() → ms it said it had saved (0: not said), saving() → the wait is long enough to
-   * say so }. `quit` is sent once, and again every quitRetryMs while nothing listens (a node still booting); any other failure,
+   * its last output or database write, savedAt() → ms it said it had saved SINCE this stop told it to (0: not said), settled() →
+   * its last output has been read, saving() → the wait is long enough to say so }. `quit` is sent once, and again every quitRetryMs while nothing listens (a node still booting); any other failure,
    * a timeout above all, may be the node saving before it answers, so it is not sent again. Signals, only:
-   *  - SIGTERM afterSavedMs after the node said it has saved (megammrsync and the like save, then sit there): nothing is cut;
+   *  - SIGTERM once the node has said it has saved AND afterSavedMs have passed with no output and no database write since
+   *    (megammrsync and the like save, then sit there; a megammr.mmr still being written keeps its own mtime fresh): nothing is cut;
    *  - SIGTERM after silenceMs with no output and no database write: the node is taken to be hung (this can cut a save);
    *  - SIGKILL termGraceMs after a SIGTERM with no sign of life since; then killGraceMs more and it is given up.
-   * → { signal: "" | "SIGTERM" | "SIGKILL", cut: a signal was needed while the node had not said it had saved }.
+   * → { signal: "" | "SIGTERM" | "SIGKILL", cut: a signal was sent while the node had not both said it had saved and gone quiet, and it
+   *   did not say so afterwards either (a node that was not shutting down saves in its own shutdown hook when it gets SIGTERM) }.
    */
   async waitGone(o) {
     const T = this.stopTimes, S = this.sys, t0 = this.now();
-    let quit = "", lastTry = -Infinity, termAt = 0, killAt = 0, said = false;
+    let quit = "", lastTry = -Infinity, termAt = 0, killAt = 0, said = false, clean = false;
     while (o.alive()) {
       const now = this.now();
       if (!quit && !termAt && o.quit && now - lastTry >= T.quitRetryMs) {
@@ -629,9 +638,9 @@ class NodeManager extends EventEmitter {
         Promise.resolve().then(o.quit).then(() => { quit = "answered"; }, (e) => { quit = refusedErr(e) ? "" : "unanswered"; });
       }
       if (!said && now - t0 >= T.noteAfterMs) { said = true; if (o.saving) o.saving(); }
-      const saved = o.savedAt(), quiet = now - Math.max(t0, o.progressAt() || 0, termAt, killAt);
-      if (!termAt && saved && now - Math.max(t0, saved) >= T.afterSavedMs) {
-        termAt = now; this.log("[app] the node has saved and has not exited by itself: SIGTERM"); o.signal("SIGTERM");
+      const saved = o.savedAt(), progress = o.progressAt() || 0, quiet = now - Math.max(t0, progress, termAt, killAt);
+      if (!termAt && saved && now - Math.max(t0, saved, progress) >= T.afterSavedMs) {
+        termAt = now; clean = true; this.log("[app] the node has saved and has not exited by itself: SIGTERM"); o.signal("SIGTERM");
       } else if (!termAt && quiet >= T.silenceMs) {
         termAt = now; this.log("[app] the node has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes since it was told to quit: SIGTERM (it may not have saved everything)"); o.signal("SIGTERM");
       } else if (termAt && !killAt && quiet >= T.termGraceMs) {
@@ -640,7 +649,8 @@ class NodeManager extends EventEmitter {
       await S.sleep(T.pollMs);
     }
     const signal = killAt ? "SIGKILL" : termAt ? "SIGTERM" : "";
-    return { signal, cut: !!signal && !o.savedAt() };
+    if (signal && !clean && o.settled) { try { await o.settled(); } catch (e) {} }
+    return { signal, cut: !!signal && !clean && !(o.savedAt() > termAt) };
   }
   now() { return (this.sys.now || Date.now)(); }
 
@@ -785,6 +795,7 @@ class NodeManager extends EventEmitter {
       // nothing to compare with: as before 0.18.116
       const legacy = async () => { await this.walletReplaced(true); this.walletCheck = null; await this.releaseEngines(); };
       let j;
+      this.shutCmdAt = this.now();   // this command shuts the node's insides down: a "saved" line after it is the node's own (stopInner)
       try { j = await this.rpc(cmd); }
       catch (e) {
         if (this.proc) {
@@ -986,8 +997,8 @@ class NodeManager extends EventEmitter {
       return;
     }
     try { this.watchParlonsLine(l); } catch (e) {}
-    // The node says it has saved (SAVED_LINE): a stop may then end a process that does not exit by itself (waitGone).
-    // ponytail: believed from any point of the run; a peer able to print a whole node line could make a stop signal early.
+    // The node says it has saved (SAVED_LINE): a stop may then end a process that does not exit by itself (waitGone). WHEN it was
+    // said is kept: a stop believes only one said after it told the node to stop (stopInner), and still waits for the node to go quiet.
     if (this.proc && SAVED_LINE.test(l)) this.savedAt = this.now();
     // The node says so itself, as it opens its databases and before it loads the wallet: block mode is ON. For a
     // classic wallet that is the forbidden start, caught earlier than any RPC could answer. Believed ONLY as the whole
