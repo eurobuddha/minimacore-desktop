@@ -843,32 +843,18 @@ async function coins() {
 }
 
 // ---- wallet send (donor onSendMax/onSendReview/doSend — raw balances, gas reserve, review-then-broadcast) ----
-async function sendMax(asset) {
-  const A = AX();
-  const b = await balances();
-  if (asset === "usdt") return A.dec.formatUnits(BigInt(b.usdtRaw), 6);
-  const gp = await p(cb => ctx.RPC.gasPrice(cb));
-  return A.dec.formatUnits(A.wallet.maxEthSendWei(BigInt(b.ethWei), gp), 18);
-}
+// The AtomiX tab's Send (0.18.323): the ETH Wallet tab's guarded path, not a second one. It sent at the RPC's raw gas price (no
+// ceiling: a hostile RPC set the fee), with no EIP-55 check, no one-send-at-a-time guard and no "may have gone through" on a cut
+// broadcast. "eth" stays; "usdt" is the USDT contract. The Medium tier, as the confirm dialog shows.
+const AX_SEND_USDT = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+const axSendAsset = (asset) => asset === "usdt" ? AX_SEND_USDT : "eth";
+async function sendMax(asset) { return ethSendMax(axSendAsset(asset)); }
 async function sendReview(asset, to, amt) {
-  const A = AX();
-  const b = await balances();
-  const gp = await p(cb => ctx.RPC.gasPrice(cb)).catch(() => null);
-  if (gp == null) return { err: "Could not read gas price — try again" };
-  const chk = A.wallet.checkSend(asset, to, amt, BigInt(b.ethWei), BigInt(b.usdtRaw), gp);
-  if (!chk.ok) return { err: chk.err };
-  const gasLimit = asset === "eth" ? A.wallet.GAS_ETH : A.wallet.GAS_ERC20;
-  return { fee: A.dec.formatUnits(A.wallet.gasReserveWei(gp, gasLimit), 18) };
+  const r = await ethSendReview(axSendAsset(asset), to, amt);
+  if (!r || r.err) return { err: (r && r.err) || "Could not check this send — try again" };
+  return { fee: r.fees.med.fee, gwei: r.fees.med.gwei, capped: r.capped };
 }
-async function sendExecute(asset, to, amt) {
-  const A = AX();
-  const send = asset === "eth" ? A.wallet.sendEth : A.wallet.sendUsdt;
-  // NO timeout: a rejected-but-still-broadcasting send would prompt a retry → a SECOND transfer (fresh nonce via
-  // F1 → both land). Let it run to the real broadcast callback (the engine's per-address nonce serializer bounds it).
-  const tx = await p(cb => send(ctx.RPC, vmCtx().eth.privKey, vmCtx().eth.address, to, amt, cb));
-  emitter.emit("update");
-  return { tx };
-}
+async function sendExecute(asset, to, amt) { return ethSendExecute(axSendAsset(asset), to, amt, "med"); }
 
 // ---- maker (donor onSaveOrder/onPublish/onWithdraw; the vm service keep-alives whatever is saved) ----
 async function makerAvail(strict) { return require("./makeravail").makerAvailFrom(await balances(), !!strict); }
@@ -1187,9 +1173,9 @@ async function ethGasNow() {
   const effBase = ethCapGas(base > floor2 ? base : floor2);
   return { base, baseFee, effBase, capped: effBase >= ETH_MAX_GAS_PRICE };
 }
-function ethTierGp(effBase, multPct) { return (effBase * BigInt(multPct)) / 100n; }   // final per-tier gas price
-/** proxy rpc: delegate everything to `base`, scaling ONLY gasPrice → effBase×mult/100, pre-divided by the +20%
- *  AX.ethtx re-applies, so the broadcast lands on exactly the previewed tier price. Because effBase ≥ 2×baseFee,
+function ethTierGp(effBase, multPct) { return ethCapGas((effBase * BigInt(multPct)) / 100n); }   // final per-tier gas price: the ceiling after the multiplier (0.18.323)
+/** proxy rpc: delegate everything to `base`, scaling ONLY gasPrice → the tier price (effBase×mult/100, then the ceiling), pre-scaled
+ *  ×8/9 for the +12.5% AX.ethtx re-applies, so the broadcast lands on the previewed tier price. Because effBase ≥ 2×baseFee,
  *  the engine's F5 floor never re-clamps it — the tier is authoritative. The whole F1 nonce serializer is reused. */
 function ethGasScaledRpc(base, multPct) {
   return {
@@ -1207,19 +1193,22 @@ function ethGasScaledRpc(base, multPct) {
       base.baseFeePerGasOrZero((e2, bf) => {                 // baseFeePerGasOrZero never errs (cb(null, 0n) on failure)
         const floor2 = (bf != null && bf > 0n) ? bf * 2n : 0n;
         const effBase = ethCapGas(g > floor2 ? g : floor2);  // same sane ceiling as ethGasNow (hostile-RPC overpay bound)
-        cb(null, (effBase * BigInt(multPct) * 10n) / (100n * 12n));
+        // the tier price with the ceiling AFTER the multiplier, pre-scaled ×8/9 for the engine's ×9/8 (0.18.323: it was ÷1.2 for a ×1.2
+        // the engine no longer applies, so every tier broadcast 6% under its preview, and High could reach 1.6× the ceiling)
+        cb(null, (ethTierGp(effBase, multPct) * 8n) / 9n);
       });
     })
   };
 }
 
 // --- send: native ETH or any listed/added ERC20, with a chosen fee tier (fund checks on RAW balances) ---
-function ethTokenBy(address) { const addr = lc(address); return ethTokensLoad().find(t => t.address === addr) || null; }
+function ethTokenBy(address) { const addr = lc(address); return ethTokensLoad().find(t => t.address === addr) || (addr === AX_SEND_USDT ? { symbol: "USDT", address: AX_SEND_USDT, decimals: 6 } : null); }   // USDT for the AtomiX tab's Send even when removed from the list
 // Reserve gas for the PRICIEST tier (High ×1.7) so Max — or any reviewed send — stays affordable at whatever tier
-// the user picks in the confirm dialog. gasReserveWei applies its own ×1.2, so ÷1.2 lands the reserve on the tier
-// price; use ×175/120 (a hair above High's ×170/120) so integer-BigInt truncation can NEVER leave the reserve a
-// wei short of the actual cost — over-reserving by a sliver only leaves a touch more dust on Max, never underfunds.
-function ethReserveGp(effBase) { const b = (effBase != null && effBase > 0n) ? effBase : ETH_FALLBACK_GP; return (b * 175n) / 120n; }
+// the user picks in the confirm dialog. gasReserveWei applies the engine's own ×9/8 (AX.wallet, AX.ethtx since 0.1.40; this was
+// ÷1.2, from when it was ×1.2), so ×8/9 lands the reserve on the tier price: ×175% (a hair above High's 170%) with the ceiling applied
+// after the multiplier, plus the engine's 0.2 gwei floor tip, rounded up, so the reserve is never a wei short of the actual cost.
+const ETH_FLOOR_TIP = 200000000n;   // AX.ethtx PRIORITY_TIP_WEI
+function ethReserveGp(effBase) { const b = (effBase != null && effBase > 0n) ? effBase : ETH_FALLBACK_GP; return ((ethCapGas((b * 175n) / 100n) + ETH_FLOOR_TIP) * 8n) / 9n + 1n; }
 async function ethSendMax(asset) {
   const A = AX();
   await ensureRpcOverride();

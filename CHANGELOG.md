@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.426] — The AtomiX room's Ethereum Send takes the ETH Wallet's guarded path; no fee tier passes the ceiling
+
+- Full review 23 Nov 2026 (MAJOR), as minimaCore Desktop 0.18.323. The AtomiX room's Send signed at whatever gas price the Ethereum endpoint returned (no ceiling: one hostile or broken endpoint among the fallbacks set the fee; in the reviewer's run a 21,000-gas send was signed with a 0.945 ETH fee), with no address checksum check and no one-send-at-a-time guard.
+- main/atomix.js: sendMax / sendReview / sendExecute now go through ethSendMax / ethSendReview / ethSendExecute at the Medium tier (EIP-55 check, one send at a time, capped gas).
+- Fee tiers: the price handed to the engine is pre-scaled ×8/9 for the ×9/8 the engine adds (it was ÷1.2, for a ×1.2 the engine no longer applies: every tier was broadcast about 6% under its preview), and the 5000 gwei ceiling is applied AFTER the tier multiplier (High could reach 1.6× the ceiling). The Max reserve covers the High tier's real cost.
+- Test: scripts/ethwallet-unit.js (fails on 0.19.425), its model of the engine's fee arithmetic corrected to the vendored engine's.
+
 ## [0.19.425] — A record the page wrote can never put an amount back on a live order
 
 - Full review 23 Nov 2026 (MAJOR). The page may write TAKER fill records. One saying `status:"unknown"` and naming a live order's applied fill id was settled as the engine's own unanswered fill: found "lost", and its `filled` (any number) was added back to the order. In the reviewer's run a live order went from 40 to 1000040, and the maker would then co-sign takes far past what was ordered.
