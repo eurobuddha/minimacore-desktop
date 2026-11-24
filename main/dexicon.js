@@ -602,6 +602,30 @@ function makeHost(opts = {}) {
     return { ready: true, orders: m.orders.map(o => String(o.coinid)), pending: m.pending.length, takes: takes(), unknown: unknown() };
   }
 
+  // A PAGE newscript NEVER TOUCHES ONE OF THIS WALLET'S OWN ADDRESSES (0.19.428, full review 23 Nov: MAJOR; as DexiconPro
+  // 0.2.183). `newscript` REPLACES the node's row for a script's address (simple:false, key 0x00, the caller's trackall): a
+  // page newscript of `RETURN SIGNEDBY(<one of our keys>)` turned our own address into an untracked one, and its coins left
+  // the balance until a seed restore. Refused when the script names one of this wallet's own keys (any 32-byte literal) or
+  // IS one of our tracked scripts (a pool covenant: same text = same address). `keys` is kept 60 s and read again at once
+  // when a simple row names a key it does not hold; either list unreadable → refused, nothing registered.
+  let ownKeys = null, ownKeysAt = 0;
+  const call = (q) => Promise.resolve().then(() => runner(q)).catch(() => null);
+  async function readKeys() {
+    ownKeys = null; const ks = await call("keys");
+    const kl = ks && ks.status === true && ks.response && Array.isArray(ks.response.keys) ? ks.response.keys : null;
+    if (kl && kl.length) { ownKeys = new Set(kl.map((k) => String((k && k.publickey) || "").toLowerCase()).filter(Boolean)); ownKeysAt = Date.now(); }
+  }
+  async function notOurScript(c) {
+    const m = /script:"([^"]*)"/.exec(c), script = m ? m[1] : null;
+    if (script == null) throw new Error("no script");
+    if (!ownKeys || Date.now() - ownKeysAt > 60000) await readKeys();
+    const sc = await call("scripts"), rows = sc && sc.status === true && Array.isArray(sc.response) ? sc.response : null;
+    if (ownKeys && rows && rows.some((r) => r && r.simple === true && /^0x[0-9A-Fa-f]{64}$/.test(String(r.publickey || "")) && !ownKeys.has(String(r.publickey).toLowerCase()))) await readKeys();
+    if (!ownKeys || !rows) throw new Error("this wallet's own keys and scripts could not be read, so no script is registered from the Dexicon page now");
+    for (const x of script.matchAll(/0x([0-9A-Fa-f]+)/g)) if (x[1].length === 64 && ownKeys.has(x[0].toLowerCase())) throw new Error("that script names one of this wallet's own keys (" + x[0] + "): registering it would hide your own coins");
+    const mine = rows.find((r) => r && r.track === true && r.script === script);
+    if (mine) throw new Error("that script is one of this wallet's own (address " + mine.address + "): registering it again would hide your own coins");
+  }
   // ---- the command bridge: what a Dexicon screen (the MiniDapp page's MDS) may ask for ----
   function pageCmd(command) {
     const c = dexCommand(command);
@@ -610,7 +634,8 @@ function makeHost(opts = {}) {
     let fwd = c;   // what reaches the node: a transaction of the frame's goes under its own page-only id (below)
     const send = () => Promise.resolve().then(() => runner(fwd, { signal })).then(r => (r && typeof r === "object" ? r : { status: false, error: "no reply" }), e => ({ status: false, error: (e && e.message) || String(e) }));
     const verb = require("./cmdverb").verbs(c)[0];   // one reading only: dexCommand refused any other
-    if (!/^txn/.test(verb) || verb === "txnview") return send();   // reads, newscript; txnview decodes hex and touches no transaction
+    if (verb === "newscript") return notOurScript(c).then(send, (e) => { const why = (e && e.message) || String(e); log("REFUSED from the Dexicon page: `newscript` — " + why); return { status: false, error: "Refused by the app: " + why + ". Nothing was registered." }; });
+    if (!/^txn/.test(verb) || verb === "txnview") return send();   // reads; txnview decodes hex and touches no transaction
     // ---- a transaction of the frame's (header of main/dexicon-signgate.js) ----
     const refuse = (why) => { log("REFUSED from the Dexicon page: `" + verb + "` — " + why); return Promise.resolve({ status: false, error: "Refused by the app's signing check: " + why + ". Nothing was signed." }); };
     const m = FRAME_TXN[verb] && FRAME_TXN[verb].exec(c.trim());

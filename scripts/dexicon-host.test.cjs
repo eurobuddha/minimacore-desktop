@@ -1591,3 +1591,23 @@ test("0.19.425: a page-written record with status unknown never raises a live or
   await M.until(() => b.ctx.__out);
   assert.equal(b.ctx.__out.remaining, "40", "the live order is untouched (it rose to 1000040)");
 });
+
+// 0.19.428 (full review 23 Nov, MAJOR): `newscript` replaces the node's row for an address: a page newscript of one of our
+// own key scripts untracked our own address (its coins left the balance until a seed restore).
+test("0.19.428: a page newscript never touches one of this wallet's own addresses; a maker's script still registers; unreadable keys = nothing registered", async () => {
+  let keysOk = true;
+  const POOL = "LET k=1 RETURN TRUE";
+  const { host, node } = await boot({ node: { on: (c) => (c === "keys" && !keysOk ? { status: false, error: "mock: keys refused" }
+    : c === "scripts" ? { status: true, response: [{ address: "0xOWNADDR", script: "RETURN SIGNEDBY(" + "KEY" + ")", publickey: "0x" + "00".repeat(32), simple: false }, { address: "0x" + "77".repeat(32), script: POOL, publickey: "0x00", simple: false, track: true }] } : null) } });
+  const cmd = (command) => host.command({ op: "cmd", command }), sent = (c) => node.seen.includes(c);
+  const OWN = 'newscript script:"RETURN SIGNEDBY(' + node.KEY + ')" trackall:false';
+  let r = await cmd(OWN); assert.equal(r.status, false); assert.match(r.error, /names one of this wallet's own keys \(0x[0-9A-Fa-f]{64}\)/); assert.ok(!sent(OWN), "never sent to the node");
+  const TRACKED = 'newscript trackall:false script:"' + POOL + '"';
+  r = await cmd(TRACKED); assert.equal(r.status, false); assert.match(r.error, /is one of this wallet's own \(address 0x7{64}\)/); assert.ok(!sent(TRACKED));
+  const MAKER = 'newscript script:"RETURN SIGNEDBY(0x' + "5A".repeat(32) + ')" trackall:false';
+  r = await cmd(MAKER); assert.equal(r.status, true, JSON.stringify(r)); assert.ok(sent(MAKER), "a maker's script is registered as before");
+  keysOk = false; await new Promise((res) => setTimeout(res, 5));
+  const h2 = await boot({ node: { on: (c) => (c === "keys" ? { status: false, error: "mock: keys refused" } : null) } });
+  const M2 = 'newscript script:"RETURN SIGNEDBY(0x' + "6B".repeat(32) + ')" trackall:false';
+  r = await h2.host.command({ op: "cmd", command: M2 }); assert.equal(r.status, false); assert.match(r.error, /could not be read/); assert.ok(!h2.node.seen.includes(M2));
+});

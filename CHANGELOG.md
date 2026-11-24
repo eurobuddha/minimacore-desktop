@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.428] — A page newscript never touches one of this wallet's own addresses
+
+- Full review 23 Nov 2026 (MAJOR), the part 0.19.424 left owed; as DexiconPro 0.2.183. The node's `newscript` REPLACES its row for a script's address (simple:false, key 0x00, the caller's trackall). A page that had been taken over could register `RETURN SIGNEDBY(<one of our keys>)` untracked: our own address stopped being ours, and its coins left the balance until a seed restore.
+- main/dexicon.js: a page newscript is refused when its script names one of this wallet's own keys (any 32-byte value in it) or is one of our tracked scripts (a pool covenant); when the wallet's keys or scripts cannot be read, nothing is registered. A maker's script registers as before.
+- Effect to know: a swap from the Dexicon page against one of YOUR OWN pools is refused with "that script is one of this wallet's own" (registering it untracked would hide the pool's coins from this wallet).
+- Test: scripts/dexicon-host.test.cjs (fails on 0.19.427).
+
 ## [0.19.427] — A read that walks the MegaMMR is given 150 seconds, not 30
 
 - Stand-in audit 23 Nov 2026 (MINOR). `balance … megammr:true` and `coins … megammr:true` walk the node's whole MegaMMR coin table. The app cut every read at 30 s, while the PandaPools engine allows its own reserve lookup 120 s: on a full mainnet MegaMMR the lookup ended as "Reserves unresolved".
