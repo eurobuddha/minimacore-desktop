@@ -122,6 +122,38 @@ const FRAME_TXN = {
   txnexport: new RegExp("^txnexport id:" + TXID + "$"),
   txndelete: new RegExp("^txndelete id:" + TXID + "$")
 };
+// THE PAGE'S READS, PARAMETER BY PARAMETER (0.19.424, full review 23 Nov: MAJOR). The verb list alone let a page that had
+// been taken over send `history action:customsize where:<SQL>` (the node pastes it into a query on its H2 database, which
+// can write and read FILES), `coins megammr:true` with no coin id (copies the whole unspent-coin table under the database
+// lock) and a `newscript` with any parameters. Each verb now carries only the parameters, in the shapes, that the engine
+// files the page loads really send (main/dexicon/{lib,resting}, renderer/dexicon/ui); anything else is refused.
+const H64 = /^0x[0-9A-Fa-f]{64}$/, HEXID = /^0x[0-9A-Fa-f]{2,64}$/, ADDR = /^(0x[0-9A-Fa-f]{2,64}|Mx[0-9A-Za-z]{30,120})$/, BOOL = /^(true|false)$/;
+const READ_PARAMS = {
+  status: {}, block: {}, getaddress: {}, checkmode: {}, scripts: {},
+  random: { size: /^\d{1,3}$/ },
+  balance: { tokenid: HEXID, address: ADDR },
+  history: { relevant: BOOL, max: /^\d{1,4}$/, offset: /^\d{1,7}$/ },
+  txpow: { onchain: H64, txpowid: H64 },
+  txnview: { data: /^0x[0-9A-Fa-f]{2,200000}$/ },
+  coins: { coinid: H64, address: ADDR, tokenid: HEXID, relevant: BOOL, sendable: BOOL, simplestate: BOOL, checkmempool: BOOL, megammr: BOOL,
+    order: /^(asc|desc)$/, depth: /^\d{1,6}$/, coinage: /^\d{1,7}$/ }
+};
+const NEWSCRIPT = /^newscript (?:script:"[^"\\]{1,60000}" trackall:false|trackall:false script:"[^"\\]{1,60000}")$/;
+/** throws unless c is exactly `verb name:value …` with each name once, known for this verb, and its value in shape */
+function readShape(verb, c) {
+  if (verb === "newscript") { if (!NEWSCRIPT.test(c)) throw new Error("only registering one script, untracked (newscript script:\"…\" trackall:false)"); return; }
+  const P = READ_PARAMS[verb]; if (!P) return;
+  const parts = c.split(" ");
+  if (parts[0] !== verb) throw new Error("not available to Dexicon: " + verb + " written another way");
+  const seen = new Set();
+  for (const t of parts.slice(1)) {
+    const i = t.indexOf(":"), name = i > 0 ? t.slice(0, i) : "", value = i > 0 ? t.slice(i + 1) : "";
+    if (!name || !Object.prototype.hasOwnProperty.call(P, name) || seen.has(name) || !P[name].test(value)) throw new Error("not available to Dexicon: " + verb + " with " + (name || "that") + (seen.has(name) ? " twice" : ""));
+    seen.add(name);
+  }
+  if (verb === "coins" && seen.has("megammr") && !seen.has("coinid")) throw new Error("not available to Dexicon: coins megammr without one coin id");
+  if (verb === "txpow" && seen.size !== 1) throw new Error("not available to Dexicon: txpow needs exactly one of onchain / txpowid");
+}
 /** One node command from a Dexicon screen, or a refusal. No chained ";" (it would also slip past the signing queue's
  *  per-command check), no parameter that reads or writes a FILE, picks key uses, carries a private key or a password,
  *  or makes txnpost sign / mine / burn. */
@@ -143,6 +175,7 @@ function dexCommand(c) {
   if (!DEX_VERBS.has(verb)) throw new Error("not available to Dexicon: " + verb);
   const names = require("./cmdverb").paramNames(c);   // as the node reads them (main/cmdverb.js read, 0.19.266)
   if (/\b(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)\s*:/i.test(c) || names.some(n => /^(file|keyuses|privatekey|password|txnpostauto|txnpostmine|txnpostburn)$/.test(n))) throw new Error("that parameter is not available to Dexicon");
+  readShape(verb, c);   // 0.19.424: the reads, and newscript, in the engine's own shapes only
   if (verb === "txnpost" && (/\b(auto|burn|mine)\s*:/i.test(c) || names.some(n => /^(auto|burn|mine)$/.test(n)))) throw new Error("that parameter is not available to Dexicon");   // the page posts plain `txnpost id:`
   return c;
 }

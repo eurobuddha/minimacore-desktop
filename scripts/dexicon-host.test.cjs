@@ -1175,7 +1175,7 @@ test("the Dexicon bridge: a quoted or ':'-spaced forbidden parameter, a verb rea
     ['txnpost id:a "burn":1', /that parameter/], ["txnpost id:a mine : true", /that parameter/], ['"seedrandom" modifier:x', /not read through this bridge/],
     ['se"edran"dom modifier:x', /not read through this bridge/], ['ba"lan"ce', /not available to Dexicon/], ['"vault"', /not available to Dexicon/], ["send amount:1 address:0x01", /not available to Dexicon/]])
     assert.throws(() => dexCommand(c), re, c);
-  assert.equal(dexCommand('"balance"'), '"balance"', "a quoted allowed verb is the same command to the node");
+  assert.throws(() => dexCommand('"balance"'), /not available to Dexicon/, "0.19.424: an allowed verb written another way (quoted) is refused: the page never writes it so");
   assert.equal(dexCommand("coins relevant:true"), "coins relevant:true");
 });
 
@@ -1557,4 +1557,21 @@ test("0.19.406: the FAST backing-coin settings: read and written by the app's ow
   await assert.rejects(b.host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('legacy_fresh', '1')" }), /engine's own/);
   const main = fs.readFileSync(path.join(M.root, "main/main.js"), "utf8"), pre = fs.readFileSync(path.join(M.root, "main/preload.js"), "utf8");
   assert.ok(/ipcMain\.handle\("mcd:dxFastCoins", \(_e, patch\) => \(patch && typeof patch === "object" \? dexicon\.fastCoinsSave\(patch\) : dexicon\.fastCoins\(\)\)\);/.test(main) && /dxFastCoins: \(patch\) => ipcRenderer\.invoke\("mcd:dxFastCoins", patch\),/.test(pre));
+});
+
+// 0.19.424 (full review 23 Nov, MAJOR): the verb list alone let a page that had been taken over reach the node's H2
+// database through `history … where:` (it can write and read files), copy the whole MegaMMR coin table, and send any
+// `newscript`. Each read now carries only the engine's own parameters, in shape.
+test("the page's reads carry only the engine's own parameters: no history where:, no coins megammr without a coin, no newscript clean:", () => {
+  const { dexCommand } = require("../main/dexicon");
+  const H = "0x" + "AB".repeat(32), ok = (c) => assert.equal(dexCommand(c), c, c), no = (c) => assert.throws(() => dexCommand(c), /not available to Dexicon|only registering one script/, c);
+  for (const c of ["status", "block", "getaddress", "checkmode", "scripts", "random", "random size:64", "balance tokenid:0x00", "balance tokenid:" + H + " address:" + H,
+    "history relevant:true max:100 offset:0", "txpow onchain:" + H, "txpow txpowid:" + H, "txnview data:0x00AB",
+    "coins coinid:" + H, "coins coinid:" + H + " megammr:true checkmempool:true", "coins relevant:true sendable:true checkmempool:true coinage:3 tokenid:0x00 address:" + H,
+    "coins simplestate:true order:desc depth:1500 address:0x50414E4441504F4F4C53", "coins order:desc address:" + H + " coinage:0 depth:72",
+    'newscript script:"RETURN SIGNEDBY(' + H + ')" trackall:false', 'newscript trackall:false script:"RETURN TRUE"']) ok(c);
+  for (const c of ["history action:customsize where:1=1", "history relevant:true max:100 offset:0 where:x", "history relevant:true max:99999 offset:0",
+    "coins megammr:true", "coins tokenid:0x00 megammr:true", "coins where:x", "coins coinid:" + H + " coinid:" + H, "coins coinid:" + H.slice(0, 20), "coins  coinid:" + H,
+    "balance megammr:true", "txpow address:" + H, "txpow onchain:" + H + " txpowid:" + H, "scripts address:" + H, "status complete:true", "random size:99999",
+    'newscript script:"RETURN TRUE" trackall:true', 'newscript script:"RETURN TRUE" trackall:false clean:true', 'newscript trackall:false script:"A\\" clean:true script:\\"B"', "newscript script:RETURN trackall:false"]) no(c);
 });

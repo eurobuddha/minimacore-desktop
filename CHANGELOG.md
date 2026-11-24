@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.424] — The Dexicon page's reads carry only the engine's own parameters
+
+- Full review 23 Nov 2026 (MAJOR). The page's bridge allowed a list of VERBS with any parameters. A page that had been taken over could send `history action:customsize where:<text>` (the node pastes it into a query on its H2 database, which can write and read files on this Mac), `coins megammr:true` with no coin id (the node copies its whole unspent-coin table under the database lock: AtomiX settlement stalls), and a `newscript` with any parameters (`clean:true`, `trackall:true`).
+- main/dexicon.js `readShape`: status, block, getaddress, checkmode and scripts take no parameter; random, balance, history, txpow, txnview and coins take only the parameters the engine files really send, each once and in shape (`history relevant: max: offset:` only; `coins megammr:` only with one `coinid:`); `newscript` is only `script:"…" trackall:false` (either order), with no quote or backslash inside the script.
+- Still owed (not in this version): refusing a `newscript` that names one of this wallet's own keys or tracked scripts (DexiconPro 0.2.183 has it).
+- Test: scripts/dexicon-host.test.cjs (fails on 0.19.423: `history action:customsize where:1=1` passed).
+
 ## [0.19.423] — An older copy of the app refuses a data folder a newer copy wrote
 
 - Every build since 0.19.105 uses the same data folder, and nothing recorded which version last wrote it. On 23 Nov 2026 a stray 0.19.105 was opened on the folder 0.19.416 had written: it knows nothing of the MegaMMR import marker, the frozen apps or the stop guard.
