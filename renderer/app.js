@@ -3189,6 +3189,8 @@ async function csRender() {
     (offers ? `<div class="card card--amber"><div class="card__title">You have ${offers} open offer${offers === 1 ? "" : "s"}</div>
       <div class="view__desc">Anyone can take an open offer at any time, and nothing renews or watches it while this app is closed. Cancelling returns the stake to this wallet.</div>
       <button class="btn btn--danger btn--full" id="csCancelAll"${dis}>Cancel all my open offers</button></div>` : "") +
+    (r.auto && r.auto.reached ? `<div class="card card--amber"><div class="card__title">The automatic limit is reached</div>
+      <div class="view__desc">This app signed ${esc(r.auto.usedToday)} P2P Chance transactions by itself in the last 24 hours (the limit is ${esc(r.auto.perDay)}). It signs no more by itself until that number falls. Each signature uses up a little of a wallet key, so the number is limited. The buttons below still work.</div></div>` : "") +
     (r.rows.length ? "" : `<div class="card"><div class="view__desc">This wallet has no coin at the P2P Chance contract (block ${esc(r.tip)}). Nothing to cancel or settle.</div></div>`) +
     good.map(rowHtml).join("") +
     (odd.length ? `<div class="view__sub">Not settled automatically (${odd.length})</div>` + odd.map(rowHtml).join("") : "") + contract;

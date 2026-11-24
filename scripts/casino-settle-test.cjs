@@ -3,7 +3,8 @@
 // The stand-in below behaves like the real node where it matters: a command text is split on EVERY ";" and each piece is run; the
 // LAST value of a repeated parameter wins; `coins` never returns a spent coin (spent or unknown: []); txnpost answers at once with
 // the pre-mining id at response.txpowid and the transaction is judged only when a block is mined (an invalid one is dropped
-// silently). The covenant is re-implemented here from its script, with Node's own SHA3, so a built transaction is checked by
+// silently); `coins` lists the NEWEST coin first and answers [] while the node is syncing; a state that is not there makes the
+// covenant throw. The covenant is re-implemented here from its script, with Node's own SHA3, so a built transaction is checked by
 // something other than the code under test.
 const test = require("node:test"), assert = require("node:assert/strict"), crypto = require("node:crypto"), fs = require("node:fs"), path = require("node:path");
 const S = require("../main/casino-settle");
@@ -14,32 +15,61 @@ const K1 = hx("A1"), K2 = hx("A2"), ADDR1 = hx("B1"), ADDR2 = hx("B2");         
 const XK = hx("E1"), XA = hx("E2");                                                // a stranger
 const up = (s) => String(s).toUpperCase();
 const sha3 = (hex) => "0x" + crypto.createHash("sha3-256").update(Buffer.from(hex.slice(2), "hex")).digest("hex").toUpperCase();
-const D = (x) => { const [i, f = ""] = String(x).split("."); return BigInt(i + f.padEnd(18, "0")); };   // 18 decimals are enough here
 const cid = (n) => "0x" + n.toString(16).toUpperCase().padStart(64, "C0");
 
-/** The covenant, from its script (CHANGELOG 0.18.330 names this as the independent check). */
+// ---- the node's own value rules (kissvm Value.getValue, StateVariable, MiniNumber; read from the node source and proven with
+// the classes of resources/minima.jar): a state is hex, a number within +-(2^64-1), TRUE / FALSE or a [string]; anything else, or
+// a state that is not there, makes the contract THROW, which fails the whole spend.
+const MAXN = (1n << 64n) - 1n, SCALE = 10n ** 44n;
+function val(s) {
+  if (typeof s !== "string") throw new Error("state missing");
+  if (s.startsWith("[") && s.endsWith("]")) return { t: "s", v: s.slice(1, -1) };
+  if (s.startsWith("0x")) { if (!/^0x[0-9a-fA-F]+$/.test(s) || s.length > 2 + 2 * 65536) throw new Error("bad hex"); const h = s.slice(2); return { t: "h", v: (h.length % 2 ? "0" + h : h).toUpperCase() }; }
+  if (s === "TRUE" || s === "FALSE") return { t: "b", v: s === "TRUE" };
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(s); if (!m) throw new Error("Invalid value : " + s);
+  const n = BigInt(m[2]) * SCALE + BigInt((m[3] || "").slice(0, 44).padEnd(44, "0"));   // 44 decimals, cut (never rounded)
+  if (n > MAXN * SCALE) throw new Error("MiniNumber outside the allowed range");
+  return { t: "n", v: m[1] ? -n : n };
+}
+const str = (x) => x.t === "h" ? "0x" + x.v : x.t === "b" ? (x.v ? "TRUE" : "FALSE") : x.t === "s" ? x.v : (x.v < 0n ? "-" : "") + ((a) => (a / SCALE) + ((a % SCALE) ? "." + (a % SCALE).toString().padStart(44, "0").replace(/0+$/, "") : ""))(x.v < 0n ? -x.v : x.v);
+/** What `txnstate value:` stores (StateVariable): the canonical text, or a throw. */
+const stored = (v) => { const x = val(v); return x.t === "s" ? v : str(x); };
+const D = (x) => { const v = val(String(x)); if (v.t !== "n") throw new Error("not a number"); return v.v; };
+
+/**
+ * The covenant, statement by statement from its script, as the node's VM runs it: every PREVSTATE / STATE is read through val()
+ * (missing or unreadable: throw); "AND" evaluates BOTH sides; EQ / GT need both sides of one type; SIGNEDBY needs hex. A throw
+ * is a failed spend. (CHANGELOG 0.18.330 names this as the check that is independent of the code under test.)
+ */
 function covenant(c, t, age) {
-  const P = (n) => c.st[n], St = (n) => t.state[n], signed = (k) => t.signed.includes(up(k));
-  const same = (a, b) => { for (let n = a; n <= b; n++) if (P(n) !== St(n)) return false; return true; };
-  const out = (i, addr, amt, keep) => { const o = t.outputs[i]; return !!o && up(o.address) === up(addr) && D(o.amount) === amt && up(o.tokenid) === up(c.tokenid) && o.storestate === keep; };
-  const amt = D(c.value), ph = Number(P(6)), to = Number(P(7));
-  if (t.outputs.reduce((a, o) => a + D(o.amount), 0n) > amt) return false;
-  if (ph === 0 && signed(P(0))) return true;
-  if (ph === 0) return same(0, 5) && Number(St(6)) === 1 && Number(St(7)) === to && Number(St(11)) >= 0 && Number(St(11)) < Number(P(3)) && out(0, CONTRACT, amt + D(P(5)), true);
-  if (ph === 1 && signed(P(0))) return same(0, 5) && Number(St(6)) === 2 && same(7, 11) && sha3(St(12)) === up(P(2)).replace("0X", "0x") && out(0, CONTRACT, amt, true);
-  if (ph === 1 && age > to && signed(P(8))) return true;
-  if (ph === 2 && signed(P(8))) {
-    const ps = St(13); if (!ps || sha3(ps) !== up(P(10)).replace("0X", "0x")) return false;
-    const h = sha3(P(12) + ps.slice(2)), r = parseInt(h.slice(2, 10), 16) % Number(P(3));
-    if (r === Number(P(11))) { const w = D(P(5)) * BigInt(P(4)); return out(0, P(9), w, false) && (amt > w ? out(1, P(1), amt - w, false) : true); }
-    return out(0, P(1), amt, false);
-  }
-  if (ph === 2 && age > to && signed(P(0))) return true;
-  return false;
+  try {
+    const P = (n) => val(c.st[n]), St = (n) => val(t.state[n]), need = (x, ty) => { if (x.t !== ty) throw new Error("type"); return x.v; };
+    const signed = (k) => t.signed.includes("0X" + need(k, "h")), is = (x, k) => need(x, "n") === BigInt(k) * SCALE;
+    const same = (a, b) => { for (let n = a; n <= b; n++) if (str(P(n)) !== str(St(n))) return false; return true; };
+    const out = (i, addr, amt, keep) => { const o = t.outputs[i]; return !!o && up(o.address) === "0X" + need(addr, "h") && D(o.amount) === amt && up(o.tokenid) === up(c.tokenid) && o.storestate === keep; };
+    const must = (b) => { if (!b) throw new Error("ASSERT"); }, sha = (x) => sha3("0x" + need(x, "h")).slice(2);
+    const amt = D(c.value), ADDR = { t: "h", v: CONTRACT.slice(2) };
+    if (c.tokenScriptFalse) return false;                                   // a token's own script is run as well
+    if (t.outputs.reduce((a, o) => a + D(o.amount), 0n) > amt) return false;
+    const hpk = P(0), ha = P(1), hc = P(2), rng = P(3), po = P(4), bt = P(5), ph = P(6), to = P(7);
+    { const a = is(ph, 0), b = signed(hpk); if (a && b) return true; }
+    if (is(ph, 0)) { must(same(0, 5)); must(is(St(6), 1)); must(need(St(7), "n") === need(to, "n")); { const a = need(St(11), "n") >= 0n, b = need(St(11), "n") < need(rng, "n"); must(a && b); } must(out(0, ADDR, amt + need(bt, "n"), true)); return true; }
+    const qk = P(8), pk = P(11);
+    { const a = is(ph, 1), b = signed(hpk); if (a && b) { must(same(0, 5)); must(is(St(6), 2)); must(same(7, 11)); must(sha(St(12)) === need(hc, "h")); must(out(0, ADDR, amt, true)); return true; } }
+    { const a = is(ph, 1), b = BigInt(age) * SCALE > need(to, "n"), s = signed(qk); if (a && b && s) return true; }
+    { const a = is(ph, 2), b = signed(qk); if (a && b) {
+      const ps = St(13); must(sha(ps) === need(P(10), "h"));
+      const h = sha({ t: "h", v: need(P(12), "h") + need(ps, "h") }), r = BigInt(parseInt(h.slice(0, 8), 16)) % (need(rng, "n") / SCALE);
+      if (r * SCALE === need(pk, "n")) { const w = need(bt, "n") * need(po, "n") / SCALE; must(out(0, P(9), w, false)); if (amt > w) must(out(1, ha, amt - w, false)); }
+      else must(out(0, ha, amt, false));
+      return true; } }
+    { const a = is(ph, 2), b = BigInt(age) * SCALE > need(to, "n"), s = signed(hpk); if (a && b && s) return true; }
+    return false;
+  } catch (e) { return false; }
 }
 
 function standin(opt = {}) {
-  const n = { tip: 5000, keys: [K1, K2], addrs: [ADDR1, ADDR2], coins: [], txns: new Map(), mempool: [], script: true, texts: [], ran: [], verdicts: [], fail: {}, shortKeys: null, nextId: 1 };
+  const n = { tip: 5000, keys: [K1, K2], addrs: [ADDR1, ADDR2], coins: [], txns: new Map(), mempool: [], script: true, texts: [], ran: [], verdicts: [], fail: {}, shortKeys: null, nextId: 1, syncing: false, dropAll: false };
   Object.assign(n, opt);
   const params = (piece) => { const o = {}; for (const m of piece.matchAll(/([A-Za-z]+):("[^"]*"|\S+)/g)) o[m[1].toLowerCase()] = m[2].replace(/^"|"$/g, ""); return o; };   // the LAST one wins
   const json = (c) => { const o = { coinid: c.coinid, amount: c.tokenid === "0x00" ? c.value : "0.0000000000000000000000000000000000001", address: c.address, tokenid: c.tokenid, state: Object.keys(c.st).map(p => ({ port: Number(p), type: 1, data: c.st[p] })), spent: false, created: String(c.created), age: String(n.tip - c.created) }; if (c.tokenid !== "0x00") o.tokenamount = c.value; return o; };
@@ -56,12 +86,16 @@ function standin(opt = {}) {
     }
     if (verb === "newscript") { n.script = true; return { status: true, response: { address: CONTRACT } }; }
     if (verb === "getaddress") return { status: true, response: { address: n.addrs[0], publickey: n.keys[0], simple: true } };
-    if (verb === "coins") { const live = n.coins.filter(c => !c.spent && (p.coinid ? up(c.coinid) === up(p.coinid) : up(c.address) === up(p.address))); return { status: true, response: live.map(json) }; }   // never a spent coin
+    if (verb === "coins") {   // never a spent coin; the newest first (the node walks back from its tip); [] while it is syncing
+      if (n.syncing) return { status: true, response: [] };
+      const live = n.coins.map((c, i) => [c, i]).filter(([c]) => !c.spent && (p.coinid ? up(c.coinid) === up(p.coinid) : up(c.address) === up(p.address))).sort((a, b) => (b[0].created - a[0].created) || (b[1] - a[1])).map(([c]) => c);
+      return { status: true, response: live.map(json) };
+    }
     if (verb === "txncreate") { n.txns.set(p.id, { id: p.id, inputs: [], outputs: [], state: {}, signed: [] }); return { status: true, response: {} }; }
     const t = n.txns.get(p.id); if (!t) return { status: false, error: "Transaction not found : " + p.id };
     if (verb === "txninput") { const c = n.coins.find(c => !c.spent && up(c.coinid) === up(p.coinid)); if (!c) return { status: false, error: "Coin not found" }; t.inputs.push(c); return { status: true, response: {} }; }
     if (verb === "txnoutput") { t.outputs.push({ amount: p.amount, address: p.address, tokenid: p.tokenid, storestate: p.storestate === "true" }); return { status: true, response: {} }; }
-    if (verb === "txnstate") { t.state[p.port] = p.value; return { status: true, response: {} }; }
+    if (verb === "txnstate") { try { t.state[p.port] = stored(p.value); } catch (e) { return { status: false, error: String(e.message) }; } return { status: true, response: {} }; }
     if (verb === "txnsign") { if (!n.keys.includes("0x" + up(p.publickey.slice(2)))) return { status: false, error: "Public key not found" }; t.signed.push(up(p.publickey)); return { status: true, response: {} }; }
     if (verb === "txnbasics") return { status: true, response: {} };
     if (verb === "txnpost") { const txpowid = "0x" + (n.nextId++).toString(16).toUpperCase().padStart(64, "0"); n.mempool.push(JSON.parse(JSON.stringify(Object.assign({}, t, { inputs: t.inputs.map(c => c.coinid) })))); return { status: true, response: { txpowid } }; }
@@ -73,7 +107,7 @@ function standin(opt = {}) {
   n.mine = (blocks = 1) => {
     for (const t of n.mempool.splice(0)) {
       const c = n.coins.find(c => !c.spent && c.coinid === t.inputs[0]);
-      const ok = !!c && n.script && covenant(c, t, n.tip + 1 - c.created); n.verdicts.push(ok);
+      const ok = !n.dropAll && !!c && n.script && covenant(c, t, n.tip + 1 - c.created); n.verdicts.push(ok);
       if (!ok) continue;
       c.spent = true;
       t.outputs.forEach((o, i) => n.coins.push({ coinid: cid(0x900000 + n.nextId * 16 + i), address: o.address, tokenid: o.tokenid, value: o.amount, created: n.tip + 1, st: o.storestate ? Object.assign({}, t.state) : {} }));
@@ -92,11 +126,14 @@ const taken = (o = {}) => Object.assign(offer({ 6: "1" }), { 8: XK, 9: XA, 10: P
 const revealed = (o = {}) => Object.assign(taken({ 6: "2" }), { 12: HS }, o);
 const result = (hs, ps, range) => parseInt(sha3(hs + ps.slice(2)).slice(2, 10), 16) % range;
 
+const TRIES = 3, PER_PASS = 4, PER_DAY = 24, CLAIMS_DAY = 12;   // the bounds of automatic signing, as numbers (the module's must equal them)
+const signs = (n) => n.ran.filter(p => /^txnsign/.test(p)).length;
 function use(n, secrets = {}) {
   let mem = {}; const notes = [];
+  n.clock = 1800000000000; if (S._setClock) S._setClock(() => n.clock);
   S.invalidate(); S._setRunner(n.run); S._setSecrets((name) => secrets[name] || null); S._setStore({ load: () => JSON.parse(JSON.stringify(mem)), save: (o) => { mem = JSON.parse(JSON.stringify(o)); } });
   S.emitter.removeAllListeners("notify"); S.emitter.on("notify", (m) => notes.push(m));
-  return { notes, posted: () => (mem.posted || {}) };
+  return { notes, posted: () => (mem.posted || {}), mem: () => mem };
 }
 const houseSecret = { ["casino_secret_for_" + HC]: HS }, playerSecret = { ["casino_psecret_for_" + PC]: PS };
 /** No text ever holds ";", and nothing but the listed verbs ever reached the node. */
@@ -147,6 +184,8 @@ test("(b) REVEAL: a taken offer of this wallet whose secret it holds is revealed
     .concat([0, 1, 2, 3, 4, 5].map(p => "txnstate id:ID port:" + p + " value:" + st[p]), ["txnstate id:ID port:6 value:2"], [7, 8, 9, 10, 11].map(p => "txnstate id:ID port:" + p + " value:" + st[p]),
       ["txnstate id:ID port:12 value:" + HS, "txnsign id:ID publickey:" + K1, "txnbasics id:ID", "txnpost id:ID", "txndelete id:ID"]));
   assert.equal(u.notes.length, 1); assert.ok(u.notes[0].includes(c.coinid), "the notification names the whole coin id");
+  assert.match(u.notes[0], /^Sent the reveal of the house secret of a taken offer; not confirmed yet/, "at post time it is SENT, nothing more");
+  assert.ok(u.notes[0].includes("id before mining 0x" + "1".padStart(64, "0")), "the id the node gives at post time is the one before mining");
   assert.equal(u.posted()[c.coinid].action, "reveal"); assert.equal(u.posted()[c.coinid].txpowid, "0x" + "1".padStart(64, "0"));
   // the same block and the next ones, not mined yet: nothing is built again
   const k = n.built().length; await S.pass(); n.tip += S.REPOST_AFTER - 1; await S.pass();
@@ -155,7 +194,10 @@ test("(b) REVEAL: a taken offer of this wallet whose secret it holds is revealed
   await assert.rejects(S.settle(c.coinid), /was sent at block 5000 .*Nothing more was sent/);
   n.mine(); assert.deepEqual(n.verdicts, [true], "the covenant accepts the reveal");
   const p2 = n.coinsAt(CONTRACT); assert.equal(p2.length, 1); assert.deepEqual([p2[0].st[6], p2[0].st[12], p2[0].value], ["2", HS, "0.14"]);
-  await S.list(); assert.deepEqual(u.posted(), {}, "the record goes when the coin is spent");
+  await S.list();   // a scan that lists coins at the contract (the revealed bet) and not this one: only now is it said to be spent
+  assert.deepEqual([u.posted()[c.coinid].done, u.posted()[c.coinid].tries, u.posted()[c.coinid].sent], [5010, 1, true], "the record is kept, marked done at the block of that scan");
+  assert.equal(u.notes.length, 2); assert.ok(u.notes[1].startsWith("Coin " + c.coinid + " is now spent (seen at block 5010), after this app sent the reveal"), u.notes[1]);
+  await S.list(); assert.equal(u.notes.length, 2, "said once");
   clean(n);
 });
 
@@ -227,7 +269,8 @@ test("a coin with a ; or an odd value in ANY port, its coin id, token or amount 
   const kinds = { reveal: [() => taken(), houseSecret, "0.14"], resolve: [() => revealed({ 0: XK, 1: XA, 8: K1, 9: ADDR1, 11: String(result(HS, PS, 2)) }), playerSecret, "0.14"], claim: [() => taken({ 0: XK, 8: K1 }), {}, "0.14"], cancel: [() => offer(), {}, "0.07"] };
   // the ports each action reads: an odd value there and NOTHING is built (not even txncreate); in any other port the value is never read,
   // the action goes through and the covenant accepts it
-  const reads = { reveal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], resolve: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12], claim: [6, 7, 8], cancel: [0, 6] };
+  // (0.18.336: the contract itself reads states 0-7 before anything else, and 8 and 11 of a taken bet: an odd value there fails every spend)
+  const reads = { reveal: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], resolve: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], claim: [0, 1, 2, 3, 4, 5, 6, 7, 8, 11], cancel: [0, 1, 2, 3, 4, 5, 6, 7] };
   let listed = 0;
   for (const [kind, [mk, secrets, value]] of Object.entries(kinds)) for (let port = 0; port <= 13; port++) for (const v of evil) {
     const n = standin(), c = coin(n, 1, value, Object.assign(mk(), { [port]: v }), kind === "claim" ? { created: 1 } : {}); use(n, secrets);
@@ -316,11 +359,14 @@ test("every error path runs txndelete; a refused post is forgotten, an unanswere
   for (const verb of ["txninput", "txnoutput", "txnsign", "txnbasics"]) {
     const n = standin(), c = coin(n, 1, "0.07", offer()); const u = use(n); n.fail[verb] = { status: false, error: "busy" };
     await assert.rejects(S.settle(c.coinid), new RegExp(verb + " failed \\(busy\\)\\. Nothing was sent\\."));
-    assert.equal(n.built().at(-1), "txndelete id:ID", verb); assert.ok(!n.built().includes("txnpost id:ID")); assert.deepEqual(u.posted(), {}); assert.equal(n.txns.size, 0);
+    assert.equal(n.built().at(-1), "txndelete id:ID", verb); assert.ok(!n.built().includes("txnpost id:ID")); assert.equal(n.txns.size, 0);
+    // a signature the node made stays counted (txnbasics failed after it); one it refused, or never asked for, is not
+    if (verb === "txnbasics") assert.deepEqual([u.posted()[c.coinid].tries, u.posted()[c.coinid].sent], [1, false]); else assert.deepEqual(u.posted(), {}, verb);
   }
   { const n = standin(), c = coin(n, 1, "0.07", offer()); const u = use(n); n.fail.txnpost = { status: false, error: "Coin already in mempool" };
     await assert.rejects(S.settle(c.coinid), /the node refused the transaction \(Coin already in mempool\)\. Nothing was sent\./);
-    assert.equal(n.built().at(-1), "txndelete id:ID"); assert.deepEqual(u.posted(), {}, "a refused post may be tried again"); }
+    assert.equal(n.built().at(-1), "txndelete id:ID"); assert.deepEqual([u.posted()[c.coinid].tries, u.posted()[c.coinid].sent], [1, false], "its signature stays counted; it is not 'sent'");
+    delete n.fail.txnpost; assert.equal((await S.list()).rows[0].held, false); assert.equal((await S.settle(c.coinid)).ok, true, "a refused post may be tried again at once"); assert.equal(u.posted()[c.coinid].tries, 2); }
   { const n = standin(), c = coin(n, 1, "0.07", offer()); const u = use(n); n.fail.txnpost = "throw";
     const r = await S.settle(c.coinid); assert.deepEqual([r.ok, r.unknown, r.coinid], [true, true, c.coinid]); assert.match(r.message, /may or may not have gone through/);
     assert.equal(n.built().at(-1), "txndelete id:ID"); assert.equal(u.posted()[c.coinid].action, "cancel", "kept: it is not built again while it may be in the mempool");
@@ -338,6 +384,132 @@ test("a node that cannot be read: nothing is done, and the list says so", async 
     const n = standin(); coin(n, 1, "0.14", taken()); use(n, houseSecret); n.fail[verb] = { status: false };
     await assert.rejects(S.pass(), /Nothing was done/); const l = await S.list(); assert.equal(l.ok, false); assert.match(l.error, /Nothing was done/); assert.deepEqual(n.built(), []);
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 0.18.336 (review of 0.18.330, CRITICAL 2): anyone can write ANY coin at the contract, with this wallet's public key in it. Nothing
+// is signed that the contract would refuse, and automatic signing is bounded: per coin, per pass and per day.
+const claimable = (o = {}) => taken(Object.assign({ 0: XK, 1: XA, 7: "0", 8: K1, 9: ADDR1 }, o));   // "the timeout has passed: this wallet can take the pot"
+const without = (st, port) => { const o = Object.assign({}, st); delete o[port]; return o; };
+
+test("a forged coin the contract never lets this wallet spend is never signed for: a missing state, a key that is not hex, one key on both sides, a token of its own", async () => {
+  const cases = [];
+  for (const port of [1, 2, 3, 4, 5]) cases.push(["claim-looking, state " + port + " missing", (n) => coin(n, 1, "5", without(claimable(), port)), new RegExp("state " + port + " is missing or is not 0x hex or a plain number: the contract cannot read it and refuses every spend")]);
+  cases.push(["claim-looking, state 11 missing", (n) => coin(n, 1, "5", without(claimable(), 11)), /state 11 is missing/]);
+  cases.push(["claim-looking, state 0 a number", (n) => coin(n, 1, "5", claimable({ 0: "5" })), /state 0 is not 0x hex: the contract's signature check throws/]);
+  cases.push(["a revealed bet past its timeout, state 8 a number", (n) => coin(n, 1, "5", revealed({ 8: "7" }), { created: 1 }), /state 8 is not 0x hex/]);
+  cases.push(["claim-looking, the same key in states 0 and 8", (n) => coin(n, 1, "5", claimable({ 0: K1 })), /states 0 and 8 hold the same key/]);
+  cases.push(["an open offer with state 3 missing (the button)", (n) => coin(n, 1, "5", without(offer(), 3)), /state 3 is missing/]);
+  cases.push(["an open offer with state 7 missing (the button)", (n) => coin(n, 1, "5", without(offer(), 7)), /state 7 \(the timeout\) is not a plain number|state 7 is missing/]);
+  for (const [name, make, why] of cases) {
+    const n = standin(), c = make(n); use(n, houseSecret);
+    await S.pass(); await S.cancelAll(); await S.settle(c.coinid).catch(() => {});
+    assert.equal(signs(n), 0, name + ": nothing is signed"); assert.deepEqual(n.built(), [], name + ": nothing is built");
+    const row = (await S.list()).rows.find(r => r.coinid === c.coinid); assert.ok(row, name + ": listed"); assert.match(row.problem, why, name); assert.equal(row.manualOk, false, name);
+    await assert.rejects(S.settle(c.coinid), /This coin cannot be settled here: .*Nothing was sent\./, name);
+    // and the stand-in's contract does refuse it, whoever signs: the check is not stricter than the chain
+    for (const key of [K1, K2]) assert.equal(covenant(c, { inputs: [c.coinid], outputs: [{ amount: c.value, address: ADDR1, tokenid: c.tokenid, storestate: false }], state: {}, signed: [up(key)] }, 99999), false, name + ": the contract refuses it");
+  }
+  { // a token of its own (its script may answer FALSE): never by itself; the user's click may try
+    const n = standin(), c = coin(n, 1, "5", claimable(), { tokenid: hx("77"), tokenScriptFalse: true }); use(n);
+    assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal(signs(n), 0);
+    const row = (await S.list()).rows[0]; assert.match(row.problem, /its token is not MINIMA or MxUSD: nothing is signed for it automatically/); assert.equal(row.manualOk, true);
+  }
+  { // MxUSD is worked on by itself, as MINIMA is
+    const n = standin(), c = coin(n, 1, "5", claimable(), { tokenid: MXUSD }); use(n);
+    assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["claim", c.coinid]]); n.mine(); assert.deepEqual(n.verdicts, [true]);
+  }
+});
+
+test("600 forged claimable-looking coins the contract will not pay cost NO signature, and a real, older taken offer is revealed in the first pass", async () => {
+  const n = standin(), real = coin(n, 1, "0.14", taken(), { created: 5000 - 100 });
+  for (let i = 0; i < 600; i++) coin(n, 1000 + i, "0.000001", without(claimable(), 3), { created: 5000 - 1 });   // newer: the node lists them first
+  use(n, houseSecret);
+  const first = await S.pass();
+  assert.deepEqual(first.done.map(d => [d.action, d.coinid]), [["reveal", real.coinid]], "the real offer, in the first pass");
+  for (let b = 0; b < 31; b++) { n.mine(); await S.pass(); }
+  assert.equal(signs(n), 1, "one signature in 32 passes: the reveal");
+  assert.deepEqual(n.verdicts, [true]); assert.equal(real.spent, true);
+  assert.equal(n.coinsAt(CONTRACT).filter(c => c.st[6] === "2" && c.st[12] === HS).length, 1, "the bet is revealed on chain");
+  clean(n);
+});
+
+test("600 forged coins that ARE claimable: at most 4 signatures a pass, 12 claims a day, largest first; the real taken offer is revealed first", async () => {
+  const n = standin(), real = coin(n, 1, "0.14", taken(), { created: 5000 - 100 });
+  for (let i = 0; i < 600; i++) coin(n, 1000 + i, "0.000001", claimable(), { created: 5000 - 1 });
+  const big = coin(n, 5000, "3", claimable(), { created: 5000 - 2 });
+  use(n, houseSecret);
+  const first = await S.pass();
+  assert.equal(signs(n), PER_PASS, "no more than " + PER_PASS + " in one pass");
+  assert.deepEqual(first.done.slice(0, 2).map(d => [d.action, d.coinid]), [["reveal", real.coinid], ["claim", big.coinid]], "the reveal before every claim, then the largest claim");
+  for (let b = 0; b < 60; b++) { n.mine(); await S.pass(); }
+  assert.equal(signs(n), 1 + CLAIMS_DAY - 1, "claims stop when the day's count reaches " + CLAIMS_DAY + ": the rest of the day's " + PER_DAY + " is kept for reveals and payouts");
+  assert.ok(n.verdicts.every(Boolean), "everything signed was valid"); assert.equal(real.spent, true);
+  const l = await S.list(); assert.deepEqual([l.auto.perCoin, l.auto.perPass, l.auto.perDay, l.auto.usedToday, l.auto.reached], [TRIES, PER_PASS, PER_DAY, CLAIMS_DAY, false]);
+  // a taken offer that turns up later the same day still gets its signature
+  const late = coin(n, 2, "0.14", taken(), { created: n.tip - 3 });
+  assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", late.coinid]]);
+  n.clock += 86400000; await S.pass(); assert.equal(signs(n), CLAIMS_DAY + 1 + PER_PASS, "a day later the claims go on");
+  clean(n);
+});
+
+test("the day's limit: 24 automatic signatures in 24 hours, then none until the oldest is a day old; the list says the limit is reached", async () => {
+  const n = standin(); for (let i = 0; i < 40; i++) coin(n, 100 + i, "0.000002", taken({ 5: "0.000001" }), { created: 5000 - 3 });   // 40 forged, VALID reveals of one old commit
+  use(n, houseSecret);
+  for (let b = 0; b < 12; b++) { await S.pass(); n.mine(); }
+  assert.equal(signs(n), PER_DAY); assert.ok(n.verdicts.every(Boolean));
+  const l = await S.list(); assert.deepEqual([l.auto.usedToday, l.auto.reached], [PER_DAY, true]);
+  assert.match(fs.readFileSync(path.resolve(__dirname, "../renderer/app.js"), "utf8"), /The automatic limit is reached<\/div>\s*<div class="view__desc">This app signed \$\{esc\(r\.auto\.usedToday\)\} P2P Chance transactions by itself in the last 24 hours/, "and the dialog says so");
+  // the user's own click is not held by the limit, and is not counted in it
+  const open = l.rows.find(r => r.action === "reveal" && !r.held); assert.equal((await S.settle(open.coinid)).ok, true); assert.equal(signs(n), PER_DAY + 1); assert.equal((await S.list()).auto.usedToday, PER_DAY);
+  n.clock += 86400000 - 1; await S.pass(); assert.equal(signs(n), PER_DAY + 1, "one millisecond short of a day: still none");
+  n.clock += 1; await S.pass(); assert.equal(signs(n), PER_DAY + 1 + PER_PASS);
+});
+
+test("many small forged bets with short timeouts do not keep a large real one waiting: nearest deadline and largest amount take turns", async () => {
+  const n = standin(), real = coin(n, 1, "0.14", taken(), { created: 5000 - 100 });
+  for (let i = 0; i < 60; i++) coin(n, 100 + i, "0.000002", taken({ 5: "0.000001", 7: "20" }), { created: 5000 - 5 });
+  use(n, houseSecret);
+  const r = await S.pass();
+  assert.equal(r.done.length, PER_PASS); assert.equal(r.done[1].coinid, real.coinid, "the second signature of the pass goes to the largest amount");
+  assert.ok(r.done.filter(d => d.coinid !== real.coinid).every(d => d.action === "reveal"));
+});
+
+test("a transaction the chain keeps dropping is signed 3 times for one coin, never a 4th by itself; the coin is then listed, and the button still works", async () => {
+  const n = standin({ dropAll: true }), c = coin(n, 1, "0.14", taken()); const u = use(n, houseSecret);
+  for (let b = 0; b < 8; b++) { await S.pass(); n.mine(S.REPOST_AFTER); }
+  assert.equal(signs(n), TRIES); assert.equal(u.posted()[c.coinid].tries, TRIES);
+  const row = (await S.list()).rows[0];
+  assert.match(row.problem, /^this app signed 3 transactions for it \(the last at block 5020\) and it is still at the contract: it is not signed for automatically any more$/); assert.equal(row.manualOk, true);
+  assert.equal((await S.settle(c.coinid)).ok, true, "the user's click"); assert.equal(signs(n), TRIES + 1); assert.equal(u.posted()[c.coinid].tries, TRIES + 1);
+  n.mine(S.REPOST_AFTER); assert.deepEqual(await S.pass(), { done: [], failed: [] }, "and the pass does not take it up again"); assert.equal(signs(n), TRIES + 1);
+});
+
+test("an empty or failed scan drops nothing: a node that is syncing answers [], and the sent record, its hold and its count stay", async () => {
+  const n = standin(), c = coin(n, 1, "0.14", taken()); const u = use(n, houseSecret);
+  await S.pass(); assert.equal(signs(n), 1); const rec = JSON.stringify(u.posted()[c.coinid]);
+  n.syncing = true;
+  assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.deepEqual((await S.list()).rows, []);
+  assert.equal(JSON.stringify(u.posted()[c.coinid]), rec, "the record is untouched by an empty answer"); assert.equal(u.notes.length, 1, "and nothing is said to be spent");
+  n.syncing = false; n.fail.coins = { status: false }; await assert.rejects(S.pass(), /Nothing was done/); delete n.fail.coins;
+  assert.equal(JSON.stringify(u.posted()[c.coinid]), rec);
+  await S.pass(); n.tip += 3; await S.pass();
+  assert.equal(signs(n), 1, "the coin is back in the list and still held: not signed again");
+  assert.equal((await S.list()).rows[0].held, true);
+  // a wallet's ONLY coin, spent: the node then lists nothing at the contract, which is also what a syncing node shows. It stays "sent".
+  const m = standin(), o = coin(m, 1, "0.07", offer()); const w = use(m);
+  await S.settle(o.coinid); m.mine(); assert.deepEqual(m.verdicts, [true]); await S.list();
+  assert.deepEqual([w.posted()[o.coinid].sent, w.posted()[o.coinid].done], [true, 0]); assert.equal(w.notes.length, 0);
+  coin(m, 2, "9", offer({ 0: XK, 1: XA })); await S.list();   // any coin listed at the contract, and not this one: now it is known
+  assert.equal(w.posted()[o.coinid].done, m.tip); assert.equal(w.notes.length, 1); assert.match(w.notes[0], /^Coin 0x[0-9A-F]{64} is now spent \(seen at block 5001\), after this app sent the cancel of an open offer for it at block 5000\.$/);
+});
+
+test("an amount the node gave as a JSON number (it has been through a double) is not used; the bounds are the stated ones", async () => {
+  const n = standin(), c = coin(n, 1, "0.14", taken()); use(n, houseSecret);
+  const run = n.run; S._setRunner(async (t) => { const r = await run(t); if (/^coins/.test(t)) for (const x of r.response) x.amount = Number(x.amount); return r; });
+  assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal(signs(n), 0);
+  assert.match((await S.list()).rows[0].problem, /its token, amount or creation block cannot be read/); assert.ok(c);
+  assert.deepEqual([S.AUTO_TRIES, S.AUTO_PER_PASS, S.AUTO_PER_DAY, S.CLAIMS_PER_DAY], [TRIES, PER_PASS, PER_DAY, CLAIMS_DAY]);
 });
 
 test("the window: one dialog from the notice and from Settings, ids copyable, Cancel offer / Settle now / Cancel all; no bet, offer or take channel", () => {

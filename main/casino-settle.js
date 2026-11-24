@@ -28,6 +28,20 @@
  *    the range, equal to the pick; winnings bet x payout, the rest to the house. Exact decimal arithmetic (BigInt), no rounding.
  *  - Every transaction's error path runs txndelete (family rule), and so does its success path. A posted transaction is
  *    written to <userData>/casino-settle.json before the post, so it is not built again each block.
+ *  - NOTHING IS SIGNED THAT THE CONTRACT WOULD REFUSE (0.18.336). Anyone can write any coin at the contract, with this wallet's
+ *    public key in it. The contract reads states 0-7 before anything else (and 8 and 11 for a taken bet), and a missing or
+ *    unreadable one makes it throw on every spend; its "AND" evaluates both sides, so state 0 (and state 8 of a taken bet) must
+ *    be hex or its signature check throws; a claim signed with a key that is also the other side's takes the other branch and
+ *    fails. Each of these is checked before a transaction is built. The node's txnpost answers before mining and does not
+ *    judge the contract: a transaction it would refuse is dropped later, silently, and the signature is spent.
+ *  - AUTOMATIC SIGNING IS BOUNDED (0.18.336): MINIMA and MxUSD only; at most AUTO_TRIES signatures per coin, ever (kept in
+ *    casino-settle.json; after that the coin is listed and only the button sends again); at most AUTO_PER_PASS per block pass
+ *    and AUTO_PER_DAY in any 24 hours, of which timeout claims may use CLAIMS_PER_DAY. One scan per pass. Work is ordered, never
+ *    taken in scan order (the node lists newest first, so a stranger's new coins would always come first): reveals and payouts
+ *    before claims, alternately the nearest deadline and the largest amount; claims by amount.
+ *  - A POST IS "SENT", NOT "DONE". The record of a sent transaction goes to "done" only when a scan that lists coins at the
+ *    contract no longer lists that coin. An empty answer (a node that is still syncing answers []) or a failed read changes
+ *    nothing: no record and no count is dropped.
  */
 "use strict";
 const crypto = require("crypto");
@@ -49,6 +63,12 @@ const NEWSCRIPT = 'newscript script:"' + SCRIPT + '" trackall:false';
 const SCAN = "coins address:" + CONTRACT + " depth:4096";   // the confirmed chain; depth above every tree length, as the removed engine
 const REPOST_AFTER = 10;      // blocks a posted transaction is given before it may be built again
 const SCAN_EVERY_MS = 12000;
+const AUTO_TRIES = 3;         // automatic signatures for ONE coin, ever: after that only the button
+const AUTO_PER_PASS = 4;      // automatic signatures in one block pass
+const AUTO_PER_DAY = 24;      // automatic signatures in any 24 hours
+const CLAIMS_PER_DAY = 12;    // of those, timeout claims stop here: the rest is kept for reveals and payouts, which have a deadline
+const DAY_MS = 86400000;
+const MANUAL_SWEEP = 50;      // "Cancel all": offers cancelled by one click
 
 // ---- the shapes: the ONLY values that reach a command ----
 const HEX64 = /^0x[0-9A-Fa-f]{64}$/;                    // a key, an address or a commit this wallet relies on; a secret; a coin id
@@ -117,12 +137,45 @@ let store = {
   load() { try { return JSON.parse(fs.readFileSync(storeFile(), "utf8")); } catch (e) { return {}; } },
   save(o) { const f = storeFile(); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f + ".tmp", JSON.stringify(o, null, 2)); fs.renameSync(f + ".tmp", f); }
 };
-function posted() {
-  const o = store.load(), p = (o && o.posted && typeof o.posted === "object") ? o.posted : {}, out = {};
-  for (const [id, r] of Object.entries(p)) if (HEX64.test(id) && r && Number.isSafeInteger(r.block)) out[id] = { action: String(r.action || ""), block: r.block, at: Number(r.at) || 0, txpowid: V.isHexId(r.txpowid) ? r.txpowid : "" };
+let now = () => Date.now();
+const ACTIONS = ["cancel", "reveal", "resolve", "claim"];
+/**
+ * { posted: { coinid: { action, block, at, txpowid, tries, sent, done } }, sigs: [ms] }. tries = signatures made for the coin
+ * (never reset); sent = the last one was posted (false: the node refused the post); done = the block of the scan that no longer
+ * listed the coin (0: still there, or not known). sigs = the times of the AUTOMATIC signatures of the last 24 hours.
+ * A record of 0.18.330 (no tries, no sent) is one sent transaction.
+ */
+function loadStore() {
+  let o; try { o = store.load(); } catch (e) { o = null; }
+  const p = (o && o.posted && typeof o.posted === "object") ? o.posted : {}, out = { posted: {}, sigs: [] };
+  for (const [id, r] of Object.entries(p)) {
+    if (!HEX64.test(id) || !r || typeof r !== "object" || !Number.isSafeInteger(r.block)) continue;
+    out.posted[id] = { action: ACTIONS.includes(r.action) ? r.action : "", block: r.block, at: Number(r.at) || 0, txpowid: V.isHexId(r.txpowid) ? r.txpowid : "",
+      tries: Number.isSafeInteger(r.tries) && r.tries >= 0 ? r.tries : 1, sent: r.sent !== false, done: Number.isSafeInteger(r.done) && r.done > 0 ? r.done : 0 };
+  }
+  const t = now(); if (o && Array.isArray(o.sigs)) out.sigs = o.sigs.filter(x => Number.isFinite(x) && x <= t && t - x < DAY_MS);
   return out;
 }
-function setPosted(coinid, rec) { const p = posted(); if (rec) p[coinid] = rec; else delete p[coinid]; try { store.save({ posted: p }); } catch (e) { log("could not save the posted list: " + (e && e.message)); } }
+function saveStore(s) {
+  // done records are history: the oldest go once there are many (a record is made only by a signature of this wallet)
+  const ids = Object.keys(s.posted); if (ids.length > 400) for (const id of ids.filter(i => s.posted[i].done).sort((a, b) => s.posted[a].at - s.posted[b].at).slice(0, ids.length - 400)) delete s.posted[id];
+  try { store.save(s); return true; } catch (e) { log("could not save casino-settle.json: " + (e && e.message)); return false; }
+}
+const sigsToday = () => loadStore().sigs.length;
+/** A signature is about to be made for this coin: counted BEFORE it is asked for (a crash must not lose the count). Not saved: not signed. */
+function countSignature(coinid, action, tip, auto) {
+  const s = loadStore(), r = s.posted[coinid] || { tries: 0 };
+  s.posted[coinid] = { action, block: tip, at: now(), txpowid: "", tries: r.tries + 1, sent: false, done: 0 };
+  if (auto) s.sigs.push(now());
+  if (!saveStore(s)) throw new Error("casino-settle.json could not be written, so the signature could not be counted. Nothing was signed.");
+}
+/** The node said it did not sign (or the command never reached it): the count is taken back. */
+function uncountSignature(coinid, before, auto) {
+  const s = loadStore(); if (before) s.posted[coinid] = before; else delete s.posted[coinid];
+  if (auto) s.sigs.pop();
+  saveStore(s);
+}
+function setSent(coinid, sent, txpowid) { const s = loadStore(), r = s.posted[coinid]; if (!r) return; r.sent = sent; r.txpowid = txpowid || ""; r.at = now(); saveStore(s); }
 
 // ---- reading the node ----
 const up = (s) => String(s).toUpperCase();
@@ -143,9 +196,17 @@ async function scan() {
   const s = await ask("scripts", "scripts"); if (!Array.isArray(s)) throw new Error("The node's addresses could not be read. Nothing was done.");
   const addrs = new Set(); for (const row of s) if (row && row.simple === true && typeof row.address === "string" && HEX64.test(row.address)) addrs.add(up(row.address));
   const coins = await ask(SCAN, "the coins at the P2P Chance contract"); if (!Array.isArray(coins)) throw new Error("The coins at the P2P Chance contract could not be read. Nothing was done.");
-  const p = posted(), gone = Object.keys(p).filter(id => !coins.some(c => c && up(c.coinid) === up(id)));   // spent: settled
-  if (gone.length) { for (const id of gone) delete p[id]; try { store.save({ posted: p }); } catch (e) {} }
-  return { tip: Number(tipS), keys: known, addrs, coins: coins.filter(c => c && typeof c === "object"), posted: p };
+  // SENT → DONE only on evidence: a scan that lists coins at the contract and not this one. An empty answer is what a node that
+  // is still syncing gives: it changes nothing. A coin that is listed again (a re-organised chain) is not done any more.
+  const S0 = loadStore(), tip = Number(tipS), seen = new Set(coins.map(c => up(c && c.coinid))), spent = []; let changed = false;
+  for (const [id, r] of Object.entries(S0.posted)) {
+    const here = seen.has(up(id));
+    if (here && r.done) { r.done = 0; changed = true; }
+    else if (!here && !r.done && r.sent && coins.length) { r.done = tip; changed = true; spent.push([id, r]); }
+  }
+  if (changed) saveStore(S0);
+  for (const [id, r] of spent) { const m = "Coin " + id + " is now spent (seen at block " + tip + "), after this app sent " + (WORDS[r.action] || "a transaction") + " for it at block " + r.block + "."; log(m); emitter.emit("notify", m); }
+  return { tip, keys: known, addrs, coins: coins.filter(c => c && typeof c === "object"), posted: S0.posted };
 }
 /** Is this key the node's, asked for this one key (no list to be short)? An unreadable answer throws: never a guess. */
 async function isKey(pk) {
@@ -172,6 +233,8 @@ function stateOf(coin) {
 function phaseOf(st) { const v = st && st.get(6); if (typeof v !== "string" || !DEC.test(v)) return null; for (const p of [0, 1, 2]) if (decCmp(v, String(p)) === 0) return p; return null; }
 const tokenLabel = (t) => t === "0x00" ? "MINIMA" : up(t) === up(MXUSD_TOKENID) ? "MxUSD" : t;
 
+/** A sent transaction is given REPOST_AFTER blocks before another is built for its coin. A refused post (sent false) holds nothing. */
+const holds = (p, tip) => !!(p && p.sent && !p.done && tip - p.block < REPOST_AFTER);
 /**
  * What this wallet may do with ONE coin at the contract. → null (not this wallet's: nothing is done, nothing is listed), or a row
  * { coinid, phase, role, amount, tokenid, token, age, blocksLeft, leftFor, action, auto, note, problem, manualOk, held, plan }.
@@ -189,16 +252,29 @@ async function judge(coin, ctx, manual) {
   const bad = (why, manualOk) => { row.problem = why; row.manualOk = !!manualOk; row.action = null; row.plan = null; return row; };
   if (!HEX64.test(row.coinid)) return bad("its coin id is not 0x and 64 hex digits");
   const tokenid = coin.tokenid, amount = tokenid === "0x00" ? coin.amount : coin.tokenamount;   // a token coin's value is its tokenamount
-  if (!V.isTokenid(tokenid) || !V.isAmount(amount) || !BLOCKN.test(String(coin.created))) return bad("its token, amount or creation block cannot be read");
+  // the amount as the node's own text: a JSON number has been through a double, and is not the amount on chain
+  if (!V.isTokenid(tokenid) || typeof amount !== "string" || !V.isAmount(amount) || !BLOCKN.test(String(coin.created))) return bad("its token, amount or creation block cannot be read");
   Object.assign(row, { amount, tokenid, token: tokenLabel(tokenid), age: ctx.tip - Number(coin.created) });
   if (row.age < 0) return bad("it is newer than the node's tip");
   const phase = phaseOf(st); if (phase === null) return bad("state 6 (the phase) is not 0, 1 or 2");
   row.phase = phase;
-  const p = ctx.posted[row.coinid]; if (p && ctx.tip - p.block < REPOST_AFTER) { row.held = true; row.note = "A transaction for this coin was sent at block " + p.block + (p.txpowid ? " (" + p.txpowid + ")" : "") + ". Waiting for the chain."; }
+  const p = ctx.posted[row.coinid]; if (holds(p, ctx.tip)) { row.held = true; row.note = "A transaction for this coin was sent at block " + p.block + (p.txpowid ? " (id before mining " + p.txpowid + ")" : "") + ". It is not confirmed: waiting for the chain."; }
+  row.tries = p ? p.tries : 0;
   const base = { coinid: row.coinid, amount, tokenid };
+  // What the contract reads before it looks at who signed: a missing or unreadable state there and it throws on EVERY spend.
+  const unread = (ports) => { const n = ports.find(x => !copyable(st.get(x))); return n === undefined ? "" : "state " + n + " is missing or is not 0x hex or a plain number: the contract cannot read it and refuses every spend of this coin, so nothing is signed for it"; };
+  const notHex = (n) => "state " + n + " is not 0x hex: the contract's signature check throws on it and refuses every spend of this coin, so nothing is signed for it";
+  // The automatic pass only (never the user's own click): MINIMA and MxUSD, and a coin it has not already signed for AUTO_TRIES times.
+  const autoOnly = () => {
+    if (manual || !row.plan || !row.auto) return row;
+    if (!(tokenid === "0x00" || up(tokenid) === up(MXUSD_TOKENID))) return bad("its token is not MINIMA or MxUSD: nothing is signed for it automatically", true);
+    if (p && p.tries >= AUTO_TRIES) return bad("this app signed " + p.tries + " transactions for it (the last at block " + p.block + ") and it is still at the contract: it is not signed for automatically any more", true);
+    return row;
+  };
 
   if (phase === 0) {
     if (!house) return bad("it is an open offer, and state 0 is not a key of this wallet");
+    { const why = unread([0, 1, 2, 3, 4, 5, 6, 7]); if (why) return bad(why); }
     row.action = "cancel"; row.plan = Object.assign({ kind: "cancel", key: k0 }, base);
     if (!row.held) row.note = "Open offer: anyone can take it at any time, in another P2P Chance app. Cancel it to take your stake back.";
     return row;
@@ -206,7 +282,13 @@ async function judge(coin, ctx, manual) {
   const to = st.get(7); if (typeof to !== "string" || !DEC.test(to)) return bad("state 7 (the timeout) is not a plain number");
   const expired = BigInt(row.age) > BigInt(to.split(".")[0]);   // the covenant's @COINAGE GT timeout, at the tip
   const left = expired ? 0 : Number(BigInt(to.split(".")[0]) - BigInt(row.age)) + 1;
-  const claim = (key) => { row.action = "claim"; row.auto = true; row.plan = Object.assign({ kind: "claim", key }, base); if (!row.held) row.note = "The other side let the timeout pass: this wallet takes the whole pot."; return row; };
+  { const why = unread([0, 1, 2, 3, 4, 5, 6, 7, 8, 11]); if (why) return bad(why); }
+  for (const n of [0, 8]) if (!HEXV.test(st.get(n))) return bad(notHex(n));
+  const claim = (key) => {
+    if (up(k0) === up(k8)) return bad("states 0 and 8 hold the same key: the contract takes its signature as the other side's move, which fails, so the timeout claim cannot be made");
+    row.action = "claim"; row.auto = true; row.plan = Object.assign({ kind: "claim", key }, base); if (!row.held) row.note = "The other side let the timeout pass: this wallet can take the whole pot.";
+    return autoOnly();
+  };
 
   if (phase === 1) {
     row.blocksLeft = left;
@@ -231,13 +313,13 @@ async function judge(coin, ctx, manual) {
       row.action = "unblock"; row.auto = true;
       row.plan = { kind: "cancel", key: ok0, coinid: o.coinid, amount: o.tokenid === "0x00" ? o.amount : o.tokenamount, tokenid: o.tokenid };
       row.note = "An open offer with the same commit is still on chain (coin " + o.coinid + "). It is cancelled first: the secret is not shown while that offer could still be taken.";
-      const op = ctx.posted[o.coinid]; if (op && ctx.tip - op.block < REPOST_AFTER) row.held = true;
-      return row;
+      const op = ctx.posted[o.coinid]; if (holds(op, ctx.tip)) row.held = true;
+      return autoOnly();
     }
     row.action = "reveal"; row.auto = true;
     row.plan = Object.assign({ kind: "reveal", key: k0, secret, states: [0, 1, 2, 3, 4, 5].map(n => [n, st.get(n)]).concat([[6, "2"]], [7, 8, 9, 10, 11].map(n => [n, st.get(n)])) }, base);
-    if (!row.held) row.note = "Taken: the house secret is revealed so the bet can be settled.";
-    return row;
+    if (!row.held) row.note = "Taken: the house secret is to be revealed so the bet can be settled.";
+    return autoOnly();
   }
 
   // phase 2
@@ -261,7 +343,7 @@ async function judge(coin, ctx, manual) {
       if (!(HEX64.test(a9) && ctx.addrs.has(up(a9))) && !manual) return { why: "the winnings would go to " + a9 + ", which the node does not list as an address of this wallet: it is not settled automatically", manualOk: true };
       return { plan: Object.assign({ kind: "resolve", key: k8, secret: ps, outputs: [[a9, w]].concat(more > 0 ? [[ha, decSub(amount, w)]] : []) }, base) };
     })();
-    if (r && r.plan) { row.action = "resolve"; row.auto = true; row.plan = r.plan; if (!row.held) row.note = "Won: " + r.plan.outputs[0][1] + " " + row.token + " is paid out to this wallet."; return row; }
+    if (r && r.plan) { row.action = "resolve"; row.auto = true; row.plan = r.plan; if (!row.held) row.note = "Won: " + r.plan.outputs[0][1] + " " + row.token + " is to be paid out to this wallet."; return autoOnly(); }
     if (house && expired) return claim(k0);
     if (r && r.lost) { row.note = "Lost: the pot goes to the house. Nothing to collect."; row.blocksLeft = null; row.leftFor = ""; return row; }
     return typeof r === "string" ? bad(r) : bad(r.why, r.manualOk);
@@ -285,7 +367,7 @@ async function ownAddress(ctx) {
   if (typeof addr !== "string" || !HEX64.test(addr) || !ctx.addrs.has(up(addr))) throw new Error("The node gave no address it lists as this wallet's own. Nothing was sent.");
   return addr;
 }
-async function send(plan, ctx) {
+async function send(plan, ctx, auto) {
   await ensureScript();
   const id = "cs_" + plan.kind + "_" + Date.now() + "_" + (++seq);
   const body = [];
@@ -302,14 +384,18 @@ async function send(plan, ctx) {
   const cmds = ["txncreate id:" + id, "txninput id:" + id + " coinid:" + plan.coinid].concat(body, ["txnsign id:" + id + " publickey:" + plan.key, "txnbasics id:" + id, "txnpost id:" + id]);
   try {
     for (const c of cmds) {
-      const post = c.startsWith("txnpost");
-      if (post) setPosted(plan.coinid, { action: plan.kind, block: ctx.tip, at: Date.now(), txpowid: "" });   // before the post: a crash must not build it again
+      const post = c.startsWith("txnpost"), sign = c.startsWith("txnsign"), before = sign ? loadStore().posted[plan.coinid] : null;
+      if (sign) countSignature(plan.coinid, plan.kind, ctx.tip, auto);   // every signature is counted, before it is asked for
+      if (post) setSent(plan.coinid, true, "");                           // before the post: a crash must not build it again
       let r, err; try { r = await run(c); } catch (e) { r = undefined; err = e; }
+      const refused = (err && neverSent(err)) || (r && typeof r === "object" && r.status === false && r.pending !== true);
+      if (sign && refused) uncountSignature(plan.coinid, before, auto);   // the node's own "no": no signature was made
       if (post) {
         // only the node's own refusal (status false, not pending) or a post that never reached it is a failure; no answer or an
-        // unreadable one is "posted, outcome unknown" (as Vestr, 0.18.322), and stays recorded
-        if (r && typeof r === "object" && r.status === true) { const tx = r.response && r.response.txpowid; setPosted(plan.coinid, { action: plan.kind, block: ctx.tip, at: Date.now(), txpowid: V.isHexId(tx) ? tx : "" }); return { ok: true, action: plan.kind, coinid: plan.coinid, txpowid: V.isHexId(tx) ? tx : "" }; }
-        if ((err && neverSent(err)) || (r && typeof r === "object" && r.status === false && r.pending !== true)) { setPosted(plan.coinid, null); throw new Error("the node refused the transaction" + (r && r.error ? " (" + String(r.error) + ")" : err ? " (" + err.message + ")" : "") + ". Nothing was sent."); }
+        // unreadable one is "sent, outcome unknown" (as Vestr, 0.18.322), and stays recorded. A refused post is not "sent": the
+        // coin is not held, but its signature stays counted.
+        if (r && typeof r === "object" && r.status === true) { const tx = r.response && r.response.txpowid, txpowid = V.isHexId(tx) ? tx : ""; setSent(plan.coinid, true, txpowid); return { ok: true, action: plan.kind, coinid: plan.coinid, txpowid }; }
+        if (refused) { setSent(plan.coinid, false, ""); throw new Error("the node refused the transaction" + (r && r.error ? " (" + String(r.error) + ")" : err ? " (" + err.message + ")" : "") + ". Nothing was sent."); }
         return { ok: true, unknown: true, action: plan.kind, coinid: plan.coinid, txpowid: "" };
       }
       if (!r || r.status !== true) throw new Error(c.split(" ")[0] + " failed" + (r && r.error ? " (" + String(r.error) + ")" : err ? " (" + err.message + ")" : "") + ". Nothing was sent.");
@@ -320,15 +406,34 @@ async function send(plan, ctx) {
 // ---- one thing at a time: the block pass and a click never build two transactions of one coin ----
 let chain = Promise.resolve();
 function locked(fn) { const p = chain.then(fn); chain = p.catch(() => {}); return p; }
-const WORDS = { cancel: "Cancelled an open offer", unblock: "Cancelled an open offer", reveal: "Revealed the house secret of a taken offer", resolve: "Collected the winnings of a bet", claim: "Claimed the pot of a bet the other side let time out" };
-function said(row, res) { return WORDS[row.action] + (res.unknown ? " (sent; the node did not answer, so it may or may not have gone through)" : "") + ": coin " + res.coinid + (res.txpowid ? ", transaction " + res.txpowid : "") + "."; }
+// What is said at post time is "sent": the node answers a post before mining and does not judge the contract. "Spent" is said by scan().
+const WORDS = { cancel: "the cancel of an open offer", reveal: "the reveal of the house secret of a taken offer", resolve: "the payout of a bet this wallet won", claim: "the claim of the pot of a bet the other side let time out" };
+function said(res) {
+  return "Sent " + WORDS[res.action] + (res.unknown ? "; the node did not answer, so it may or may not have gone through" : "; not confirmed yet (the node takes a transaction before it is mined)")
+    + ": coin " + res.coinid + (res.txpowid ? ", id before mining " + res.txpowid : "") + ".";
+}
+const idCmp = (a, b) => a.coinid < b.coinid ? -1 : a.coinid > b.coinid ? 1 : 0;
+const bigFirst = (a, b) => decCmp(b.amount, a.amount) || idCmp(a, b);
+/**
+ * The order of automatic work. Never the scan's (newest first: a stranger's new coins would always be first). Reveals and payouts
+ * (they have a deadline and need this wallet's secret) before timeout claims; among them alternately the nearest deadline and
+ * the largest amount, so neither many small coins with short timeouts nor one large coin can keep the other waiting; claims
+ * by amount.
+ */
+function ordered(rows) {
+  const first = rows.filter(r => r.action !== "claim"), claims = rows.filter(r => r.action === "claim").sort(bigFirst);
+  const soon = first.slice().sort((a, b) => (a.blocksLeft - b.blocksLeft) || bigFirst(a, b)), big = first.slice().sort((a, b) => bigFirst(a, b)), out = [], seen = new Set();
+  for (let i = 0; i < first.length; i++) for (const r of [soon[i], big[i]]) if (!seen.has(r)) { seen.add(r); out.push(r); }
+  return out.concat(claims);
+}
 
 /** This wallet's coins at the contract, for the panel. Never throws: { ok:false, error } when the node cannot be read. */
 async function list() {
   try {
     const ctx = await scan(), rows = [];
     for (const c of ctx.coins) { let r; try { r = await judge(c, ctx, false); } catch (e) { continue; } if (r) { delete r.plan; rows.push(r); } }
-    return { ok: true, contract: CONTRACT, tip: ctx.tip, rows };
+    const used = sigsToday();
+    return { ok: true, contract: CONTRACT, tip: ctx.tip, rows, auto: { perCoin: AUTO_TRIES, perPass: AUTO_PER_PASS, perDay: AUTO_PER_DAY, usedToday: used, reached: used >= AUTO_PER_DAY } };
   } catch (e) { return { ok: false, contract: CONTRACT, error: String((e && e.message) || e), rows: [] }; }
 }
 /** The user's click on one coin: the coin is read again, judged again, and what the covenant gives this wallet is done. */
@@ -342,33 +447,42 @@ function settle(coinid) {
     if (row.problem) throw new Error("This coin cannot be settled here: " + row.problem + ". Nothing was sent.");
     if (row.held) throw new Error(row.note + " Nothing more was sent.");
     if (!row.plan) throw new Error((row.note || "There is nothing to do for this coin yet.") + " Nothing was sent.");
-    const res = await send(row.plan, ctx); emitter.emit("update");
-    return Object.assign(res, { message: said(row, res) });
+    const res = await send(row.plan, ctx, false); emitter.emit("update");
+    return Object.assign(res, { message: said(res) });
   });
 }
-/** Every coin a filter picks, one at a time, each from a fresh read. → { done: [...], failed: [...] } */
-async function sweep(pick, manual) {
-  const tried = new Set(), done = [], failed = [];
-  for (let n = 0; n < 50; n++) {
-    const ctx = await scan(); let row = null;
-    for (const c of ctx.coins) { let r; try { r = await judge(c, ctx, manual); } catch (e) { continue; } if (r && r.plan && !r.held && !r.problem && !tried.has(r.plan.coinid) && pick(r)) { row = r; break; } }
-    if (!row) break;
-    tried.add(row.plan.coinid);
-    try { const res = await send(row.plan, ctx); done.push(Object.assign(res, { message: said(row, res) })); }
-    catch (e) { failed.push({ coinid: row.plan.coinid, action: row.action, error: String((e && e.message) || e) }); }
-  }
-  if (done.length || failed.length) emitter.emit("update");
-  return { done, failed };
+/** ONE scan, every coin judged once, and the rows that have something to send (not held, no problem). */
+async function work(pick, manual) {
+  const ctx = await scan(), rows = [];
+  for (const c of ctx.coins) { let r; try { r = await judge(c, ctx, manual); } catch (e) { continue; } if (r && r.plan && !r.held && !r.problem && pick(r)) rows.push(r); }
+  return { ctx, rows };
 }
-/** "Cancel all my open offers": an untaken offer is a standing risk now that nothing here watches it. */
-function cancelAll() { return locked(() => sweep(r => r.action === "cancel", true)); }
-/** The block pass: reveals, payouts and timeout claims (and the cancel that must come before a reveal), nothing else. */
+/** "Cancel all my open offers": the user's click. The largest first, at most MANUAL_SWEEP in one click. */
+function cancelAll() {
+  return locked(async () => {
+    const { ctx, rows } = await work(r => r.action === "cancel", true), done = [], failed = [];
+    for (const row of rows.sort(bigFirst).slice(0, MANUAL_SWEEP)) {
+      try { const res = await send(row.plan, ctx, false); done.push(Object.assign(res, { message: said(res) })); }
+      catch (e) { failed.push({ coinid: row.plan.coinid, action: row.action, error: String((e && e.message) || e) }); }
+    }
+    if (done.length || failed.length) emitter.emit("update");
+    return { done, failed };
+  });
+}
+/** The block pass: reveals, payouts and timeout claims (and the cancel that must come before a reveal), nothing else; bounded. */
 function pass() {
   return locked(async () => {
-    const out = await sweep(r => r.auto, false);
-    for (const d of out.done) { log(d.message); emitter.emit("notify", d.message); }
-    for (const f of out.failed) log("not settled: " + f.action + " of coin " + f.coinid + ": " + f.error);
-    return out;
+    const { ctx, rows } = await work(r => r.auto, false), done = [], failed = [], start = sigsToday();
+    for (const row of ordered(rows)) {
+      const used = sigsToday();
+      if (used - start >= AUTO_PER_PASS || done.length + failed.length >= 2 * AUTO_PER_PASS) break;   // signatures, and tries that failed before one
+      if (used >= AUTO_PER_DAY) { log("the automatic limit is reached: " + used + " signatures in the last 24 hours (limit " + AUTO_PER_DAY + "). Nothing more is signed automatically until that falls."); break; }
+      if (row.action === "claim" && used >= CLAIMS_PER_DAY) continue;
+      try { const res = await send(row.plan, ctx, true), m = said(res); done.push(Object.assign(res, { message: m })); log(m); emitter.emit("notify", m); }
+      catch (e) { failed.push({ coinid: row.plan.coinid, action: row.action, error: String((e && e.message) || e) }); log("not sent: " + row.action + " of coin " + row.plan.coinid + ": " + ((e && e.message) || e)); }
+    }
+    if (done.length || failed.length) emitter.emit("update");
+    return { done, failed };
   });
 }
 
@@ -386,6 +500,6 @@ function stopLoop() { if (pollTimer) { clearInterval(pollTimer); pollTimer = nul
 function invalidate() { known = new Set(); secretCache.clear(); lastTip = null; }
 
 module.exports = {
-  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER,
-  _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run
+  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY,
+  _setClock: (fn) => { now = fn; }, _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run
 };
