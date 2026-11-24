@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.445] — The Parlons Node answers eight commands at once (was two)
+
+- The cause under the stall of 24 Nov 2026 (0.19.443, 0.19.444): the Parlons Node's admin RPC, through which this app sends every command, had two worker threads. Any two slow commands held both, and every other command (a balance, a chat send, a trading engine's read, `quit`) waited until its own time ran out. It has eight now. The node's own RPC server gives every request its own thread, so commands are safe side by side; this app still sends its signing commands one at a time.
+- Pandamonium flavour only: `parlons-node.jar` is the 0.19.441 jar with ONE class replaced (com/eurobuddha/maxima/node/AdminRpc.class, from maxima security/cmd-inject-2026-11-21-block @ 491af6c3024887c35b7adf820a2c544001e0dfcb); every other entry byte-identical. sha256 85440d40169a30a4cf55ccb2546c63b07de28fa083fc962242f01bcec62e0692 (was 30db5baafa48695a6d9769160ee2d2c8a97fbd84a0d4f075af712d8c8ef7ae5a). minima.jar is unchanged. The released flavour's jar still has two.
+- Test, in the node: AdminRpcTest.twoSlowRequestsDoNotHoldUpAThird (fails with two workers). scripts/flavor-test.cjs pins the new jar.
+
 ## [0.19.444] — Chat photos: one wait per offline sender, photos on disk at once, a click really retries; receipts one at a time
 
 - Independent review of 0.19.443 ("safe to install; it closes the measured stall, but only down to half capacity"). With one fetch at a time, a thread of N unfetchable photos still held one of the Parlons Node's two places for N × 30 s, and two things got worse: a photo already on disk waited in that queue, and "click to retry" did nothing for 2 to 30 minutes.
