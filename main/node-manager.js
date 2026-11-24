@@ -314,7 +314,8 @@ class NodeManager extends EventEmitter {
     args.push(...keymode.startFlags(cfg.keyMode));
 
     // Additional raw args, appended verbatim (quote-aware split). Never a key-mode flag (start() refuses those first).
-    for (const tok of tokenizeArgs(cfg.extraArgs)) if (!PARAMS.keyModeArg(tok) && !PARAMS.mdsArg(tok)) args.push(tok);   // never MDS (0.19.291)
+    // never MDS (0.19.291); never the Keets setting's own flags, which a value stored before 0.19.441 may still hold
+    for (const tok of PARAMS.withoutKeetsOwned(tokenizeArgs(cfg.extraArgs))) if (!PARAMS.keyModeArg(tok) && !PARAMS.mdsArg(tok)) args.push(tok);
     return args;
   }
 
@@ -337,7 +338,7 @@ class NodeManager extends EventEmitter {
       else flags.push("-" + k, q(v));
     }
     flags.push(...keymode.startFlags(cfg.keyMode));   // the wallet's key mode (see buildArgs)
-    for (const tok of tokenizeArgs(cfg.extraArgs)) {
+    for (const tok of PARAMS.withoutKeetsOwned(tokenizeArgs(cfg.extraArgs))) {   // as buildArgs (0.19.441)
       const key = tok.replace(/^-+/, "").toLowerCase();
       if (PARAMS.keyModeArg(tok) || PARAMS.mdsArg(tok)) continue;   // never MDS (0.19.291)
       if (tok.startsWith("-") && PARLONS_REFUSED.has(key)) continue;

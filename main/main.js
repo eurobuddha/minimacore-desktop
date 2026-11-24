@@ -298,7 +298,7 @@ ipcMain.handle("mcd:langSet", (_e, code) => {
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 // Which app this is, for the screens: its name, and whether it updates itself and may open at login (main/flavor.js).
 ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, title: flavor.windowTitle, updates: !updater.OFF, loginItem: flavor.loginItem && !flavor.test, basePort: flavor.basePort }));
-ipcMain.handle("mcd:getConfig", () => { const c = config.load(); return c; });
+ipcMain.handle("mcd:getConfig", () => { const c = config.load(); c.keetsChatOnly = config.keetsChatOnlySupported(); return c; });   // 0.19.441: read-only for the page; not a config key (a save drops it)
 ipcMain.handle("mcd:saveConfig", (_e, patch) => saveConfigPatch(patch));
 const NODE_START_KEYS = ["params", "extraArgs", "dataFolder", "basePort", "rpcPortManual", "heapMb", "nodeKind", "contribute", "network", "customConnect"];
 /** The window's config patch, saved (also by a restart that carries one: mcd:nodeRestart, 0.19.287). */

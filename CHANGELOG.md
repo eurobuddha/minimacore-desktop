@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.441] — Keets is one setting of three: chat and network, chat only, classic only (Pandamonium Desktop)
+
+- Owner, 24 Nov 2026: the phone's three-way Keets setting, in Pandamonium Desktop. Startup Params shows **Chat and network** (as before: `-keets`), **Chat only** (`-keets -keetschatonly`: KeetChat, files and the mailbox stay, blocks and transactions use the classic Minima network only) and **Classic only** (no keets), in the phone's wording and translations. The released flavour keeps its on/off switch: its node jars do not know the flag, and a node given a flag it does not know refuses to start.
+- Node jars of the Pandamonium flavour: the same two jars as 0.19.440 (minima 1.1.2.31-euro14, parlons-node 0.2.160) with the classes of seven sources recompiled from minima-core `feat/keets-chat-only-block-euro14` @ 2d8aad6981a48cae5d9fd937a01b0caabb765443, which is the change reviewed for the phone (Pandamonium 2.2.124–2.2.131), applied to the commit these jars were built from. Every other entry is byte-identical. minima.jar sha256 dea0a6c7b4568fcd15576dafd421bad28da79310b76d2265d2ebadf707f350dd, parlons-node.jar sha256 30db5baafa48695a6d9769160ee2d2c8a97fbd84a0d4f075af712d8c8ef7ae5a. The node starts the Keets sidecar itself and hands it `--chat-only`.
+- What else that node change does, as on the phone: Keets peers no longer count when the node gives up on a classic peer, and classic peers are seeded from the published lists `https://spartacusrex.com/minimapeers.txt` and `https://eurobuddha.com/minimapeers.txt` at start and whenever the node has no peers (bounded: exact host:port entries, 64 KB, 50 checks, time limits, never this computer or a private network; nothing in a list can stop the node).
+- Keets sidecar 1.3.5 (keets c3ac90351c7150de0c41c9e064fe453cceabb1a4): `--chat-only`. Its dependencies are unchanged.
+- The setting owns `-keets`, `-keetschatonly` and `-keetssidecarargs`: typed in the extra arguments they are refused, and a value stored earlier is dropped together with its value. Chat only is sent only with keets, and only by a flavour whose jars know it.
+- Tests: scripts/keets-test.cjs (four new: the owned flags, the sidecar, the real argument lists of both node kinds for the three settings, the pinned jars), scripts/core-screens-test.cjs, scripts/flavor-test.cjs; scripts/fixtures/KeetsFlagsCheck.java asks a jar whether it accepts the three settings without starting a node (both new jars do; the 0.19.440 jar does not compile against it).
+- Not changed: the Chat tab is shown whatever the setting (with Classic only it says the node is starting); the sidecar's sender-id fix (1.3.6) is not in this copy.
+
 ## [0.19.440] — The stop path after a resync: only a real shutdown answer counts, and a lost answer is not recorded as a cut
 
 - Independent review of 0.19.439 ("safe to install, strictly safer than 0.19.438"; two Required findings, both reproduced), main/node-manager.js.

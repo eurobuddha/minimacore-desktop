@@ -139,6 +139,13 @@
   "RPC interface on port {rpcPort}, on this computer only. This app talks to its node through it, so it cannot be switched off. The Parlons Node takes no RPC password.": "端口 {rpcPort} 上的 RPC 接口，仅限本机访问。本应用通过它与节点通信，因此无法关闭。Parlons 节点不使用 RPC 密码。",
   "Copy RPC password": "复制 RPC 密码",
   "Keets transport (-keets)": "Keets 传输（-keets）",
+  "Keets": "Keets",
+  "Chat and network": "聊天和网络",
+  "Chat only": "仅聊天",
+  "Classic only": "仅经典网络",
+  "Chat and network: KeetChat, and blocks and transactions also travel over keets, as before. Chat only: KeetChat, files and the mailbox stay, but blocks and transactions use the classic Minima network only. Classic only: no keets at all - less RAM. Your chats and keets identity stay on this computer in every setting. Applies after a restart.": "聊天和网络：KeetChat，并且区块和交易也通过 keets 传输，与之前相同。仅聊天：保留 KeetChat、文件和邮箱，但区块和交易仅使用经典 Minima 网络。仅经典网络：完全不使用 keets，内存占用更少。无论哪种设置，您的聊天记录和 keets 身份都保留在这台电脑上。重启后生效。",
+  "keets chat only (-keetschatonly)": "keets 仅聊天 (-keetschatonly)",
+  "KeetChat, files and the mailbox stay; blocks and transactions use the classic Minima network only. Set by the Keets setting above, and only together with keets.": "保留 KeetChat、文件和邮箱；区块和交易仅使用经典 Minima 网络。由上方的 Keets 设置决定，且仅在启用 keets 时有效。",
   "On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart.": "开启：与之前一样，使用 KeetChat 和点对点 keets 传输。关闭：不运行 Hyperswarm 辅助进程，也不使用 DHT，节点仅通过经典 Minima 传输运行，占用更少内存。您的聊天记录和 keets 身份会保留在这台电脑上，重新开启后即可恢复。重启后生效。",
   "Extra arguments (advanced)": "额外参数（高级）",
   "-p2pnodes host:port -txpowdbstore 3 …": "-p2pnodes host:port -txpowdbstore 3 …",
@@ -3036,7 +3043,7 @@
   "ALL": "全部"
 }, {
   // rightly the same as the English (a name, a unit, a technical token)
-  same: ["MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
+  same: ["Keets", "MINIMA CORE", "-p2pnodes host:port -txpowdbstore 3 …", "host:port", "Minima Web Wallet", "· NFT", "TCP", "pid {pid} · {command}", "↗  Etherscan", "~{fee} ETH  ·  {gwei} gwei", "https://…", "miniMall Inbox", "miniMall Shop", "TxPoW ID", "Minima Explorer", "ENTROPY", "{side}{amount} {c} @ {price} USDT", "ATOMIX · USDT ⇄ {c}", "USDT {usdt} · ETH {eth}", "ATOMIX", "MINIMA / {name}{tok}", "{reserveM} MINIMA  ·  {reserveT} {name}", "{spot} {name} / MINIMA", "{totalMinima} MINIMA  ·  {totalToken} {name}", "{price} {name} / MINIMA", "{reserveM} MINIMA  +  {reserveT} {name}", "{poolPrice} {name} / MINIMA", "MINIMA  (+", "{action} · {minimaAmt} MINIMA / {tokenAmt} {label}", "K/KMIN {r} · {warn}", "https://archive.example.com", "MINIMA / MxUSD", "{bestBid} · FAST + BOOK + POOL", "{side} · BOOK / POOL", "{sell}{rem} MINIMA @ {price}", "{sell}{m} MINIMA @ {price}", "{sell}{minima} MINIMA @ {price}", "{buy}{filled} MINIMA @ {price}", "{buy}{size} MINIMA @ {price}", "{f} MxUSD → {filled} MINIMA", "{filled} MINIMA → {f} MxUSD", "{minima} MINIMA @ {price}", "https://relay.example/dex-relay", "Minima Mail", "minimaCore Desktop", "Dexicon"],
   // translated for the desktop (the phone has no such text): 1915 keys for native review
   review: [
     "Click to copy the full id",

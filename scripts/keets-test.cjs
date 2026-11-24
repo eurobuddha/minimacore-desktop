@@ -84,3 +84,91 @@ test('package.json: sidecar ships via extraResources', () => {
   assert.ok(pkg.build.extraResources.some(r => r.from === 'resources/keets-sidecar'),
     'extraResources must bundle resources/keets-sidecar');
 });
+
+// ---- 0.19.441: the Keets setting is one of three (chat and network, chat only, classic only), as on the phone ----
+const PARAMS441 = require(path.join(ROOT, 'renderer/params.js'));
+
+test('0.19.441: the setting owns -keets, -keetschatonly and -keetssidecarargs: refused when typed, dropped WITH their value when stored', () => {
+  for (const typed of ['-keets', '-keetschatonly', '-KeetsChatOnly true', '--keetssidecarargs --chat-only', '-megammr -keetschatonly=true'])
+    assert.ok(PARAMS441.reservedArg(typed), typed + ' must be refused in the extra arguments');
+  for (const fine of ['-keetsconnect abc', '-keetsbootstrap h:1', '-keetsmaxconns 4', '-megammr', ''])
+    assert.equal(PARAMS441.reservedArg(fine), '', fine + ' stays the user\'s');
+  const strip = (s) => PARAMS441.withoutKeetsOwned(s.split(' ').filter(Boolean)).join(' ');
+  assert.equal(strip('-megammr -keets false -archive'), '-megammr -archive', 'the value goes with the flag (the phone left "-megammr false")');
+  assert.equal(strip('-keetschatonly true -keetsconnect abc'), '-keetsconnect abc');
+  assert.equal(strip('-keetssidecarargs --chat-only -megammr'), '-megammr');
+  assert.equal(strip('-keets -megammr'), '-megammr', 'a flag that follows is not taken for a value');
+  assert.equal(strip('-keetsconnect abc -keetsmaxconns 4'), '-keetsconnect abc -keetsmaxconns 4', 'the user\'s keets flags are kept');
+  // the three settings, and classic only winning over a stale chat-only value
+  assert.equal(PARAMS441.keetsMode({ keets: true, keetschatonly: false }), 'full');
+  assert.equal(PARAMS441.keetsMode({ keets: true, keetschatonly: true }), 'chat');
+  assert.equal(PARAMS441.keetsMode({ keets: false, keetschatonly: true }), 'classic');
+  assert.deepEqual(PARAMS441.setKeetsMode({}, 'chat'), { keets: true, keetschatonly: true });
+  assert.deepEqual(PARAMS441.setKeetsMode({ keetschatonly: true }, 'classic'), { keets: false, keetschatonly: false });
+  assert.deepEqual(PARAMS441.setKeetsMode({ keetschatonly: true }, 'full'), { keets: true, keetschatonly: false });
+  assert.equal(PARAMS441.defaultParams().keetschatonly, false, 'a new install is chat and network, as before');
+});
+
+test('0.19.441: the bundled sidecar is 1.3.5 and knows --chat-only (the node passes it when it has -keetschatonly)', () => {
+  const idx = fs.readFileSync(path.join(ROOT, 'resources/keets-sidecar/index.js'), 'utf8');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, 'resources/keets-sidecar/package.json'), 'utf8')).version, '1.3.5');
+  assert.ok(idx.includes("process.argv.includes('--chat-only')"), 'index.js reads --chat-only');
+});
+
+test('0.19.441: what the node is started with, for the three settings, on both node kinds; chat only never without the capability', () => {
+  const Module = require('module'), os = require('os');
+  let USERDATA = '';
+  const fakeElectron = { app: { getPath: () => USERDATA, isPackaged: false, getVersion: () => '0' }, safeStorage: null };
+  const realLoad = Module._load;
+  Module._load = function (request, ...rest) { return request === 'electron' ? fakeElectron : realLoad.call(this, request, ...rest); };
+  try {
+    const config = require(path.join(ROOT, 'main/config.js')); config.rpcSecret = () => 'test-secret';
+    const node = require(path.join(ROOT, 'main/node-manager.js')); node.blockKeysSupported = () => true;
+    const argsOf = (kind, mode, capable, extraArgs) => {
+      USERDATA = fs.mkdtempSync(path.join(os.tmpdir(), 'keets-mode-test-'));
+      config.keetsChatOnlySupported = () => capable;
+      config.recordKeyMode('classic');
+      config.save({ nodeKind: kind, setupDone: true, params: PARAMS441.setKeetsMode(PARAMS441.defaultParams(), mode) });
+      if (extraArgs) {   // a value stored before the setting owned these flags: written past the save's refusal
+        const f = path.join(USERDATA, 'config.json'), j = JSON.parse(fs.readFileSync(f, 'utf8')); j.extraArgs = extraArgs; fs.writeFileSync(f, JSON.stringify(j));
+      }
+      const a = node.buildArgs();
+      return kind === 'minima' ? a.join(' ') : a.find(x => x.startsWith('-Dparlons.node.args=')).slice('-Dparlons.node.args='.length);
+    };
+    const count = (s, flag) => (s.match(new RegExp('(^|\\s)' + flag + '(?=\\s|$)', 'g')) || []).length;
+    for (const kind of ['minima', 'parlons']) {
+      const full = argsOf(kind, 'full', true), chat = argsOf(kind, 'chat', true), classic = argsOf(kind, 'classic', true);
+      assert.deepEqual([count(full, '-keets'), count(full, '-keetschatonly'), count(full, '-keetssidecar')], [1, 0, 1], kind + ', chat and network: ' + full);
+      assert.deepEqual([count(chat, '-keets'), count(chat, '-keetschatonly'), count(chat, '-keetssidecar')], [1, 1, 1], kind + ', chat only (the sidecar still runs): ' + chat);
+      assert.deepEqual([count(classic, '-keets'), count(classic, '-keetschatonly'), count(classic, '-keetssidecar')], [0, 0, 0], kind + ', classic only: ' + classic);
+      // a flavour whose jars do not know the flag is never given it: such a node refuses to start
+      assert.equal(count(argsOf(kind, 'chat', false), '-keetschatonly'), 0, kind + ', no capability');
+      // a stored extra argument cannot double the flag, bring it back, or hand the sidecar arguments
+      const old = argsOf(kind, 'classic', true, '-keets -keetschatonly true -keetssidecarargs --chat-only -keetsmaxconns 4');
+      assert.deepEqual([count(old, '-keets'), count(old, '-keetschatonly'), count(old, '-keetssidecarargs'), count(old, '--chat-only'), count(old, '-keetsmaxconns')], [0, 0, 0, 0, 1], kind + ', stored extras: ' + old);
+      assert.equal(count(argsOf(kind, 'chat', true, '-keetschatonly'), '-keetschatonly'), 1, kind + ', not doubled');
+    }
+    assert.throws(() => config.save({ extraArgs: '-keetschatonly' }), /-keetschatonly cannot be set in the extra arguments/);
+  } finally { Module._load = realLoad; }
+});
+
+test('0.19.441: a flavour that says its jars know chat only has jars that do (asked without starting a node)', (t) => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const { execFileSync } = require('child_process');
+  let checked = 0;
+  for (const [id, f] of Object.entries(pkg.flavors || {})) {
+    if (f.keetsChatOnly !== true) continue;
+    assert.ok(f.jars && f.jars.dir, id + ' names its jars');
+    for (const jar of ['minima.jar', 'parlons-node.jar']) {
+      const file = path.join(ROOT, f.jars.dir, jar);
+      if (!fs.existsSync(file)) continue;   // the flavour's jars are not in git (scripts/build-flavor.cjs checks their sha256 at build)
+      const keys = execFileSync('unzip', ['-p', file, 'org/minima/system/params/ParamConfigurer$ParamKeys.class'], { maxBuffer: 1 << 24 }).toString('latin1');
+      assert.ok(keys.includes('keetschatonly'), id + '/' + jar + ' must know -keetschatonly');
+      const mgr = execFileSync('unzip', ['-p', file, 'org/minima/system/network/keets/KeetsManager.class'], { maxBuffer: 1 << 24 }).toString('latin1');
+      assert.ok(mgr.includes('--chat-only'), id + '/' + jar + ' must hand --chat-only to the sidecar it starts');
+      checked++;
+    }
+  }
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).flavors.pandamonium.keetsChatOnly, true);
+  if (!checked) t.skip('the flavour\'s jars are not in this checkout (not in git): nothing to open');
+});

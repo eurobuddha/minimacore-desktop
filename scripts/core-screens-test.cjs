@@ -32,6 +32,21 @@ test("Startup Params: a titled sub screen, opened from the menu and from the Nod
   assert.ok(!/Resync automatically/.test(body), "no auto-resync switch: the desktop has nothing behind it");
 });
 
+// 0.19.441: a flavour whose node knows -keetschatonly shows the phone's three options in place of the switch
+test("Startup Params: the Keets setting is three options where the node knows chat only, and the old switch where it does not", () => {
+  const body = source("renderParams");
+  assert.ok(/CFG\.keetsChatOnly === true \?/.test(body), "decided by the capability the main process reports");
+  for (const mode of ["full", "chat", "classic"]) assert.ok(body.includes('data-keets="' + mode + '"'), "option " + mode);
+  for (const words of ["Chat and network", "Chat only", "Classic only", "KEETS_MODES_NOTE"]) assert.ok(body.includes(words), words);
+  assert.ok(body.includes(': psSwitch("pKeets", ') && body.includes("Keets transport (-keets)"), "the switch stays for the other flavour");
+  assert.ok(body.includes("MINIMA_PARAMS.setKeetsMode(P, o.dataset.keets)") && body.includes("MINIMA_PARAMS.keetsMode(P)"), "the options write and read the two params through params.js");
+  assert.ok(body.includes('if ($("pKeets"))'), "painting does not assume the switch is there");
+  assert.ok(body.includes("filter(it => !it.hidden)"), "keetschatonly is not a raw checkbox in All parameters");
+  const note = app.match(/const KEETS_MODES_NOTE = "([^"]+)"/)[1];
+  assert.ok(/Chat only: KeetChat, files and the mailbox stay, but blocks and transactions use the classic Minima network only\./.test(note) && !/no Chat tab|battery|phone/.test(note), "the phone's wording, without what is not true on a computer");
+  assert.ok(/ipcMain\.handle\("mcd:getConfig"[^\n]*keetsChatOnly = config\.keetsChatOnlySupported\(\)/.test(fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8")));
+});
+
 test("Startup Params saves node settings only: never a wallet field", () => {
   const { paramsPatch } = lift(["paramsPatch"]);
   const P = PARAMS.defaultParams();

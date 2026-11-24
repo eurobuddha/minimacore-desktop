@@ -211,6 +211,8 @@ function recordKeyMode(mode) {
  * (true) resolved to their real Keychain value. Managed flags (rpcenable/daemon/ports/seed) are added by
  * node-manager itself, so they are excluded here to avoid duplicates.
  */
+/** Do this app's node jars know -keetschatonly (main/flavor.js: the flavour says so)? Through module.exports, so a test can set it. */
+function keetsChatOnlySupported() { return flavor.keetsChatOnly === true; }
 function effectiveParams() {
   const p = load().params || {};
   const out = {};
@@ -225,6 +227,8 @@ function effectiveParams() {
       out[k] = v;
     }
   }
+  // 0.19.441: chat only is sent only WITH keets (classic only wins over a stale value) and only by a flavour whose jars know the flag
+  if (!(out.keets === true && out.keetschatonly === true && module.exports.keetsChatOnlySupported())) delete out.keetschatonly;
   return out;
 }
 
@@ -324,4 +328,4 @@ function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(se
  *  and the window's own colours follow it. */
 function themeSource(v) { return v === "light" || v === "dark" ? v : "system"; }
 
-module.exports = { themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, setMegammrImport, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+module.exports = { keetsChatOnlySupported, themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, setMegammrImport, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

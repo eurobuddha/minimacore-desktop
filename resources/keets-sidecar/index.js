@@ -14,7 +14,7 @@
 // Keep every require specifier a string literal so bare-pack can preresolve them.
 
 const IS_BARE = typeof Bare !== 'undefined'
-const VERSION = '1.3.4'
+const VERSION = '1.3.5'
 
 // On bare an uncaught error ABORTS the host process — inside a bare-kit worklet that
 // takes the whole Android app down with SIGABRT (proven on-device 2026-10-13, missing
@@ -42,6 +42,10 @@ const PORT = parseInt(arg('port', '9001'))
 const DATADIR = arg('datadir', '.')
 const TOPIC = arg('topic', 'minima-mainnet-keets-v1')
 const MAXCONNS = parseInt(arg('maxconns', '6'))
+// --chat-only (1.3.5): chat, media and the mailbox stay, but this sidecar carries NO Minima
+// traffic — it never joins the chain topic and refuses every non-service link, so the node
+// syncs over classic P2P only. Still listens on its own key, so peers reach it by pubkey.
+const CHAT_ONLY = process.argv.includes('--chat-only')
 // DHT duty. 'routing' (default, unchanged behaviour): the main DHT node is adaptive and becomes a
 // full routing node once the network shows it is directly reachable, supporting the network for
 // everyone. 'client': it never routes others' lookups (still connects, announces and receives);
@@ -198,6 +202,10 @@ let svcConns = 0
 const SVC_MAX = 16
 
 function bridge (conn, publicKey, initiator, replay) {
+  if (CHAT_ONLY) {
+    conn.destroy()
+    return
+  }
   // An accepted link can die while we peek its first bytes (the remote's swarm dedupes or gives
   // up). Bridging a dead stream counts it forever — its 'close' already fired — and after
   // MAXCONNS of those every new link is refused at the cap (1.2.14 diag on the Fold, 2026-10-26).
@@ -273,14 +281,22 @@ swarm.on('connection', (conn, info) => {
 })
 
 const topic = sha256(Buffer.from(TOPIC))
-console.log('keets step: joining topic')
-swarm.join(topic, { server: true, client: true })
-console.log('keets step: topic joined')
-for (const pk of CONNECT) {
-  swarm.joinPeer(Buffer.from(pk.replace(/^0x/i, ''), 'hex'))
+if (CHAT_ONLY) {
+  // no topic: nobody finds us as a chain peer, we dial none. The server still announces our key.
+  swarm.listen().then(
+    () => console.log('keets step: chat-only — listening on own key, chain topic not joined'),
+    (e) => console.error('keets chat-only listen failed: ' + (e && e.message))
+  )
+} else {
+  console.log('keets step: joining topic')
+  swarm.join(topic, { server: true, client: true })
+  console.log('keets step: topic joined')
+  for (const pk of CONNECT) {
+    swarm.joinPeer(Buffer.from(pk.replace(/^0x/i, ''), 'hex'))
+  }
 }
 
-console.log('keets sidecar up — pubkey:0x' + mypub + ' topic:' + TOPIC + ' node:127.0.0.1:' + PORT + ' mailboxes:' + MAILBOXES.length)
+console.log('keets sidecar up — pubkey:0x' + mypub + ' topic:' + (CHAT_ONLY ? '(chat-only)' : TOPIC) + ' node:127.0.0.1:' + PORT + ' mailboxes:' + MAILBOXES.length)
 if (mailbox) {
   mailbox.listen().catch((e) => console.error('keets mailbox failed to listen: ' + e.message))
 }
@@ -289,7 +305,7 @@ if (mailbox) {
 // token also written to a file so host apps that own the datadir can pick it up
 fs.writeFileSync(path.join(keetsdir, 'apitoken'), TOKEN + '\n', { mode: 0o600 })
 require('./api')({ port: APIPORT, token: TOKEN, mypub, media, messages, version: VERSION,
-  dhtInfo: () => ({ mode: SERVE ? 'serve' : DHT_MODE, routing: !swarm.dht.ephemeral, firewalled: swarm.dht.firewalled, mediaRouting: !media.swarm.dht.ephemeral,
+  dhtInfo: () => ({ mode: SERVE ? 'serve' : DHT_MODE, chatOnly: CHAT_ONLY, routing: !swarm.dht.ephemeral, firewalled: swarm.dht.firewalled, mediaRouting: !media.swarm.dht.ephemeral,
     mailboxes: MAILBOXES.map(m => '0x' + m),
     // fleet box: the bootstrap address to list and the mailbox pubkey to sign into the list
     serve: mailbox ? { dhtPort: DHT_PORT, publicHost: PUBLIC_HOST || null, mailboxPubkey: '0x' + mailbox.pubkey, store: mailbox.maildir } : null,

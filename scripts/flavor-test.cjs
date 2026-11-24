@@ -41,7 +41,7 @@ function build(id, o = {}) {
 
 test("the released flavour is the released identity, name for name as in 0.18.69, and nothing is set for it", () => {
   assert.deepEqual(flavor.RELEASED, { id: "", productName: "minimaCore", appId: "com.eurobuddha.minimacore", userData: "minimaCore", keychainService: "com.eurobuddha.minimacore.rpc",
-    basePort: 12001, updates: true, loginItem: true, windowTitle: "Minima Core", autostartFile: "minimacore.desktop", artifact: "minimaCore" });
+    basePort: 12001, updates: true, loginItem: true, windowTitle: "Minima Core", autostartFile: "minimacore.desktop", artifact: "minimaCore", keetsChatOnly: false });
   assert.equal(PKG.flavor, "", "the source tree names no flavour: a plain build is the released app");
   assert.equal(flavor.resolve(PKG), flavor.RELEASED); assert.equal(flavor.resolve({}), flavor.RELEASED);
   assert.equal(PKG.productName, "minimaCore"); assert.equal(PKG.build.appId, "com.eurobuddha.minimacore"); assert.equal(PKG.build.productName, "minimaCore");
@@ -66,7 +66,7 @@ test("the identity table: every identity-keyed name of Pandamonium Desktop diffe
   const P = flavor.resolve({ flavor: "pandamonium", flavors: PKG.flavors }), R = flavor.RELEASED;
   assert.deepEqual(P, { id: "pandamonium", productName: "Pandamonium Desktop", appId: "com.eurobuddha.pandamonium.desktop", userData: "PandamoniumDesktop",
     keychainService: "com.eurobuddha.pandamonium.desktop.rpc", basePort: 17001, updates: false, loginItem: false, windowTitle: "Pandamonium Desktop",
-    autostartFile: "pandamonium-desktop.desktop", artifact: "PandamoniumDesktop" });
+    autostartFile: "pandamonium-desktop.desktop", artifact: "PandamoniumDesktop", keetsChatOnly: true });   // 0.19.441
   for (const k of ["productName", "appId", "userData", "keychainService", "basePort", "windowTitle", "autostartFile", "artifact"]) assert.notEqual(String(P[k]).toLowerCase(), String(R[k]).toLowerCase(), k);
   assert.ok(!P.keychainService.startsWith(R.keychainService) && !R.keychainService.startsWith(P.keychainService), "neither keychain service is a prefix of the other");
   const b = build("pandamonium");
@@ -252,7 +252,8 @@ test("the build of a flavour: its name, id and artifact names, the flavour writt
   assert.deepEqual(cfg.mac.extendInfo, { NSCameraUsageDescription: "Pandamonium Desktop uses your camera to scan QR codes.", NSMicrophoneUsageDescription: "Pandamonium Desktop uses your microphone to record a Chat voice note when you choose Voice note." });
   assert.match(PKG.build.mac.extendInfo.NSMicrophoneUsageDescription, /^Minima Core uses your microphone/);
   assert.throws(() => builderConfig(PKG, ""), /name a flavour/); assert.equal(F.basePort, 17001);
-  assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.160", "e40ad7bc812285ba49a93715df6a9e855dcc7bfd3df9c450bee58b8b89558a39", "1.1.2.31-euro14", "e9399cce238971138d5efe7aa2fba93bfc601bce9e536fcf7477c3c2970e72e0"]);
+  assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.160-chatonly", "30db5baafa48695a6d9769160ee2d2c8a97fbd84a0d4f075af712d8c8ef7ae5a", "1.1.2.31-euro14-chatonly", "dea0a6c7b4568fcd15576dafd421bad28da79310b76d2265d2ebadf707f350dd"]);   // 0.19.441: the same jars with -keetschatonly
+  assert.equal(flavor.resolve({ flavor: "pandamonium", flavors: PKG.flavors }).keetsChatOnly, true, "this flavour's jars know -keetschatonly"); assert.equal(flavor.RELEASED.keetsChatOnly, false, "the released app's do not");
   // the jar check, on stand-in files
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flavor-jars-")), sha = (s) => require("crypto").createHash("sha256").update(s).digest("hex");
   try {

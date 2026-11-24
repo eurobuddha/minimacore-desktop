@@ -399,6 +399,9 @@ function paramsPatch(f, cfg) {
     customConnect: f.net === "custom" ? f.customPeer : "", params: f.P, extraArgs: f.extraArgs
   } };
 }
+// 0.19.441: the Keets setting of a flavour whose node knows -keetschatonly: three options, the phone's wording (its "no Chat tab" and
+// "battery" are not true here: this app always shows Chat)
+const KEETS_MODES_NOTE = "Chat and network: KeetChat, and blocks and transactions also travel over keets, as before. Chat only: KeetChat, files and the mailbox stay, but blocks and transactions use the classic Minima network only. Classic only: no keets at all - less RAM. Your chats and keets identity stay on this computer in every setting. Applies after a restart.";
 function psSwitch(id, title, on, body) {
   return `<div class="ps-sw"><span class="ps-sw__t" id="${id}L">${esc(title)}</span><button class="switch switch--m2" role="switch" id="${id}" aria-checked="${on ? "true" : "false"}" aria-labelledby="${id}L"></button></div>
     <p class="ps-note">${esc(body)}</p>`;
@@ -423,7 +426,12 @@ function renderParams(host, firstRun, done) {
       ? tr("HTTP RPC interface on port {rpcPort}. This app talks to its node through it, so it cannot be switched off. Anything that can reach the port can command this node, so it is never started without Basic auth: user minima, password below.", { rpcPort: esc(rpcPort) })
       : tr("RPC interface on port {rpcPort}, on this computer only. This app talks to its node through it, so it cannot be switched off. The Parlons Node takes no RPC password.", { rpcPort: esc(rpcPort) })}</p>
     ${plain ? `<button class="btn btn--outline ps-btn ps-btn--copy" id="pRpcCopy">${th("Copy RPC password")}</button>` : ""}
-    ${psSwitch("pKeets", t("Keets transport (-keets)"), P.keets === true, t("On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart."))}
+    ${CFG.keetsChatOnly === true ? `<div class="eyebrow ps-label">${th("Keets")}</div>
+      <label class="opt" data-keets="full"><b>${th("Chat and network")}</b></label>
+      <label class="opt" data-keets="chat"><b>${th("Chat only")}</b></label>
+      <label class="opt" data-keets="classic"><b>${th("Classic only")}</b></label>
+      <p class="ps-note">${th(KEETS_MODES_NOTE)}</p>`
+    : psSwitch("pKeets", t("Keets transport (-keets)"), P.keets === true, t("On: KeetChat and the peer-to-peer keets transport, as before. Off: no Hyperswarm sidecar and no DHT - the node runs on the classic Minima transport only and uses less RAM. Your chats and keets identity stay on this computer and return when you switch it back on. Applies after a restart."))}
     <div class="eyebrow ps-label">${th("Extra arguments (advanced)")}</div>
     <textarea class="field__input ps-field" id="extraArgs" rows="2" spellcheck="false" placeholder="${th("-p2pnodes host:port -txpowdbstore 3 …")}">${esc(CFG.extraArgs || "")}</textarea>
     <p class="ps-note ps-note--gap">${th("Space-separated flags passed to the node at boot, after the parameters below. Quotes are respected. -blockaskeyuses and -lowram are not allowed here: the wallet's key mode sets them.")}</p>
@@ -470,10 +478,10 @@ function renderParams(host, firstRun, done) {
   function renderAdvanced() {
     $("advParams").innerHTML = MINIMA_PARAMS.GROUPS.map(g => `
       <div class="adv-group"><div class="adv-group__h">${th(g.group)}</div>
-      ${g.items.map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
+      ${g.items.filter(it => !it.hidden).map(it => paramControl(it, P[it.flag])).join("")}</div>`).join("");
     $("advParams").querySelectorAll("[data-flag]").forEach(inp => {
       const f = inp.dataset.flag;
-      if (inp.type === "checkbox") inp.onchange = async () => { if (f === "megammr" && !await megaAsk(inp.checked)) { inp.checked = !inp.checked; return; } P[f] = inp.checked; paintSwitches(); };
+      if (inp.type === "checkbox") inp.onchange = async () => { if (f === "megammr" && !await megaAsk(inp.checked)) { inp.checked = !inp.checked; return; } P[f] = inp.checked; if (f === "keets" && !inp.checked) P.keetschatonly = false; paintSwitches(); };
       else inp.onchange = () => { P[f] = inp.value; };
     });
   }
@@ -484,7 +492,9 @@ function renderParams(host, firstRun, done) {
     return on ? showConfirm(t("Turn MegaMMR on?"), t(MEGAMMR_ON_NOTE), t("Turn MegaMMR on"))
       : showConfirm(t("Turn MegaMMR off?"), t(MEGAMMR_OFF_WARNING), t("Turn MegaMMR off"), true);
   };
-  const paintSwitches = () => { $("pMega").setAttribute("aria-checked", P.megammr === true ? "true" : "false"); $("pKeets").setAttribute("aria-checked", P.keets === true ? "true" : "false"); };
+  const paintSwitches = () => { $("pMega").setAttribute("aria-checked", P.megammr === true ? "true" : "false");
+    if ($("pKeets")) $("pKeets").setAttribute("aria-checked", P.keets === true ? "true" : "false");
+    host.querySelectorAll(".opt[data-keets]").forEach(x => x.classList.toggle("sel", x.dataset.keets === MINIMA_PARAMS.keetsMode(P))); };
   const applyNet = (n) => {
     net = n;
     applyNetPreset(P, net, isOn("pServer"), $("customPeer").value.trim(), CFG.peersUrl);
@@ -503,6 +513,7 @@ function renderParams(host, firstRun, done) {
     renderAdvanced();
   });
   host.querySelectorAll(".opt[data-net]").forEach(o => o.onclick = () => applyNet(o.dataset.net));
+  host.querySelectorAll(".opt[data-keets]").forEach(o => o.onclick = () => { MINIMA_PARAMS.setKeetsMode(P, o.dataset.keets); paintSwitches(); renderAdvanced(); });
   $("customPeer").oninput = () => { if (net === "custom") P.connect = $("customPeer").value.trim(); };
   $("pickFolder").onclick = async () => { const f = await api.pickFolder(); if (f) $("dataFolder").value = f; };
   if ($("pRpcCopy")) $("pRpcCopy").onclick = async () => {   // the password goes from the main process to the clipboard; it never reaches this page
@@ -515,6 +526,7 @@ function renderParams(host, firstRun, done) {
   $("customPeer").style.display = net === "custom" ? "" : "none";
   $("pServer").disabled = net === "solo";
   renderAdvanced();
+  paintSwitches();   // 0.19.441: the Keets option that is saved is the one marked
 
   const collect = () => {
     // every control of the full editor into P (a secret left blank that was already stored keeps its marker)

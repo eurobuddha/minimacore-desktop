@@ -31,7 +31,8 @@ const path = require("path"), crypto = require("crypto");
 /** The released app. These values are the ones every install since 0.1 has: do not edit them. */
 const RELEASED = Object.freeze({ id: "", productName: "minimaCore", appId: "com.eurobuddha.minimacore", userData: "minimaCore",
   keychainService: "com.eurobuddha.minimacore.rpc", basePort: 12001, updates: true, loginItem: true,
-  windowTitle: "Minima Core", autostartFile: "minimacore.desktop", artifact: "minimaCore" });
+  windowTitle: "Minima Core", autostartFile: "minimacore.desktop", artifact: "minimaCore",
+  keetsChatOnly: false });   // its jars do not know -keetschatonly: a node given a flag it does not know refuses to start
 const KEYS = ["productName", "appId", "userData", "keychainService", "basePort"];   // must ALL differ from the released app's
 
 /** The flavour a package.json names ({ flavor, flavors }). Throws when it is named and is not a whole, separate identity. */
@@ -50,7 +51,9 @@ function resolve(pkg) {
   if (Math.abs(f.basePort - RELEASED.basePort) < 1000) throw new Error("flavour '" + id + "': basePort is within the released app's port range");
   return Object.freeze({ id, productName: String(f.productName), appId: String(f.appId), userData: String(f.userData), keychainService: String(f.keychainService),
     basePort: f.basePort, updates: f.updates === true, loginItem: f.loginItem === true, windowTitle: String(f.windowTitle || f.productName),
-    autostartFile: String(f.autostartFile || (String(f.appId) + ".desktop")), artifact: String(f.artifact || f.userData) });
+    autostartFile: String(f.autostartFile || (String(f.appId) + ".desktop")), artifact: String(f.artifact || f.userData),
+    // 0.19.441: this flavour's node jars know -keetschatonly and its sidecar --chat-only (scripts/keets-test.cjs checks the pinned jars)
+    keetsChatOnly: f.keetsChatOnly === true });
 }
 
 /** Same folder, or one inside the other. Case is ignored: the Mac's file system does. */

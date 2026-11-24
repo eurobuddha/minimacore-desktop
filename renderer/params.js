@@ -35,6 +35,7 @@
       { flag: "slavenode",        type: "value", label: "Slave node (-slavenode)",         help: "Connect to this node only; accept only TxBlock messages.", def: "" },
       { flag: "allowgenmessage",  type: "bool",  label: "Allow simple messages (-allowgenmessage)", help: "Allow simple messages sent from peers.", def: false },
       { flag: "keets",            type: "bool",  label: "keets transport (-keets)",        help: "Hyperswarm/HyperDHT transport: this node becomes dialable by its Noise pubkey even behind NAT (no port forwarding). Runs the bundled sidecar; classic TCP peers are unaffected.", def: true },
+      { flag: "keetschatonly",    type: "bool",  hidden: true, label: "keets chat only (-keetschatonly)", help: "KeetChat, files and the mailbox stay; blocks and transactions use the classic Minima network only. Set by the Keets setting above, and only together with keets.", def: false },
       { flag: "keetsbootstrap",   type: "value", label: "keets bootstrap list (-keetsbootstrap)", help: "HyperDHT bootstrap host:port list. Blank = the baked-in owner-run 7-node fleet.", def: "" },
       { flag: "keetsconnect",     type: "value", label: "keets connect pubkeys (-keetsconnect)", help: "Comma-separated keets public keys to dial directly (pin your home node).", def: "" },
       { flag: "keetsmaxconns",    type: "int",   label: "keets max connections (-keetsmaxconns)", help: "Max concurrent keets links (node default 6).", def: "" }
@@ -133,10 +134,36 @@
       var t = toks[i].replace(/["']/g, "");
       if (t.charAt(0) !== "-") continue;
       var name = t.replace(/^-+/, "").split("=")[0].toLowerCase();
-      if (name === "conf" || MANAGED.indexOf(name) >= 0) return "-" + name;
+      if (name === "conf" || MANAGED.indexOf(name) >= 0 || KEETS_OWNED.indexOf(name) >= 0) return "-" + name;
     }
     return "";
   }
+
+  /** The Keets setting owns these (0.19.441, as the phone): chat and network = -keets, chat only = -keets -keetschatonly, classic only =
+   *  neither; -keetssidecarargs would hand the sidecar arguments of its own. Typed in the extra arguments they are refused (reservedArg). */
+  var KEETS_OWNED = ["keets", "keetschatonly", "keetssidecarargs"];
+  /** Extra-argument tokens without the Keets setting's own flags, for a value STORED before they were owned. The flag goes WITH its
+   *  value (the phone's strip left "-megammr -keets false" as "-megammr false"): true/false after -keets or -keetschatonly, and
+   *  whatever follows -keetssidecarargs. */
+  function withoutKeetsOwned(tokens) {
+    var out = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var raw = String(tokens[i]), t = raw.replace(/["']/g, "");
+      var name = t.charAt(0) === "-" ? t.replace(/^-+/, "").split("=")[0].toLowerCase() : "";
+      if (name && KEETS_OWNED.indexOf(name) >= 0) {
+        var next = i + 1 < tokens.length ? String(tokens[i + 1]).replace(/["']/g, "") : null;
+        if (next != null && t.indexOf("=") < 0 && (name === "keetssidecarargs" || /^(true|false)$/i.test(next))) i++;
+        continue;
+      }
+      out.push(tokens[i]);
+    }
+    return out;
+  }
+  /** The Keets setting of a params object: "full" (chat and network), "chat" (chat only) or "classic" (no keets). Classic wins over a
+   *  stale chat-only value. */
+  function keetsMode(p) { return !p || p.keets !== true ? "classic" : p.keetschatonly === true ? "chat" : "full"; }
+  /** Write a Keets setting into a params object (in place). */
+  function setKeetsMode(p, mode) { p.keets = mode !== "classic"; p.keetschatonly = mode === "chat"; return p; }
 
   /** The first extra-argument token that would turn MiniDapps (MDS) on ("-mdsenable", any -mds…), or "" (0.19.291): this app never
    *  runs MDS, and an MDS that is on lets a MiniDapp's waiting command run with full rights past every check of the app. */
@@ -147,7 +174,7 @@
   }
   /** Why a -rescuenode value is refused ("" = it is fine, or unset): host:port only (0.19.301): the node pastes it into a command. */
   function rescueProblem(v) { return v == null || v === "" || v === false ? "" : /^[A-Za-z0-9.\-]{1,253}:\d{1,5}$/.test(String(v)) ? "" : "host:port"; }
-  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, mdsArg: mdsArg, rescueProblem: rescueProblem, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
+  var API = { KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, KEETS_OWNED: KEETS_OWNED, withoutKeetsOwned: withoutKeetsOwned, keetsMode: keetsMode, setKeetsMode: setKeetsMode, mdsArg: mdsArg, rescueProblem: rescueProblem, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.MINIMA_PARAMS = API;
