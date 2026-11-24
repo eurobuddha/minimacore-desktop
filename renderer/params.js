@@ -128,13 +128,15 @@
     return "";
   }
   /** The first extra-argument token that names a parameter the app sets itself ("-data"), or -conf, or "". The node keeps the LAST value, so one in the extra arguments would override the app's. */
-  function reservedArg(extra) {
+  /** stored: true for a value read back from the saved config at node start (0.19.442): the Keets setting's own flags are then not a
+   *  reason to refuse, because a value saved before the setting owned them may hold "-keets"; the start drops them (withoutKeetsOwned). */
+  function reservedArg(extra, stored) {
     var toks = String(extra == null ? "" : extra).split(/\s+/);
     for (var i = 0; i < toks.length; i++) {
       var t = toks[i].replace(/["']/g, "");
       if (t.charAt(0) !== "-") continue;
       var name = t.replace(/^-+/, "").split("=")[0].toLowerCase();
-      if (name === "conf" || MANAGED.indexOf(name) >= 0 || KEETS_OWNED.indexOf(name) >= 0) return "-" + name;
+      if (name === "conf" || MANAGED.indexOf(name) >= 0 || (!stored && KEETS_OWNED.indexOf(name) >= 0)) return "-" + name;
     }
     return "";
   }
@@ -152,7 +154,9 @@
       var name = t.charAt(0) === "-" ? t.replace(/^-+/, "").split("=")[0].toLowerCase() : "";
       if (name && KEETS_OWNED.indexOf(name) >= 0) {
         var next = i + 1 < tokens.length ? String(tokens[i + 1]).replace(/["']/g, "") : null;
-        if (next != null && t.indexOf("=") < 0 && (name === "keetssidecarargs" || /^(true|false)$/i.test(next))) i++;
+        // the value goes too: true/false, or for -keetssidecarargs what follows, unless that is a parameter of its own ("-megammr";
+        // the node never takes a dash-led token as a value, but "--chat-only" is a sidecar argument)
+        if (next != null && t.indexOf("=") < 0 && (/^(true|false)$/i.test(next) || (name === "keetssidecarargs" && (next.charAt(0) !== "-" || next.slice(0, 2) === "--")))) i++;
         continue;
       }
       out.push(tokens[i]);

@@ -298,7 +298,9 @@ ipcMain.handle("mcd:langSet", (_e, code) => {
 ipcMain.handle("mcd:appVersion", () => app.getVersion());
 // Which app this is, for the screens: its name, and whether it updates itself and may open at login (main/flavor.js).
 ipcMain.handle("mcd:flavor", () => ({ id: flavor.id, name: flavor.productName, title: flavor.windowTitle, updates: !updater.OFF, loginItem: flavor.loginItem && !flavor.test, basePort: flavor.basePort }));
-ipcMain.handle("mcd:getConfig", () => { const c = config.load(); c.keetsChatOnly = config.keetsChatOnlySupported(); return c; });   // 0.19.441: read-only for the page; not a config key (a save drops it)
+// 0.19.441: what the page is told beside the config: read-only, not a config key (a save drops it). 0.19.442: on EVERY config the page
+// gets, the one a save answers with too: the page keeps that one, and the three Keets options turned back into the switch after any save.
+ipcMain.handle("mcd:getConfig", () => { const c = config.load(); c.keetsChatOnly = config.keetsChatOnlySupported(); return c; });
 ipcMain.handle("mcd:saveConfig", (_e, patch) => saveConfigPatch(patch));
 const NODE_START_KEYS = ["params", "extraArgs", "dataFolder", "basePort", "rpcPortManual", "heapMb", "nodeKind", "contribute", "network", "customConnect"];
 /** The window's config patch, saved (also by a restart that carries one: mcd:nodeRestart, 0.19.287). */
@@ -311,6 +313,7 @@ function saveConfigPatch(patch) {
   reserveMode(c);
   if (c.walletDone) firstRunOpen = false;   // the wallet step is over for this launch
   if (patch && "openAtLogin" in patch) c.loginItem = loginitem.apply(app, c.openAtLogin);   // transient status for the Settings toast, not persisted
+  c.keetsChatOnly = !!(config.keetsChatOnlySupported && config.keetsChatOnlySupported());   // 0.19.442: the page keeps THIS object (see mcd:getConfig)
   return c;
 }
 // Key mode (main/keymode.js). The renderer may ASK for a mode when a wallet is created or restored; config

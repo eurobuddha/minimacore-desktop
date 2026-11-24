@@ -98,6 +98,11 @@ test('0.19.441: the setting owns -keets, -keetschatonly and -keetssidecarargs: r
   assert.equal(strip('-keetschatonly true -keetsconnect abc'), '-keetsconnect abc');
   assert.equal(strip('-keetssidecarargs --chat-only -megammr'), '-megammr');
   assert.equal(strip('-keets -megammr'), '-megammr', 'a flag that follows is not taken for a value');
+  assert.equal(strip('-keetssidecarargs -megammr -archive'), '-megammr -archive', '0.19.442: nor after -keetssidecarargs (0.19.441 swallowed -megammr)');
+  assert.equal(strip('-keetssidecarargs x -megammr'), '-megammr');
+  // 0.19.442: at node start a STORED value is not a reason to refuse (the start drops these flags); typed, it still is
+  for (const stored of ['-keets', '-keetsmaxconns 4 -keets', '-keetschatonly', '-keetssidecarargs x']) assert.equal(PARAMS441.reservedArg(stored, true), '', stored);
+  assert.equal(PARAMS441.reservedArg('-data /x', true), '-data', 'what the app manages is refused either way');
   assert.equal(strip('-keetsconnect abc -keetsmaxconns 4'), '-keetsconnect abc -keetsmaxconns 4', 'the user\'s keets flags are kept');
   // the three settings, and classic only winning over a stale chat-only value
   assert.equal(PARAMS441.keetsMode({ keets: true, keetschatonly: false }), 'full');
@@ -149,6 +154,14 @@ test('0.19.441: what the node is started with, for the three settings, on both n
       assert.equal(count(argsOf(kind, 'chat', true, '-keetschatonly'), '-keetschatonly'), 1, kind + ', not doubled');
     }
     assert.throws(() => config.save({ extraArgs: '-keetschatonly' }), /-keetschatonly cannot be set in the extra arguments/);
+    // 0.19.442 (review of 0.19.441, MAJOR): the node START must not be refused for such a stored value. 0.19.441 said "is in the
+    // extra arguments ... Remove it in Startup Params" and did not start the node; the test above called buildArgs past that gate.
+    for (const kind of ['minima', 'parlons']) for (const extra of ['-keets', '-keetsmaxconns 4 -keets', '-keetschatonly', '-keetssidecarargs --chat-only']) {
+      argsOf(kind, 'full', true, extra);
+      assert.equal(node.keyModeProblem(), '', kind + ': the start is not refused for a stored ' + extra);
+    }
+    argsOf('minima', 'full', true, '-data /elsewhere');
+    assert.match(node.keyModeProblem(), /-data is in the extra arguments/, 'a flag the app manages still stops the start');
   } finally { Module._load = realLoad; }
 });
 
@@ -171,4 +184,20 @@ test('0.19.441: a flavour that says its jars know chat only has jars that do (as
   }
   assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).flavors.pandamonium.keetsChatOnly, true);
   if (!checked) t.skip('the flavour\'s jars are not in this checkout (not in git): nothing to open');
+});
+
+// 0.19.442 (review of 0.19.441, MAJOR): the page keeps the config a SAVE answers with; without the capability on it the three options
+// turned back into the on/off switch after any save (a new wallet, the theme, plain Save), until the app was started again
+test('0.19.442: the page is told the chat-only capability on every config it gets, the answer of a save too; a -conf file cannot set the owned flags', () => {
+  const main = fs.readFileSync(path.join(ROOT, 'main/main.js'), 'utf8');
+  assert.ok(/ipcMain\.handle\("mcd:getConfig"[^\n]*c\.keetsChatOnly = config\.keetsChatOnlySupported\(\); return c;/.test(main), 'getConfig');
+  const save = main.slice(main.indexOf('function saveConfigPatch(patch) {'), main.indexOf('\n}', main.indexOf('function saveConfigPatch(patch) {')));
+  assert.ok(/c\.keetsChatOnly = !!\(config\.keetsChatOnlySupported && config\.keetsChatOnlySupported\(\)\);[^\n]*\n\s*return c;\s*$/.test(save), 'saveConfigPatch answers with it');
+  // and for real: the function lifted out of main.js, with a config that has the capability
+  const lifted = new Function('config', 'notBusy', 'nativeTheme', 'reserveMode', 'loginitem', 'app', 'NODE_START_KEYS', 'let firstRunOpen = false;\n' + save + '\n}\nreturn saveConfigPatch;')(
+    { save: (p) => Object.assign({ theme: 'system' }, p), keetsChatOnlySupported: () => true, themeSource: () => 'system' }, () => {}, {}, () => {}, { apply: () => ({}) }, {}, []);
+  assert.equal(lifted({ labels: {} }).keetsChatOnly, true, 'a save of anything answers with the capability');
+  const km = fs.readFileSync(path.join(ROOT, 'main/keymode.js'), 'utf8');
+  assert.ok(km.includes('PARAMS.MANAGED.concat(["conf"], PARAMS.KEETS_OWNED)'), 'the -conf file check knows the three owned names');
+  assert.ok(km.includes('PARAMS.reservedArg(o.extraArgs, true)'), 'the start gate reads the stored value as stored');
 });

@@ -73,7 +73,7 @@ function markBlockFolder(dir) {
 function startFlags(mode) { return mode === "block" ? ["-blockaskeyuses", "true", "-lowram", "true"] : []; }
 
 const KEY_FLAGS = PARAMS.KEY_MODE_FLAGS;
-const APP_OWNED = PARAMS.MANAGED.concat(["conf"]);   // set by the app (conf: by its own parameter only), never by hand
+const APP_OWNED = PARAMS.MANAGED.concat(["conf"], PARAMS.KEETS_OWNED);   // set by the app (conf: by its own parameter only), never by hand; 0.19.442: nor the Keets setting's flags from a -conf file
 /** "-Name", "--name", "-name=x" → "name"; anything that does not start with a dash → "". */
 const flagName = (tok) => (String(tok).charAt(0) === "-" ? String(tok).replace(/^-+/, "").split("=")[0].toLowerCase() : "");
 
@@ -182,7 +182,7 @@ function startProblem(o) {
     return "This wallet uses block key uses, and the node in this version of the app cannot run it. The node was not started, because starting it here would add classic keys to the wallet for good. Install the newer version of the app this wallet was made with.";
   const arg = PARAMS.keyModeArg(o.extraArgs);
   if (arg) return arg + " is in the extra arguments. The wallet's key mode sets it, so it cannot be passed by hand. Remove it in Startup Params.";
-  const owned = PARAMS.reservedArg(o.extraArgs);
+  const owned = PARAMS.reservedArg(o.extraArgs, true);   // stored: the Keets setting's own flags are dropped by the start, not a reason to refuse it (0.19.442)
   if (owned) return owned + " is in the extra arguments. The app sets it itself, and a second one would override the app's. Remove it in Startup Params.";
   // The node reads any token that starts with a dash as a parameter NAME, wherever it stands.
   for (const [k, v] of Object.entries(o.params || {}))
