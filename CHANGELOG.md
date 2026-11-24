@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.434] — On Windows the app's exit no longer ends the node unsaved
+
+- Independent review of 0.19.428 (MINOR 7). When the app closes with its node still running and not yet told to quit, it sent the node SIGTERM and logged "sent SIGTERM, so it saves and stops by itself". On Windows that call is TerminateProcess: the node ends at once, with no shutdown hook and nothing saved.
+- main/node-manager.js killNow: on Windows nothing is sent. The node runs on as it is, and the next launch stops it with `quit` and waits for it (as it already does for a node left by a crash). The log line says what was done on each platform. macOS and Linux are unchanged.
+- Test: scripts/lifecycle-test.cjs (fails on 0.19.433: SIGTERM was sent).
+
 ## [0.19.433] — A stop sees the node writing its H2 stores, not only the files beside them
 
 - Independent review of 0.19.428 (MINOR 6). A stop takes a write in the node's databases folder as a sign that the node is saving. Only the files directly in `<data>/<version>/databases` were looked at (megammr.mmr and the like); the H2 stores live one folder down (walletsql, archivesql, txpowsql, coindb, txblockdb), and H2 rewrites its file in place, so the folder's own time does not move: a node writing only those counted as silent.

@@ -484,12 +484,17 @@ class NodeManager extends EventEmitter {
    * quit, or signalled, is left to finish saving and exit by itself; any other is sent SIGTERM, which makes the node run its own
    * shutdown (Minima.java's shutdown hook: Main.shutdown, every database saved). The pidfile stays, so the next launch finds it
    * (reclaimStaleNode) and waits for it.
+   * On Windows NOTHING is sent (0.19.434): there "SIGTERM" is TerminateProcess, the process ends at once with no shutdown hook and
+   * nothing saved. The node is left running as it is, and the next launch stops it with `quit` (reclaimStaleNode).
    */
   killNow() {
     const p = this.proc;
     if (!p) return;
-    if (!this.quitSent) { try { p.kill("SIGTERM"); } catch (e) {} }
-    this.log("[app] the app is closing with its node still running (pid " + p.pid + "): " + (this.quitSent ? "it was told to quit and is left to finish saving" : "sent SIGTERM, so it saves and stops by itself") + "; the next launch waits for it");
+    const win = (this.sys.platform || process.platform) === "win32";
+    if (!this.quitSent && !win) { try { p.kill("SIGTERM"); } catch (e) {} }
+    this.log("[app] the app is closing with its node still running (pid " + p.pid + "): " + (this.quitSent ? "it was told to quit and is left to finish saving; the next launch waits for it"
+      : win ? "nothing was sent to it (on Windows a signal ends a process at once, with nothing saved), so it runs on as it is; the next launch stops it with `quit` and waits for it"
+      : "sent SIGTERM, so it saves and stops by itself; the next launch waits for it"));
     this.proc = null;
   }
 

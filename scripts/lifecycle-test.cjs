@@ -172,6 +172,20 @@ test("the app's own exit never kills the node: one told to quit is left to save,
   } finally { s.off(); restore(); }
 });
 
+test("0.19.434: on Windows the app's own exit sends the node nothing (there SIGTERM ends it at once, unsaved), and the log does not say it saves", () => {
+  fresh();
+  const sent = [], lines = () => m.logs.filter((l) => /the app is closing with its node still running/.test(l));
+  m.sys = Object.assign({}, real.sys, { platform: "win32" }); m.proc = { pid: 4242, kill: (s) => sent.push(s) }; m.quitSent = false;
+  m.killNow();
+  assert.deepEqual(sent, [], "no signal on Windows"); assert.equal(m.proc, null);
+  assert.match(lines()[0], /\(pid 4242\): nothing was sent to it \(on Windows a signal ends a process at once, with nothing saved\), so it runs on as it is; the next launch stops it with `quit` and waits for it$/);
+  assert.ok(!/saves and stops by itself/.test(lines()[0]));
+  m.logs = []; m.sys = Object.assign({}, real.sys, { platform: "darwin" }); m.proc = { pid: 4243, kill: (s) => sent.push(s) }; m.quitSent = false;
+  m.killNow();
+  assert.deepEqual(sent, ["SIGTERM"]); assert.match(lines()[0], /sent SIGTERM, so it saves and stops by itself; the next launch waits for it$/);
+  restore();
+});
+
 test("a node of an earlier launch still SAVING is waited for at the next start, its writes being its sign of life (the old reclaim signalled it after 8 s)", { timeout: 60_000 }, async () => {
   fresh({ silenceMs: 3_000, quitRetryMs: 500 });
   const c = spawn(process.execPath, [STANDIN, "-jar", "/x/minima.jar", dataDir(), "14000", "28", "1", "0", "1"], { stdio: "ignore", detached: true }); children.push(c);
