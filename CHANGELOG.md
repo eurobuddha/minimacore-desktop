@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.423] — An older copy of the app refuses a data folder a newer copy wrote
+
+- Every build since 0.19.105 uses the same data folder, and nothing recorded which version last wrote it. On 23 Nov 2026 a stray 0.19.105 was opened on the folder 0.19.416 had written: it knows nothing of the MegaMMR import marker, the frozen apps or the stop guard.
+- main/writermark.js (new): each node start records the app's version in `<data folder>/minimacore-writer.txt` (only ever raised). A copy older than the recorded version does not start the node: "This data folder was last used by Pandamonium Desktop {v}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open Pandamonium Desktop {v} or newer. This copy is at {its own path}".
+- Limit: builds older than 0.19.423 do not read the mark, so they are not stopped by it; keep old copies out of reach.
+- Test: scripts/writermark-test.cjs (in test:flavor; the module does not exist on 0.19.422).
+
 ## [0.19.422] — AtomiX: a market is never published as zero because a balance read failed
 
 - Review of minimaCore Desktop 0.18.328 (MAJOR 2), the same code in all three desktop apps. `makerAvail` turned a failed read into 0 (`Number(b.minima) || 0`: `balances()` gives "0" when the `balance` RPC fails and "—" when the USDT read fails), and Save, Publish and the desk's republish then published a zero order: the market left every book and a key use was spent, with no error.
