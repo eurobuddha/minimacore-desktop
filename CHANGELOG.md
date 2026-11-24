@@ -7,6 +7,16 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.340] — P2P Chance settle mode: the scan sees old coins, and a flood of forged coins costs a bounded amount of work
+
+- Review of 0.18.330 (MINORS 7 and 8).
+- **No `depth:4096` on the scan.** `depth` makes the node stop walking back from its tip after that many blocks (`TxPoWSearcher.searchCoins`: `if(depth++>zDepth) break`): on a longer tree an older coin that is still unspent is not in the answer. An open offer that is not seen cannot hold the reveal of a bet with the same secret, and an old bet is not settled. The scan is now `coins address:<the contract>`, the whole confirmed chain. `coins` has no row limit, so the answer's size is the node's; what is done with it is bounded as below.
+- **Keychain reads** (each one starts a `security` process on the main process): a secret is looked up only for a coin that has passed every other check (shapes, pot, stake, the open-offer rule, depth of the take, token, the signature count), and for at most 4 commits in one scan; a commit that was looked up and not found is not asked again for 10 minutes. A coin whose turn has not come says "Its secret has not been looked up yet". 200 forged coins made 400 lookups a scan; they now make none unless each also holds a full bet × payout pot, and then 4 commits a scan.
+- **Judged**: only coins that name a key of this wallet in state 0 or 8 (found without a question to the node), the largest amount first, at most 1000 a scan: a flood of small coins cannot push a large one out. The open offers are read once a scan, not once per bet.
+- **A coin's states**: at most 16, and 140,000 characters in all (a coin fits one 64K transaction); a longer one is not read at all.
+- **The window gets 40 rows**: what can be acted on first, then the largest; with the count of the rest and of all ("N more coins at the contract that name a key of this wallet are not shown"). The count of open offers is of all of them.
+- Tests: the stand-in honours `depth:` as the node does; an open offer 5000 blocks old holds its twin's reveal (0.18.339 revealed it); the lookup counts; the row cap and its order; a coin with 28 states or 140,002 characters is not read. Each fails on 0.18.339.
+
 ## [0.18.339] — P2P Chance settle mode: the house secret is not revealed for a take that is less than 5 blocks deep
 
 - Review of 0.18.330 (MAJOR 5). The reveal was posted in the block pass that first saw the take (coin age 0). A taker with mining weight could publish a take, read the house secret from the reveal, and replace that block with a take carrying the pick the secret makes win.

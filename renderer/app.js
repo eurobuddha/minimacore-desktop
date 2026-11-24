@@ -3184,16 +3184,17 @@ async function csRender() {
       <div class="kv"><span class="kv__k">Coin id</span><span class="kv__v">${idHtml(x.coinid)}</span></div>
       ${x.problem ? `<div class="view__desc">Not settled automatically: ${esc(x.problem)}.</div>` : ""}${x.note ? `<div class="view__desc">${esc(x.note)}</div>` : ""}${btn}</div>`;
   };
-  const offers = r.rows.filter(x => x.action === "cancel" && !x.held).length, good = r.rows.filter(x => !x.problem), odd = r.rows.filter(x => x.problem);
+  const offers = r.offers, good = r.rows.filter(x => !x.problem), odd = r.rows.filter(x => x.problem);
   body.innerHTML =
     (offers ? `<div class="card card--amber"><div class="card__title">You have ${offers} open offer${offers === 1 ? "" : "s"}</div>
       <div class="view__desc">Anyone can take an open offer at any time, and nothing renews or watches it while this app is closed. Cancelling returns the stake to this wallet.</div>
       <button class="btn btn--danger btn--full" id="csCancelAll"${dis}>Cancel all my open offers</button></div>` : "") +
     (r.auto && r.auto.reached ? `<div class="card card--amber"><div class="card__title">The automatic limit is reached</div>
       <div class="view__desc">This app signed ${esc(r.auto.usedToday)} P2P Chance transactions by itself in the last 24 hours (the limit is ${esc(r.auto.perDay)}). It signs no more by itself until that number falls. Each signature uses up a little of a wallet key, so the number is limited. The buttons below still work.</div></div>` : "") +
-    (r.rows.length ? "" : `<div class="card"><div class="view__desc">This wallet has no coin at the P2P Chance contract (block ${esc(r.tip)}). Nothing to cancel or settle.</div></div>`) +
+    (r.coins ? "" : `<div class="card"><div class="view__desc">This wallet has no coin at the P2P Chance contract (block ${esc(r.tip)}). Nothing to cancel or settle.</div></div>`) +
     good.map(rowHtml).join("") +
-    (odd.length ? `<div class="view__sub">Not settled automatically (${odd.length})</div>` + odd.map(rowHtml).join("") : "") + contract;
+    (odd.length ? `<div class="view__sub">Not settled automatically (${odd.length})</div>` + odd.map(rowHtml).join("") : "") +
+    (r.more ? `<div class="card card--amber"><div class="view__desc">${esc(r.more)} more coin${r.more === 1 ? "" : "s"} at the contract that name a key of this wallet ${r.more === 1 ? "is" : "are"} not shown (${esc(r.coins)} in all; the ${esc(r.rows.length)} shown are the ones that can be acted on first, the largest first). Anyone can send a coin there with this wallet's public key in it.</div></div>` : "") + contract;
 }
 async function csClick(e) {
   const one = e.target.closest && e.target.closest("[data-cs]"), all = e.target.id === "csCancelAll";

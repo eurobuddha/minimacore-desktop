@@ -88,7 +88,8 @@ function standin(opt = {}) {
     if (verb === "getaddress") return { status: true, response: { address: n.addrs[0], publickey: n.keys[0], simple: true } };
     if (verb === "coins") {   // never a spent coin; the newest first (the node walks back from its tip); [] while it is syncing
       if (n.syncing) return { status: true, response: [] };
-      const live = n.coins.map((c, i) => [c, i]).filter(([c]) => !c.spent && (p.coinid ? up(c.coinid) === up(p.coinid) : up(c.address) === up(p.address))).sort((a, b) => (b[0].created - a[0].created) || (b[1] - a[1])).map(([c]) => c);
+      const deep = (c) => p.depth !== undefined && c.created < n.tip - Number(p.depth);   // depth: the node stops walking back from its tip after that many blocks
+      const live = n.coins.map((c, i) => [c, i]).filter(([c]) => !c.spent && !deep(c) && (p.coinid ? up(c.coinid) === up(p.coinid) : up(c.address) === up(p.address))).sort((a, b) => (b[0].created - a[0].created) || (b[1] - a[1])).map(([c]) => c);
       return { status: true, response: live.map(json) };
     }
     if (verb === "txncreate") { n.txns.set(p.id, { id: p.id, inputs: [], outputs: [], state: {}, signed: [] }); return { status: true, response: {} }; }
@@ -131,7 +132,7 @@ const signs = (n) => n.ran.filter(p => /^txnsign/.test(p)).length;
 function use(n, secrets = {}) {
   let mem = {}; const notes = [];
   n.clock = 1800000000000; if (S._setClock) S._setClock(() => n.clock);
-  S.invalidate(); S._setRunner(n.run); S._setSecrets((name) => secrets[name] || null); S._setStore({ load: () => JSON.parse(JSON.stringify(mem)), save: (o) => { mem = JSON.parse(JSON.stringify(o)); } });
+  S.invalidate(); S._setRunner(n.run); n.lookups = 0; S._setSecrets((name) => { n.lookups++; return secrets[name] || null; }); S._setStore({ load: () => JSON.parse(JSON.stringify(mem)), save: (o) => { mem = JSON.parse(JSON.stringify(o)); } });
   S.emitter.removeAllListeners("notify"); S.emitter.on("notify", (m) => notes.push(m));
   return { notes, posted: () => (mem.posted || {}), mem: () => mem };
 }
@@ -238,7 +239,7 @@ test("(c) RESOLVE: a revealed bet this wallet WON is paid out by the pass: winni
     const l = await S.list();
     assert.match(l.rows.find(r => r.coinid === a.coinid).problem, new RegExp("the winnings would go to " + XA + ", which the node does not list")); assert.equal(l.rows.find(r => r.coinid === a.coinid).manualOk, true);
     assert.match(l.rows.find(r => r.coinid === b.coinid).problem, /the pot \(0\.41\) is smaller than the winnings \(0\.42\)/);
-    use(n, {}); assert.match((await S.list()).rows[1].problem, /the secret of this bet is not on this computer/);
+    use(n, {}); assert.match((await S.list()).rows.find(r => r.coinid === a.coinid).problem, /the secret of this bet is not on this computer/);
     assert.deepEqual(n.built(), []); clean(n);
   }
 });
@@ -668,6 +669,53 @@ test("the reveal waits until the take is 5 blocks deep (half the timeout when th
     for (let age = 0; age < deep; age++) { assert.deepEqual(await S.pass(), { done: [], failed: [] }, "timeout " + to + " age " + age); m.tip += 1; }
     assert.deepEqual((await S.pass()).done.map(d => d.coinid), [x.coinid], "timeout " + to + ": revealed at age " + deep); m.mine(); assert.deepEqual(m.verdicts, [true]);
   }
+});
+
+// 0.18.340 (review of 0.18.330, MINORS 7 and 8): what a scan costs is bounded, and the scan is not blind to an old coin.
+test("the scan reads the whole confirmed chain (no depth:4096): an open offer older than 4096 blocks is seen and still holds its twin's reveal", async () => {
+  const n = standin({ tip: 20000 }), o = coin(n, 1, "0.07", offer(), { created: 20000 - 5000 }), t = coin(n, 2, "0.14", taken(), { created: 20000 - 50 }); use(n, houseSecret);
+  assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal(leaked(n), false, "the secret of an open offer is not shown because the offer is old");
+  assert.equal((await S.list()).rows.find(r => r.coinid === o.coinid).action, "cancel", "and the old offer is listed, with its Cancel button");
+  assert.ok(n.ran.includes("coins address:" + CONTRACT)); assert.ok(!n.ran.some(p => /^coins/.test(p) && p !== "coins address:" + CONTRACT), "one scan command, no depth");
+  assert.equal(S.SCAN, "coins address:" + CONTRACT); await assert.rejects(S._run("coins address:" + CONTRACT + " depth:4096"), (e) => e.notSent === true); assert.ok(t);
+});
+
+test("a flood of forged coins costs no keychain read unless a coin passes every other check, and then 4 commits a scan; the real offer's secret is looked up first", async () => {
+  const commitOf = (i) => sha3("0x" + (0x1000 + i).toString(16).toUpperCase().repeat(16));   // commits nobody here holds a secret for
+  { // 200 forged taken bets that fail another check (the pot is not bet x payout): not one lookup
+    const n = standin(); for (let i = 0; i < 200; i++) coin(n, 100 + i, "0.000003", taken({ 2: commitOf(i) })); use(n, houseSecret);
+    await S.pass(); await S.list(); assert.equal(n.lookups, 0);
+  }
+  { // 200 that pass every check but the secret (each a different commit), newer than a real taken offer
+    const n = standin(), real = coin(n, 1, "0.14", taken(), { created: 5000 - 100 });
+    for (let i = 0; i < 200; i++) coin(n, 100 + i, "0.000002", taken({ 2: commitOf(i), 5: "0.000001" }), { created: 5000 - 6 });
+    use(n, houseSecret);
+    const r = await S.pass();
+    assert.deepEqual(r.done.map(d => [d.action, d.coinid]), [["reveal", real.coinid]], "the largest coin is judged first: the real offer is revealed in the first pass");
+    assert.ok(n.lookups <= 4 * 2, "at most 4 commits looked up in one scan (two spellings each): " + n.lookups); const first = n.lookups;
+    await S.list(); assert.ok(n.lookups - first <= 4 * 2);
+    const waiting = (await S.list()).rows.filter(x => /^Its secret has not been looked up yet: at most 4 are looked up in one pass/.test(x.note)); assert.ok(waiting.length > 0, "the rest say so");
+    for (let b = 0; b < 100; b++) await S.pass();
+    assert.ok(n.lookups <= 200 * 2 + 2, "and a commit that was looked up is not looked up again within 10 minutes: " + n.lookups);
+    assert.match((await S.list()).rows.find(x => x.problem).problem, /the secret of this offer is not on this computer/);
+  }
+  { // forged revealed bets naming this wallet as the player, each a different commit: the same bound
+    const n = standin(); for (let i = 0; i < 100; i++) coin(n, 100 + i, "0.14", revealed({ 0: XK, 1: XA, 8: K1, 9: ADDR1, 10: commitOf(i) })); use(n, playerSecret);
+    await S.pass(); assert.ok(n.lookups <= 4 * 2, String(n.lookups));
+  }
+});
+
+test("the window gets 40 rows, what can be acted on first and the largest first, with the count of the rest; a coin with too many states is not read at all", async () => {
+  const n = standin(), o = coin(n, 1, "0.07", offer()), t = coin(n, 2, "0.14", taken({ 2: hx("99") }));
+  for (let i = 0; i < 200; i++) coin(n, 100 + i, "0.000001", without(claimable(), 3), { created: 5000 - 1 });
+  use(n);
+  const l = await S.list();
+  assert.deepEqual([l.rows.length, l.more, l.coins, l.offers], [40, 162, 202, 1]);
+  assert.equal(l.rows[0].coinid, o.coinid, "the open offer first: it is the row with something to do"); assert.equal(l.rows[1].coinid, t.coinid, "then the largest of the rest");
+  const app = fs.readFileSync(path.resolve(__dirname, "../renderer/app.js"), "utf8");
+  assert.match(app, /\$\{esc\(r\.more\)\} more coin\$\{r\.more === 1 \? "" : "s"\} at the contract that name a key of this wallet/); assert.match(app, /const offers = r\.offers,/);
+  { const m = standin(), big = offer(); for (let p = 20; p < 40; p++) big[p] = "1"; const c = coin(m, 1, "0.07", big), huge = coin(m, 2, "0.07", offer({ 9: "0x" + "AB".repeat(70001) })); use(m);
+    assert.deepEqual((await S.list()).rows, []); assert.deepEqual(await S.cancelAll(), { done: [], failed: [] }); await assert.rejects(S.settle(c.coinid), /does not list a key of that coin/); assert.deepEqual(m.built(), []); assert.ok(huge); }
 });
 
 test("the window: one dialog from the notice and from Settings, ids copyable, Cancel offer / Settle now / Cancel all; no bet, offer or take channel", () => {

@@ -65,13 +65,24 @@ const V = require("./validate");
 const { sha3_256 } = require("./sha3");
 
 const emitter = new EventEmitter();
+let now = () => Date.now();
 const SOURCE = "P2P Chance settle";
 const CONTRACT = "0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F";
 const MXUSD_TOKENID = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";   // the Minima dollar token is MxUSD
 // The covenant, verbatim: it must compile to CONTRACT (txnbasics attaches its script proof from the node's script row).
 const SCRIPT = 'LET hpk=PREVSTATE(0) LET ha=PREVSTATE(1) LET hc=PREVSTATE(2) LET rng=PREVSTATE(3) LET po=PREVSTATE(4) LET bt=PREVSTATE(5) LET ph=PREVSTATE(6) LET to=PREVSTATE(7) IF ph EQ 0 AND SIGNEDBY(hpk) THEN RETURN TRUE ENDIF IF ph EQ 0 THEN ASSERT SAMESTATE(0 5) ASSERT STATE(6) EQ 1 ASSERT STATE(7) EQ to ASSERT STATE(11) GTE 0 AND STATE(11) LT rng ASSERT VERIFYOUT(@INPUT @ADDRESS @AMOUNT+bt @TOKENID TRUE) RETURN TRUE ENDIF LET qk=PREVSTATE(8) LET pk=PREVSTATE(11) IF ph EQ 1 AND SIGNEDBY(hpk) THEN ASSERT SAMESTATE(0 5) ASSERT STATE(6) EQ 2 ASSERT SAMESTATE(7 11) LET hs=STATE(12) ASSERT SHA3(hs) EQ hc ASSERT VERIFYOUT(@INPUT @ADDRESS @AMOUNT @TOKENID TRUE) RETURN TRUE ENDIF IF ph EQ 1 AND @COINAGE GT to AND SIGNEDBY(qk) THEN RETURN TRUE ENDIF IF ph EQ 2 AND SIGNEDBY(qk) THEN LET ps=STATE(13) ASSERT SHA3(ps) EQ PREVSTATE(10) LET hs=PREVSTATE(12) LET h=SHA3(CONCAT(hs ps)) LET r=NUMBER(SUBSET(0 4 h))%rng IF r EQ pk THEN LET w=bt*po ASSERT VERIFYOUT(@INPUT PREVSTATE(9) w @TOKENID FALSE) IF @AMOUNT GT w THEN ASSERT VERIFYOUT(@INPUT+1 ha @AMOUNT-w @TOKENID FALSE) ENDIF ELSE ASSERT VERIFYOUT(@INPUT ha @AMOUNT @TOKENID FALSE) ENDIF RETURN TRUE ENDIF IF ph EQ 2 AND @COINAGE GT to AND SIGNEDBY(hpk) THEN RETURN TRUE ENDIF RETURN FALSE';
 const NEWSCRIPT = 'newscript script:"' + SCRIPT + '" trackall:false';
-const SCAN = "coins address:" + CONTRACT + " depth:4096";   // the confirmed chain; depth above every tree length, as the removed engine
+// The confirmed chain, the WHOLE of it (0.18.340). `depth:4096` (0.18.330) made the node stop walking back from its tip after
+// 4096 blocks (TxPoWSearcher.searchCoins: "if(depth++>zDepth) break"): on a longer tree an older coin that is still unspent is
+// simply not in the answer, and an open offer that is not seen cannot hold a reveal. `coins` has no row limit, so what is DONE
+// with the answer is bounded here instead: MAX_STATES / MAX_STATE_CHARS per coin, JUDGE_MAX coins of this wallet judged in one
+// scan (largest first), SECRETS_PER_SCAN keychain lookups, ROWS_SHOWN rows to the window.
+const SCAN = "coins address:" + CONTRACT;
+const MAX_STATES = 16;            // states of one coin (this app's coins have 8, 12 or 13)
+const MAX_STATE_CHARS = 140000;   // text of one coin's states (a coin fits one 64K transaction: 128K hex digits at most)
+const JUDGE_MAX = 1000;           // coins of this wallet judged in one scan, the largest first
+const SECRETS_PER_SCAN = 4;       // commits whose secret is looked up in the system keychain in one scan (each: up to 3 processes)
+const ROWS_SHOWN = 40;            // rows sent to the window (with the count of the rest)
 const REPOST_AFTER = 10;      // blocks a posted transaction is given before it may be built again
 const SCAN_EVERY_MS = 12000;
 const AUTO_TRIES = 3;         // automatic signatures for ONE coin, ever: after that only the button
@@ -151,21 +162,26 @@ function decMulInt(a, k) { const x = dec(a); return fmt(x[0] * BigInt(k), x[1]);
 // ---- secrets: the removed app's own keychain entries, read only ----
 let readSecret = (name) => { try { return require("./config").getSecret("casino-" + crypto.createHash("sha256").update(String(name)).digest("hex")); } catch (e) { return null; } };
 const secretCache = new Map();   // found: kept; not found: asked again after 10 minutes (each keychain read starts a process)
+const cached = (name) => { const hit = secretCache.get(name); return hit && (hit.v || now() - hit.at < 600000) ? hit : null; };
 function lookup(name) {
-  const hit = secretCache.get(name);
-  if (hit && (hit.v || Date.now() - hit.at < 600000)) return hit.v;
+  const hit = cached(name); if (hit) return hit.v;
   let v = null; try { v = readSecret(name) || null; } catch (e) { v = null; }
-  secretCache.set(name, { v, at: Date.now() });
+  secretCache.set(name, { v, at: now() });
   return v;
 }
 const sha3hex = (hex) => sha3_256(Buffer.from(hex.slice(2), "hex")).toString("hex").toUpperCase();
-/** The secret this computer holds for a commit, proven: 0x + 64 hex whose SHA3 IS the commit. "" = none held, null = held but wrong. */
-function secretFor(prefix, commit) {
-  const h = commit.slice(2);
-  for (const c of new Set([commit, "0x" + h.toUpperCase(), "0x" + h.toLowerCase()])) {
-    const s = lookup(prefix + c);
-    if (s) return (HEX64.test(s) && sha3hex(s) === h.toUpperCase()) ? s : null;
-  }
+/**
+ * The secret this computer holds for a commit, proven: 0x + 64 hex whose SHA3 IS the commit. "" = none held, null = held but
+ * wrong, undefined = not looked up in this scan (a stranger's coins must not start hundreds of keychain reads: SECRETS_PER_SCAN
+ * commits a scan, and only for a coin that has passed every other check).
+ */
+function secretFor(prefix, commit, budget) {
+  const h = commit.slice(2), names = [...new Set([commit, "0x" + h.toUpperCase(), "0x" + h.toLowerCase()])].map(c => prefix + c);
+  const proven = (x) => (HEX64.test(x) && sha3hex(x) === h.toUpperCase()) ? x : null;
+  const known = names.map(cached).find(hit => hit && hit.v); if (known) return proven(known.v);
+  if (names.every(cached)) return "";                          // asked within the last 10 minutes: not held
+  if (budget.left <= 0) return undefined; budget.left--;      // a real lookup: counted
+  for (const name of names) { const x = lookup(name); if (x) return proven(x); }
   return "";
 }
 
@@ -176,7 +192,6 @@ let store = {
   load() { try { return JSON.parse(fs.readFileSync(storeFile(), "utf8")); } catch (e) { return {}; } },
   save(o) { const f = storeFile(); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f + ".tmp", JSON.stringify(o, null, 2)); fs.renameSync(f + ".tmp", f); }
 };
-let now = () => Date.now();
 const ACTIONS = ["cancel", "reveal", "resolve", "claim"];
 /**
  * { posted: { coinid: { action, block, at, txpowid, tries, sent, done } }, sigs: [ms] }. tries = signatures made for the coin
@@ -246,7 +261,9 @@ async function scan() {
   }
   if (changed) saveStore(S0);
   for (const [id, r] of spent) { const m = "Coin " + id + " is now spent (seen at block " + tip + "), after this app sent " + (WORDS[r.action] || "a transaction") + " for it at block " + r.block + "."; log(m); emitter.emit("notify", m); }
-  return { tip, keys: known, addrs, coins: coins.filter(c => c && typeof c === "object"), posted: S0.posted };
+  const rows = coins.filter(c => c && typeof c === "object"), offers = [];   // the open offers, read ONCE a scan (the open-offer rule looks at them for every reveal)
+  for (const c of rows) { const st = stateOf(c); if (st && phaseOf(st) === 0) offers.push({ coin: c, st }); }
+  return { tip, keys: known, addrs, coins: rows, offers, posted: S0.posted, secrets: { left: SECRETS_PER_SCAN } };
 }
 /** Is this key the node's, asked for this one key (no list to be short)? An unreadable answer throws: never a guess. */
 async function isKey(pk) {
@@ -261,11 +278,11 @@ async function isKey(pk) {
 // ---- reading a coin ----
 /** port → data, or null when the state is not a list of single ports with text values. */
 function stateOf(coin) {
-  if (!Array.isArray(coin.state)) return null;
-  const m = new Map();
+  if (!Array.isArray(coin.state) || coin.state.length > MAX_STATES) return null;
+  const m = new Map(); let chars = 0;
   for (const s of coin.state) {
     const p = s && typeof s === "object" ? String(s.port) : "";
-    if (!/^\d{1,3}$/.test(p) || typeof s.data !== "string" || m.has(p)) return null;
+    if (!/^\d{1,3}$/.test(p) || typeof s.data !== "string" || m.has(p) || (chars += s.data.length) > MAX_STATE_CHARS) return null;
     m.set(p, s.data);
   }
   return { get: (port) => m.get(String(port)) };
@@ -274,6 +291,7 @@ function stateOf(coin) {
 function phaseOf(st) { const v = st && st.get(6); if (typeof v !== "string" || !DEC.test(v)) return null; for (const p of [0, 1, 2]) if (decCmp(v, String(p)) === 0) return p; return null; }
 const tokenLabel = (t) => t === "0x00" ? "MINIMA" : up(t) === up(MXUSD_TOKENID) ? "MxUSD" : t;
 
+const LATER = "Its secret has not been looked up yet: at most " + SECRETS_PER_SCAN + " are looked up in one pass (each is a read of the system keychain). The next passes go on.";
 /** A sent transaction is given REPOST_AFTER blocks before another is built for its coin. A refused post (sent false) holds nothing. */
 const holds = (p, tip) => !!(p && p.sent && !p.done && tip - p.block < REPOST_AFTER);
 /**
@@ -307,12 +325,10 @@ async function judge(coin, ctx, manual) {
   const unread = (ports) => { const n = ports.find(x => !copyable(st.get(x))); return n === undefined ? "" : "state " + n + " is missing or is not 0x hex or a plain number: the contract cannot read it and refuses every spend of this coin, so nothing is signed for it"; };
   const notHex = (n) => "state " + n + " is not 0x hex: the contract's signature check throws on it and refuses every spend of this coin, so nothing is signed for it";
   // The automatic pass only (never the user's own click): MINIMA and MxUSD, and a coin it has not already signed for AUTO_TRIES times.
-  const autoOnly = () => {
-    if (manual || !row.plan || !row.auto) return row;
-    if (!(tokenid === "0x00" || up(tokenid) === up(MXUSD_TOKENID))) return bad("its token is not MINIMA or MxUSD: nothing is signed for it automatically", true);
-    if (p && p.tries >= AUTO_TRIES) return bad("this app signed " + p.tries + " transactions for it (the last at block " + p.block + ") and it is still at the contract: it is not signed for automatically any more", true);
-    return row;
-  };
+  const notAuto = () => manual ? ""
+    : !(tokenid === "0x00" || up(tokenid) === up(MXUSD_TOKENID)) ? "its token is not MINIMA or MxUSD: nothing is signed for it automatically"
+    : (p && p.tries >= AUTO_TRIES) ? "this app signed " + p.tries + " transactions for it (the last at block " + p.block + ") and it is still at the contract: it is not signed for automatically any more" : "";
+  const autoOnly = () => { const why = row.plan && row.auto ? notAuto() : ""; return why ? bad(why, true) : row; };
 
   if (phase === 0) {
     if (!house) return bad("it is an open offer, and state 0 is not a key of this wallet");
@@ -348,9 +364,6 @@ async function judge(coin, ctx, manual) {
       const bytes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].reduce((a, n) => a + valueBytes(st.get(n)), 32);
       if (2 * bytes > 65536) return bad("its states are " + bytes + " bytes, and a reveal carries them twice: that is over the node's 64K limit for one transaction, so this bet cannot be revealed");
     }
-    const secret = secretFor("casino_secret_for_", commit);
-    if (secret === "") return bad("the secret of this offer is not on this computer, so it cannot be revealed here");
-    if (secret === null) return bad("the secret saved for this offer does not match its commit");
     // a taken offer of this app holds exactly bet x payout: anything else is a forgery (a dust coin must not cost a key use, or cancel an offer)
     const whole = INT.test(st.get(3)) && INT.test(st.get(4)) && V.isAmount(st.get(5)) && decCmp(amount, decMulInt(st.get(5), st.get(4))) === 0;
     if (!whole && !manual) return bad("the pot is not bet x payout, which a taken offer of this app always is: it is not revealed automatically", true);
@@ -358,9 +371,8 @@ async function judge(coin, ctx, manual) {
     // and holds at least this wallet's stake in the bet, makes the reveal WAIT, for a bounded time. The pass never cancels it.
     const bet = st.get(5), stake = whole && decCmp(amount, bet) > 0 ? decSub(amount, bet) : "0";
     let open = null;
-    for (const o of ctx.coins) {
-      if (o === coin) continue;
-      const os = stateOf(o); if (!os || phaseOf(os) !== 0 || !sameValue(os.get(2), commit)) continue;
+    for (const { coin: o, st: os } of ctx.offers) {
+      if (!sameValue(os.get(2), commit)) continue;
       if ([0, 1, 2, 3, 4, 5, 6, 7].some(n => !copyable(os.get(n))) || !HEX64.test(os.get(0)) || !HEX64.test(String(o.coinid))) continue;   // the contract would throw on a take: not an offer
       if (o.tokenid !== tokenid || !(tokenid === "0x00" || up(tokenid) === up(MXUSD_TOKENID))) continue;
       const oa = tokenid === "0x00" ? o.amount : o.tokenamount;
@@ -383,6 +395,12 @@ async function judge(coin, ctx, manual) {
     // REVEAL_MIN_AGE blocks deep (half the timeout when that is less: a bet with a very short timeout must not be lost by waiting).
     { const half = BigInt(to.split(".")[0]) / 2n, deep = half < BigInt(REVEAL_MIN_AGE) ? Number(half) : REVEAL_MIN_AGE;
       if (row.age < deep) { row.note = "Taken " + row.age + " block" + (row.age === 1 ? "" : "s") + " ago. The house secret is revealed when the take is " + deep + " blocks deep: a block this new can still be replaced by one with another pick."; return row; } }
+    // the keychain last: only a coin that has passed every other check costs a lookup
+    { const why = notAuto(); if (why) return bad(why, true); }
+    const secret = secretFor("casino_secret_for_", commit, ctx.secrets);
+    if (secret === undefined) { row.note = LATER; return row; }
+    if (secret === "") return bad("the secret of this offer is not on this computer, so it cannot be revealed here");
+    if (secret === null) return bad("the secret saved for this offer does not match its commit");
     row.action = "reveal"; row.auto = true;
     row.plan = Object.assign({ kind: "reveal", key: k0, secret, states: [0, 1, 2, 3, 4, 5].map(n => [n, st.get(n)]).concat([[6, "2"]], [7, 8, 9, 10, 11].map(n => [n, st.get(n)])) }, base);
     if (!row.held) row.note = row.warn || "Taken: the house secret is to be revealed so the bet can be settled.";
@@ -397,22 +415,26 @@ async function judge(coin, ctx, manual) {
       const hs = st.get(12), rng = st.get(3), po = st.get(4), bt = st.get(5), pick = st.get(11);
       if (typeof hs !== "string" || !HEXV.test(hs)) return "state 12 (the house secret) is not 0x hex";
       if (!INT.test(rng) || !INT.test(po) || !V.isAmount(bt) || typeof pick !== "string" || !DEC.test(pick)) return "the range, payout, bet or pick is not a plain number";
-      const ps = secretFor("casino_psecret_for_", commit);
+      // what would stop a payout whatever the secret says comes first: the keychain is asked last
+      const w = decMulInt(bt, po), a9 = st.get(9), ha = st.get(1), more = decCmp(amount, w);   // w = bt*po
+      if (more < 0) return "the pot (" + amount + ") is smaller than the winnings (" + w + "), so the covenant cannot pay it";
+      if (typeof a9 !== "string" || !ADDR.test(a9)) return "state 9 (the player address) is not an address";
+      if (more > 0 && (typeof ha !== "string" || !ADDR.test(ha))) return "state 1 (the house address) is not an address";
+      { const why = notAuto(); if (why) return { why, manualOk: true }; }
+      const ps = secretFor("casino_psecret_for_", commit, ctx.secrets);
+      if (ps === undefined) return { later: true };
       if (ps === "") return "the secret of this bet is not on this computer, so it cannot be settled here";
       if (ps === null) return "the secret saved for this bet does not match its commit";
       // the covenant: h = SHA3(CONCAT(hs ps)); r = NUMBER(SUBSET(0 4 h)) % rng; r EQ pick
       const result = sha3_256(Buffer.from(hs.slice(2) + ps.slice(2), "hex")).readUInt32BE(0) % Number(rng);
       if (decCmp(pick, String(result)) !== 0) return { lost: true };
-      const w = decMulInt(bt, po), a9 = st.get(9), ha = st.get(1), more = decCmp(amount, w);   // w = bt*po
-      if (more < 0) return "the pot (" + amount + ") is smaller than the winnings (" + w + "), so the covenant cannot pay it";
-      if (typeof a9 !== "string" || !ADDR.test(a9)) return "state 9 (the player address) is not an address";
-      if (more > 0 && (typeof ha !== "string" || !ADDR.test(ha))) return "state 1 (the house address) is not an address";
       if (!(HEX64.test(a9) && ctx.addrs.has(up(a9))) && !manual) return { why: "the winnings would go to " + a9 + ", which the node does not list as an address of this wallet: it is not settled automatically", manualOk: true };
       return { plan: Object.assign({ kind: "resolve", key: k8, secret: ps, outputs: [[a9, w]].concat(more > 0 ? [[ha, decSub(amount, w)]] : []) }, base) };
     })();
     if (r && r.plan) { row.action = "resolve"; row.auto = true; row.plan = r.plan; if (!row.held) row.note = "Won: " + r.plan.outputs[0][1] + " " + row.token + " is to be paid out to this wallet."; return autoOnly(); }
     if (house && expired) return claim(k0);
     if (r && r.lost) { row.note = "Lost: the pot goes to the house. Nothing to collect."; row.blocksLeft = null; row.leftFor = ""; return row; }
+    if (r && r.later) { row.note = LATER; return row; }
     return typeof r === "string" ? bad(r) : bad(r.why, r.manualOk);
   }
   if (expired) return claim(k0);
@@ -495,12 +517,26 @@ function ordered(rows) {
 }
 
 /** This wallet's coins at the contract, for the panel. Never throws: { ok:false, error } when the node cannot be read. */
+/** The node's amount of a coin as text, "0" when it is not one (for ordering only). */
+const sizeOf = (c) => { const a = c.tokenid === "0x00" ? c.amount : c.tokenamount; return typeof a === "string" && V.isAmount(a) ? a : "0"; };
+/**
+ * The coins of the scan that name a key of this wallet in state 0 or 8, the largest first, at most JUDGE_MAX: no question to the
+ * node and no keychain read is spent on a stranger's coin, and a flood of small coins cannot push a large one out.
+ */
+function mine(ctx) {
+  const own = ctx.coins.filter(c => { const st = stateOf(c); return !!st && [st.get(0), st.get(8)].some(k => typeof k === "string" && HEX64.test(k) && ctx.keys.has(up(k))); })
+    .sort((a, b) => decCmp(sizeOf(b), sizeOf(a)) || (String(a.coinid) < String(b.coinid) ? -1 : 1));
+  return { coins: own.slice(0, JUDGE_MAX), skipped: Math.max(0, own.length - JUDGE_MAX) };
+}
 async function list() {
   try {
-    const ctx = await scan(), rows = [];
-    for (const c of ctx.coins) { let r; try { r = await judge(c, ctx, false); } catch (e) { continue; } if (r) { delete r.plan; rows.push(r); } }
-    const used = sigsToday();
-    return { ok: true, contract: CONTRACT, tip: ctx.tip, rows, auto: { perCoin: AUTO_TRIES, perPass: AUTO_PER_PASS, perDay: AUTO_PER_DAY, usedToday: used, reached: used >= AUTO_PER_DAY } };
+    const ctx = await scan(), rows = [], m = mine(ctx);
+    for (const c of m.coins) { let r; try { r = await judge(c, ctx, false); } catch (e) { continue; } if (r) { delete r.plan; delete r.warn; rows.push(r); } }
+    const used = sigsToday(), rank = (r) => r.problem ? 1 : 0;
+    rows.sort((a, b) => (rank(a) - rank(b)) || decCmp(b.amount || "0", a.amount || "0") || idCmp(a, b));   // what can be acted on first, the largest first
+    return { ok: true, contract: CONTRACT, tip: ctx.tip, rows: rows.slice(0, ROWS_SHOWN), more: Math.max(0, rows.length - ROWS_SHOWN) + m.skipped,
+      offers: rows.filter(r => r.action === "cancel" && !r.held).length, coins: rows.length + m.skipped,
+      auto: { perCoin: AUTO_TRIES, perPass: AUTO_PER_PASS, perDay: AUTO_PER_DAY, usedToday: used, reached: used >= AUTO_PER_DAY } };
   } catch (e) { return { ok: false, contract: CONTRACT, error: String((e && e.message) || e), rows: [] }; }
 }
 /** The user's click on one coin: the coin is read again, judged again, and what the covenant gives this wallet is done. */
@@ -521,7 +557,7 @@ function settle(coinid) {
 /** ONE scan, every coin judged once, and the rows that have something to send (not held, no problem). */
 async function work(pick, manual) {
   const ctx = await scan(), rows = [];
-  for (const c of ctx.coins) { let r; try { r = await judge(c, ctx, manual); } catch (e) { continue; } if (r && r.plan && !r.held && !r.problem && pick(r)) rows.push(r); }
+  for (const c of mine(ctx).coins) { let r; try { r = await judge(c, ctx, manual); } catch (e) { continue; } if (r && r.plan && !r.held && !r.problem && pick(r)) rows.push(r); }
   return { ctx, rows };
 }
 /** "Cancel all my open offers": the user's click. The largest first, at most MANUAL_SWEEP in one click. */
@@ -567,6 +603,6 @@ function stopLoop() { if (pollTimer) { clearInterval(pollTimer); pollTimer = nul
 function invalidate() { known = new Set(); strangers = new Set(); secretCache.clear(); lastTip = null; }
 
 module.exports = {
-  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY, HOLD_AGE, REVEAL_ANYWAY_LEFT, REVEAL_MIN_AGE,
+  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY, HOLD_AGE, REVEAL_ANYWAY_LEFT, REVEAL_MIN_AGE, SECRETS_PER_SCAN, ROWS_SHOWN, JUDGE_MAX, SCAN,
   _setClock: (fn) => { now = fn; }, _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run, _takerValue: takerValue
 };
