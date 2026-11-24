@@ -50,6 +50,9 @@
     /** R3-2 (review 7 Nov): the applied peg was priced off a mid more than JUMP_FRACTION from the current price (a
      *  confirmed move not yet republished) — takes are declined until it is. */
     function pegOutdated() { return appliedMid > 0 && price > 0 && Math.abs(appliedMid - price) / price > JUMP_FRACTION; }
+    /** No usable price at all — never fetched, or older than the hard ceiling: applyPeg would answer PEG_STALE. Pure
+     *  (applyPeg itself records appliedMid, which only a real publish may move). */
+    function noUsablePrice() { return !(price > 0) || ageMs() > HARD_STALE_MS; }
     function source() { return TR.active().pricingParity ? 'Parity' : 'MEXC'; }
     function state() { return { price: price, bid: bid, ask: ask, ageMs: ageMs(), fresh: fresh(), error: lastError }; }
 
@@ -195,7 +198,7 @@
     AX.peg = {
         PEG_OFF: PEG_OFF, PEG_APPLIED: PEG_APPLIED, PEG_STALE: PEG_STALE, PEG_WIDE: PEG_WIDE,
         FRESH_MS: FRESH_MS, HARD_STALE_MS: HARD_STALE_MS, MAX_WIDEN: MAX_WIDEN,
-        jumpPending: jumpPending, pegOutdated: pegOutdated, init: init, resetForSwitch: resetForSwitch, source: source, state: state, fresh: fresh, appliedMid: function () { return appliedMid; },
+        jumpPending: jumpPending, pegOutdated: pegOutdated, noUsablePrice: noUsablePrice, init: init, resetForSwitch: resetForSwitch, source: source, state: state, fresh: fresh, appliedMid: function () { return appliedMid; },
         applyPeg: applyPeg, shouldReprice: shouldReprice, armSafe: armSafe, wideningFactor: wideningFactor, fetch: fetch,
         _setNow: function (fn) { _now = fn; }, _setPrice: function (p, age) { price = p; goodAtMs = p > 0 ? (_now() - (age || 0)) : 0; },
         _reset: function () { resetForSwitch(); lastTryMs = 0; },

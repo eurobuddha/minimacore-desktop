@@ -13,11 +13,6 @@
     var GAS_ETH = 21000n;      // fixed intrinsic gas of a plain value transfer
     var GAS_ERC20 = 100000n;   // same safety limit native uses for its ERC20 approve; unused gas refunds
 
-    /** first 8 + … + last 6 — native MainActivity.shortAddr (:3302). */
-    function shortAddr(a) {
-        a = String(a == null ? '' : a);
-        return a.length < 14 ? a : a.slice(0, 8) + '…' + a.slice(-6);
-    }
     function isEthAddr(a) { return /^0x[0-9a-fA-F]{40}$/.test(String(a == null ? '' : a).trim()); }
     function validDec(s) { return /^[0-9]+(\.[0-9]+)?$/.test(String(s == null ? '' : s).trim()); }
 
@@ -71,7 +66,7 @@
 
     AX.wallet = {
         GAS_ETH: GAS_ETH, GAS_ERC20: GAS_ERC20,
-        shortAddr: shortAddr, isEthAddr: isEthAddr, validDec: validDec,
+        isEthAddr: isEthAddr, validDec: validDec,
         gasReserveWei: gasReserveWei, maxEthSendWei: maxEthSendWei, checkSend: checkSend,
         sendEth: sendEth, sendUsdt: sendUsdt
     };

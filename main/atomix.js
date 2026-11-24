@@ -506,7 +506,7 @@ async function balances() {
   const bal = await runner("balance tokenid:" + A.trading.active().tokenId).catch(() => null);
   const r0 = bal && bal.response && bal.response[0];
   // a read that failed is not a balance of zero (main/makeravail.js): said to the maker's publish
-  if (!bal || bal.status !== true || !Array.isArray(bal.response)) out.minimaErr = (bal && bal.error) ? String(bal.error) : "the node did not answer";
+  if (!bal || bal.status !== true || bal.pending === true || !Array.isArray(bal.response)) out.minimaErr = (bal && bal.error) ? String(bal.error) : "the node did not answer";
   // node returns response:[] for a token the wallet holds none of → a zeroed breakdown (consistent UI card).
   out.minima = r0 ? String(r0.sendable) : "0";
   out.meta = r0
@@ -857,7 +857,7 @@ async function sendReview(asset, to, amt) {
 async function sendExecute(asset, to, amt) { return ethSendExecute(axSendAsset(asset), to, amt, "med"); }
 
 // ---- maker (donor onSaveOrder/onPublish/onWithdraw; the vm service keep-alives whatever is saved) ----
-async function makerAvail(strict) { return require("./makeravail").makerAvailFrom(await balances(), !!strict); }
+async function makerAvail(strict, needs) { return require("./makeravail").makerAvailFrom(await balances(), !!strict, needs); }
 async function makerCfg() {
   const A = AX();
   await p(cb => A.maker.loadConfig(() => cb(null)));
@@ -891,17 +891,18 @@ async function makerPreview(cfg, manual) {
 }
 async function makerSave(cfg, manual) {
   const A = AX();
-  await p(cb => A.maker.saveConfig(jvm(cfg), jvm(manual), () => cb(null)));
-  await p(cb => A.maker.refreshPeg(() => cb(null)));
-  const avail = await makerAvail(true);
-  await makerStep(() => p(cb => A.maker.publish(jvm(avail), e => cb(e))), "publish");
+  // the balances are read BEFORE the config is stored: a Save refused for an unread balance leaves the saved order as it was (0.19.431)
+  await require("./makeravail").saveThenPublish({ read: balances,
+    save: async () => { await p(cb => A.maker.saveConfig(jvm(cfg), jvm(manual), () => cb(null))); await p(cb => A.maker.refreshPeg(() => cb(null))); },
+    publish: async (avail) => { await makerStep(() => p(cb => A.maker.publish(jvm(avail), e => cb(e))), "publish"); } }, cfg, manual);
   emitter.emit("update");
   return { ok: true };
 }
 async function makerPublish() {
   const A = AX();
   await p(cb => A.maker.refreshPeg(() => cb(null)));
-  const avail = await makerAvail(true);
+  const saved = jclone(A.maker._state()) || {};   // only the side the saved ladder uses must be readable
+  const avail = await makerAvail(true, require("./makeravail").ladderNeeds(saved.cfg, saved.manual));
   await makerStep(() => p(cb => A.maker.publish(jvm(avail), e => cb(e))), "publish");
   emitter.emit("update");
   return { ok: true };

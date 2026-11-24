@@ -2,11 +2,11 @@
   "_comment": "Digests of the atomix files copied verbatim from the donor. Regenerate ONLY with `node scripts/vendored-manifest.cjs atomix --update` beside a deliberate re-copy. Desktop-only code belongs in main/atomix/loader.js or main/atomix.js.",
   "donor": {
     "root": "mds/atomix-mds",
-    "version": "0.1.61",
+    "version": "0.1.71",
     "branch": "security/2026-11-07",
-    "gitSha": "f33c4afd495f84451d459a46b0445f6b7d7490e9"
+    "gitSha": "fa5efa7e55fa679b066e231e5a451ad9d59d423c"
   },
-  "digest": "9d010cf3f862054b051636e0b62776bd90869b77d4f66f0359f7cf5830eb97f0",
+  "digest": "1349701bb6262d4342635f92782c6ba0317baa12b7b5d3bdd734505e62d1fd4d",
   "files": {
     "lib/rhino_shim.js": {
       "sha256": "3c836294a244afb5198002dcdce2c569eb166300553cb1ba60fb5b56209a487b",
@@ -69,8 +69,8 @@
       "bytes": 4442
     },
     "lib/trading.js": {
-      "sha256": "52ffdbd685ccc946c1cab0535ec16ab6696d8333a2ffd7e8b98d67dd96c650ab",
-      "bytes": 8058
+      "sha256": "abea040fa074820ea7f7ca26b8310c9df9c7592a6676384a1be99203870051b4",
+      "bytes": 8582
     },
     "lib/signgate.js": {
       "sha256": "b205cd5382f2bba4b66c201c14333bff96b7e62c2c11ed22c296091eb18cb99e",
@@ -85,8 +85,8 @@
       "bytes": 7245
     },
     "lib/ethtx.js": {
-      "sha256": "a0b1c9d50aa1c09467a9e9b9d18ba15eddd649e6c251af1c69c497aac75ae4c5",
-      "bytes": 6920
+      "sha256": "65a9d6fdbe00b3ffa8c56fe80cd80431651cd940962a5ccd2c0b845a9d4f5b46",
+      "bytes": 10443
     },
     "lib/ethops.js": {
       "sha256": "185c7ac1da259f20e49347cc71fd12fa99d2107c7c79ce3ba4af8b6468a2fe0b",
@@ -109,32 +109,32 @@
       "bytes": 2675
     },
     "lib/boot.js": {
-      "sha256": "929eea6cfce6591edb11dc0d579e7a08b6c84d603691aa9ce3bf109f54cdbdcb",
-      "bytes": 5705
+      "sha256": "ade5944d5ec2a26491841cd8d79eff805fbd10185c209fe95c1cffe6fa60104d",
+      "bytes": 6325
     },
     "lib/identitywatch.js": {
       "sha256": "5824ae4a971e3e1b31945d4ccd0a3dcf91675b148d4b305973ac90cfa523b265",
       "bytes": 7807
     },
     "lib/settle.js": {
-      "sha256": "46d1fa289b2460fb60b86bf91002350f719c51f620a0ac476dd893ccd2f02ba7",
-      "bytes": 59770
+      "sha256": "b2bf98553c755caae14e19fd2337cc324fc33cc338fc5724ec2978d9f6dfd657",
+      "bytes": 60922
     },
     "lib/orderbook.js": {
       "sha256": "52f151e151dd641e32cf079ed3dde1d7d4f755381d4db66a15a4c98f4ee4b30a",
       "bytes": 7622
     },
     "lib/peg.js": {
-      "sha256": "f61d69e6c5e3173efe5483d5108bafaf8718bc41178b01e158ecafa181ad8353",
-      "bytes": 13522
+      "sha256": "ffd498fb8f14212b5b8ed40af15eceba86dcbc98d3c4dbd2a5d9e9425234d201",
+      "bytes": 13838
     },
     "lib/responder.js": {
-      "sha256": "3131b7b5dd06aab6b6a3f79679bceb6655a8292fc702f1a29eafb1705a029990",
-      "bytes": 38942
+      "sha256": "e40778869b406b6c0f23b5a18304cf896d15ce5ebc47a8f44cc71bac90aab2a6",
+      "bytes": 42816
     },
     "lib/maker.js": {
-      "sha256": "d42031dda11f913b84953d8628bb98071b65eb18a7e2325e87a50abbba8aa97b",
-      "bytes": 14044
+      "sha256": "ae1dbfeb1b505f6ed3cfe059989b1bfc6a614d38cea4ce8b9e8874bca60cd7ab",
+      "bytes": 17665
     },
     "lib/take.js": {
       "sha256": "55eeeffa3b1d4323af6afc2202e927e5b4df0c3c233abec5659d3e74d0ac783c",
@@ -157,16 +157,16 @@
       "bytes": 4822
     },
     "service.js": {
-      "sha256": "71814044cde13a9c5ba8bf1e8a33ff0e7ebc87351648ac5d2ed9908aee5310f6",
-      "bytes": 11783
+      "sha256": "b971ecf63367d754a20f9aa5ee7b3642911c818232830372209db8ee9a2b780d",
+      "bytes": 12294
     },
     "lib/wallet.js": {
-      "sha256": "51d58089a09acc751a10fb01225563849db387750a615d8ed5111b89da596b02",
-      "bytes": 4475
+      "sha256": "2b32db01dad897ec7998e3896b44ce174dce49c2434b8a127230fb4e5c14eb79",
+      "bytes": 4230
     },
     "lib/inspect.js": {
-      "sha256": "20044288ba2ed5576db6ec1fd939bdaf42c8f68f1e6084c3ca999f2122a44c69",
-      "bytes": 8599
+      "sha256": "7296786befa0deac3c9d06c152790864b1c17f73d5cd58b7eee45e99fdfc7be9",
+      "bytes": 8738
     }
   }
 }

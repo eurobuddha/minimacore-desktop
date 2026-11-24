@@ -34,6 +34,7 @@
     /** Last failure message reported per claim/refund key — one event row + one notification per DISTINCT
      *  reason, not one per attempt (a two-hour claim window is ~45 attempts). Cleared on success. */
     var lastFail = {};
+    var feeTold = {};   // swap key → true once its ETH_FEE_REFUSED was notified (log every time, notify once per swap)
     var _now = function () { return Date.now(); };
     function nowUnix() { return Math.floor(_now() / 1000); }
 
@@ -642,6 +643,7 @@
             // the NEXT poll retries promptly instead of waiting out ETH_RETRY_SECS. Confirmed on-chain, not here.
             ops().withdraw(cid, secret, function (e) {
                 if (e && e.busy) delete ethAttempt[key]; delete inflight[key];
+                if (e && e.feeRefused) return feeRefused('withdraw', key, hash, e, next);
                 if (!e && sw) return markSecretOut(sw, hash, next);   // R3-1: only once it was really broadcast
                 next();
             });
@@ -654,6 +656,7 @@
         ops().refund(cid, function (e, tx) {
             if (e && e.busy) delete ethAttempt[key];
             delete inflight[key];
+            if (e && e.feeRefused) return feeRefused('refund', key, hash, e, next);
             if (e || !tx) return next();
             // Say so the moment it is broadcast (native 0.1.84): the user may be watching the clock for exactly
             // this. Once per swap; terminal status still comes ONLY from the contract flag (F1).
@@ -668,13 +671,25 @@
         });
     }
 
+    /** A deadline send (withdraw / refund) refused by the fee ceiling — after the re-quote median also exceeded it.
+     *  Nothing was signed, so it is retried on the very next poll (not after ETH_RETRY_SECS); every refusal is logged,
+     *  and the user is told once per swap: this is a claim or refund racing a timelock, it must never be silent. */
+    function feeRefused(kind, key, hash, e, next) {
+        delete ethAttempt[key];
+        log('[AtomiX] ETH ' + kind + ' NOT SENT ' + hash + ': ' + e.message);
+        if (feeTold[key]) return next();
+        feeTold[key] = true;
+        notify('AtomiX ETH ' + kind + ' held back', e.message + ' — retrying every block. Swap ' + hash);
+        next();
+    }
+
     function confirmEthWithdrawn(hash, swap, next) {
         delete ethAttempt['wdEth:' + hash];
         DB.getSwap(hash, function (e, cur) {
             if (cur && cur.status === DB.ST_COMPLETE) return next();
             finalize(hash, DB.EV_COLLECT, DB.ST_COMPLETE, function (have, cb2) {
                 if (!have) DB.logEvent(hash, DB.EV_COLLECT, 'ETH', '', 'confirmed on-chain', cb2); else cb2();
-            }, function () { notify('Swap complete', 'Withdrew your ' + (swap.buyToken || 'USDT')); onChanged(); next(); });
+            }, function () { notify('Swap complete', 'Withdrew your ' + (swap.buyToken ? TR.labelForToken(swap.buyToken) : 'USDT')); onChanged(); next(); });
         });
     }
     /** A human reason a swap refunded (0.1.21, native parity; role-aware since 0.1.24): prefer a stored
@@ -708,8 +723,8 @@
     function finalizeEthLost(hash, next) {
         DB.getSwap(hash, function (e, cur) {
             if (!cur || cur.status === DB.ST_ERROR || cur.status === DB.ST_REFUNDED || cur.status === DB.ST_COMPLETE) return next();
-            var note = 'counterparty refunded their ' + cur.buyAmount + ' ' + cur.buyToken + ' leg before you claimed it'
-                + (cur.myLegIsMinima ? ' — your ' + cur.sellAmount + ' ' + cur.sellToken + ' lock is refundable at its timelock' : '');
+            var note = 'counterparty refunded their ' + cur.buyAmount + ' ' + TR.labelForToken(cur.buyToken) + ' leg before you claimed it'
+                + (cur.myLegIsMinima ? ' — your ' + cur.sellAmount + ' ' + TR.labelForToken(cur.sellToken) + ' lock is refundable at its timelock' : '');
             finalize(hash, DB.EV_LOST, DB.ST_ERROR, function (have, cb2) {
                 if (!have) DB.logEvent(hash, DB.EV_LOST, 'ETH', cur.buyAmount, note, cb2); else cb2();
             }, function () { notify('Swap FAILED', note + '. Swap ' + hash); onChanged(); next(); });
@@ -756,8 +771,8 @@
     function finalizeMinimaLost(hash, next) {
         DB.getSwap(hash, function (e, cur) {
             if (!cur || cur.status === DB.ST_ERROR || cur.status === DB.ST_REFUNDED || cur.status === DB.ST_COMPLETE) return next();
-            var note = 'counterparty withdrew your ' + cur.sellAmount + ' ' + cur.sellToken + ' and reclaimed their '
-                + cur.buyAmount + ' ' + cur.buyToken + ' at the timelock — our claim never posted';
+            var note = 'counterparty withdrew your ' + cur.sellAmount + ' ' + TR.labelForToken(cur.sellToken) + ' and reclaimed their '
+                + cur.buyAmount + ' ' + TR.labelForToken(cur.buyToken) + ' at the timelock — our claim never posted';
             finalize(hash, DB.EV_LOST, DB.ST_ERROR, function (have, cb2) {
                 if (!have) DB.logEvent(hash, DB.EV_LOST, 'minima', cur.buyAmount, note, cb2); else cb2();
             }, function () { notify('Swap FAILED', note + '. Swap ' + hash); onChanged(); next(); });
@@ -886,7 +901,7 @@
                 v.notice = { state: bar < 0 ? n : n.slice(0, bar), reason: bar < 0 ? '' : n.slice(bar + 1), at: Number(ev.date) || 0 };
             }
         });
-        if (started) v.steps.push('Locked your ' + s.sellAmount + ' ' + s.sellToken);
+        if (started) v.steps.push('Locked your ' + s.sellAmount + ' ' + TR.labelForToken(s.sellToken));
         if (told) v.steps.push('Maker notified');
         if (s.status === DB.ST_CLAIMING || s.status === DB.ST_COMPLETE) v.steps.push('Maker locked — claiming');
         if (s.status === DB.ST_COMPLETE) v.steps.push('Complete');
@@ -900,7 +915,7 @@
         secondEndpointAgrees: secondEndpointAgrees, amountTokenOk: amountTokenOk, stripReqToken: stripReqToken, decimalsOf: decimalsOf,
         deadlines: deadlines, onMakerNotice: onMakerNotice, noteTimeouts: noteTimeouts, refundNow: refundNow, visibility: visibility,
         NOTICE_RETRYING: NOTICE_RETRYING, NOTICE_DECLINED: NOTICE_DECLINED,
-        _setNow: function (fn) { _now = fn; }, _reset: function () { ethAttempt = {}; inflight = {}; lastFail = {}; },
+        _setNow: function (fn) { _now = fn; }, _reset: function () { ethAttempt = {}; inflight = {}; lastFail = {}; feeTold = {}; },
         _ethAttempt: function () { return ethAttempt; },
         ETH_RETRY_SECS: ETH_RETRY_SECS
     };

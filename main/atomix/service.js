@@ -98,13 +98,17 @@ function reloadShared(cb) {
     });
 }
 
-/** Fetch the maker's sellable balances (native minima sendable + ERC20 USDT balanceOf) for keep-alive publishing. */
+/** Fetch the maker's sellable balances (native minima sendable + ERC20 USDT balanceOf) for keep-alive publishing.
+ *  cb(null) when either read fails: keepAlive then republishes nothing (a failed read was published as 0, which took
+ *  the market off every taker's book and spent a key use). */
 function getBalances(cb) {
     MDS.cmd('balance tokenid:' + AX.trading.active().tokenId, function (r) {
-        var minima = 0;
-        try { minima = Number(r.response[0].sendable) || 0; } catch (e) { }
+        var minima = AX.maker.sellableFrom(r);
+        if (minima === null) { log('balance read failed — keep-alive skipped, the published market stands: ' + ((r && (r.error || r.message)) || 'no answer')); return cb(null); }
         AX.ethops.make(RPC, CTX.eth.privKey, CTX.eth.address).balanceOf(AX.ethops.NET.usdt, function (e, raw) {
-            cb({ minima: minima, usdt: e ? 0 : Number(AX.dec.formatUnits(raw, 6)) });
+            var usdt = e ? NaN : Number(AX.dec.formatUnits(raw, 6));
+            if (!isFinite(usdt)) { log('USDT balance read failed — keep-alive skipped, the published market stands: ' + (e ? e.message : 'unreadable')); return cb(null); }
+            cb({ minima: minima, usdt: usdt });
         });
     });
 }

@@ -197,6 +197,25 @@ async function okA(name, fn) { try { await fn(); pass++; console.log("  ✓", na
       for (const c of ["vault action:seed", "seedrandom modifier:ethbridge"]) assert.ok(node.seen.includes(c), "the mock answered " + c);
       assert.deepEqual(node.seen.filter(c => /^(send|txn(post|sign|create|input|output)|newscript|consolidate)\b/.test(c)), [], "and was never asked to sign, post or register anything");
     });
+    // 0.19.431 (independent review of 0.19.428, MAJOR): the background keep-alive read its balances with `Number(...) || 0`, so a
+    // failed read was published as a market of zero. The engine (atomix-mds 0.1.64+) answers null, and keepAlive(null) publishes nothing.
+    await okA("the keep-alive's balance read answers null when the node did not answer, and a keep-alive without balances publishes nothing (the engine up to 0.1.61 published zero)", async () => {
+      const atomix = require("../main/atomix"), c = atomix._ctx(), A = c.AX, seen = [];
+      const read = () => new Promise(res => c.getBalances(res)), inVm = (o) => require("vm").runInContext("(" + JSON.stringify(o) + ")", c);
+      const withBalance = (reply) => atomix._setRunner(async (cmd) => { cmd = String(cmd); seen.push(cmd); if (/^balance /.test(cmd)) return reply; return { status: true, pending: false, response: {} }; });
+      try {
+        withBalance({ status: false, error: "RPC timeout" }); assert.equal(await read(), null, "a failed read");
+        withBalance({ status: true, pending: true, response: [] }); assert.equal(await read(), null, "a pending read");
+        withBalance({ status: true, pending: false, response: [{ sendable: "abc" }] }); assert.equal(await read(), null, "a sendable that is not a number");
+        // a manual ask is saved and due: the keep-alive, handed no balances, sends nothing to the book
+        await new Promise(res => A.maker.saveConfig(inVm({ pegEnable: false }), inVm({ bids: [], asks: [{ p: 1.01, a: 5 }] }), res));
+        A.maker._setLastPublish(0); seen.length = 0;
+        await new Promise(res => A.maker.keepAlive(null, res));
+        assert.deepEqual(seen.filter(x => /^send /.test(x)), [], "nothing was published");
+        assert.equal(typeof A.wallet.shortAddr, "undefined"); assert.equal(typeof (A.fmt || {}).shorten, "undefined", "the engine no longer shortens identifiers");
+        assert.equal(A.ethtx.MAX_GAS_PRICE_WEI, 8000000000000n, "and holds the 8000 gwei signing ceiling");
+      } finally { await new Promise(res => A.maker.saveConfig(inVm({}), inVm({ bids: [], asks: [] }), res)); A.maker._resetBalanceWatch && A.maker._resetBalanceWatch(); atomix.stopLoop(); atomix.flush(); }
+    });
     console.log("  ⊘ frozen quote replay on a REAL node — SKIPPED (no test node named: set " + NAMES + ")");
   } else {
     await okA("frozen quote issues a replayable quoteId; replay consumes it (the named test node, a funded balance injected)", async () => {
