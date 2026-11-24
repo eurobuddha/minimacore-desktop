@@ -503,13 +503,28 @@ function create(o) {
   // ---- transactions (Tx.java) ----
   let seq = 0;
   const stage = (c) => String(c).split(" ")[0];
-  /** Node.coinState: "gone" (rolled back by a reorg) kept apart from "spent". */
+  /** Node.coinState. The node NEVER lists a spent coin (TxPoWSearcher.searchCoins skips it): `coins coinid:` of a spent
+   *  coin answers [] — and so does a coin a reorg undid, or one outside the node's window. So [] is NOROW: unknown, never
+   *  "spent" and never "rolled back" by itself (0.19.421; until then [] read as a reorg: a collect never finished and a landed
+   *  sweep was deleted as rolled back). Only what the spend produced proves it: the collect's output at its payout, or the
+   *  sweep's at the safe (Pandamonium 2.2.113 Guardian.collectDone / sweepVerdict). SPENT stays for a row with spent:true. */
   async function coinState(id) {
     const r = await call("coins coinid:" + id);
     if (!ok(r) || !Array.isArray(r.response)) return "UNKNOWN";
-    if (!r.response.length) return "GONE";
+    if (!r.response.length) return "NOROW";
     return r.response[0] && r.response[0].spent === true ? "SPENT" : "UNSPENT";
   }
+  /** The coin a collect paid to its payout (Guardian.collectOutput): this token and amount, at the payout, created at or after
+   *  the collect (or, for a stake collected by anyone, at or after its maturity). null when not seen, or not readable. */
+  async function collectOutput(row, claimed) {
+    if (!validAddr(row.payout) || !TOKEN.test(String(row.tokenid))) return null;   // review L8: never into a command unchecked
+    const from = row.collectBlock || row.matureBlock || 0;
+    const r = await call("coins address:" + row.payout + " checkmempool:true");
+    return (ok(r) && Array.isArray(r.response) ? r.response : []).find(c => c && c.spent !== true && HEX64.test(String(c.coinid || "")) && !(claimed && claimed.has(lc(c.coinid)))
+      && lc(c.tokenid) === lc(row.tokenid) && decEq(outAmount(c), row.amount) && !(num(c.created) > 0 && num(c.created) < from)) || null;
+  }
+  /** A stake that is no longer listed is collected when the node says spent, or when its output is at the payout. */
+  const collectDone = async (st, row) => st === "SPENT" || (st === "NOROW" && !!(await collectOutput(row, null)));
   /**
    * Tx.run: the steps in order, each checked before the next; the sign gate asked before the step that signs and the
    * step that posts; txndelete on EVERY path. A reply with no boolean status is an unknown outcome, never a success.
@@ -606,18 +621,18 @@ function create(o) {
       if (seen.has(lc(row.coinid))) continue;
       if ((nextRead.get(lc(row.coinid)) || 0) > t) continue;   // asked lately and not resolved: not again until REREAD_BLOCKS on
       if (budget.reads-- <= 0) return;
-      const st = await coinState(row.coinid);
-      if (st !== "SPENT") nextRead.set(lc(row.coinid), t + REREAD_BLOCKS);
+      const st = await coinState(row.coinid), done = await collectDone(st, row);
+      if (!done) nextRead.set(lc(row.coinid), t + REREAD_BLOCKS);
       // the native sets COLLECTED here whatever the payout, so a clean stake collected by hand was then swept too; on the
       // desktop a clean payout ends as COLLECTED_SAFE: only an at-risk payout is ever queued for a sweep
-      if (st === "SPENT") store.setCollectStatus(row.coinid, row.atRisk ? S.COLLECTED : S.COLLECTED_SAFE);
+      if (done) store.setCollectStatus(row.coinid, row.atRisk ? S.COLLECTED : S.COLLECTED_SAFE);
     }
   }
   async function reconcileCollects(t, budget) {
     for (const row of store.collects(S.COLLECT_POSTED, S.COLLECT_POSTED_SAFE)) {
       if (budget.reads-- <= 0) return;
       const safe = row.status === S.COLLECT_POSTED_SAFE && !row.atRisk, st = await coinState(row.coinid);
-      if (st === "SPENT") {
+      if (await collectDone(st, row)) {
         store.setCollectStatus(row.coinid, safe ? S.COLLECTED_SAFE : S.COLLECTED);
         if (safe) notify("Future Cash", "Collected " + row.amount + " safely");
         activity("info", "Collected " + row.amount + (safe ? " [safe]" : " [rescue → sweeping next]") + " | stake:" + row.coinid + " | on:" + row.payout);
@@ -812,9 +827,7 @@ function create(o) {
     for (const row of store.collects(S.COLLECTED)) {
       if (!validAddr(row.payout) || !TOKEN.test(String(row.tokenid))) continue;   // review L8: never into a command unchecked
       if (budget.sweepReads-- <= 0) return;
-      const r = await call("coins address:" + row.payout + " checkmempool:true");
-      const found = (ok(r) && Array.isArray(r.response) ? r.response : []).find(c => c && c.spent !== true && HEX64.test(String(c.coinid || "")) && !claimed.has(lc(c.coinid))
-        && lc(c.tokenid) === lc(row.tokenid) && decEq(outAmount(c), row.amount) && !(num(c.created) > 0 && num(c.created) < row.collectBlock));
+      const found = await collectOutput(row, claimed);
       if (!found) {
         if (t && row.collectBlock && t - row.collectBlock >= UNFOUND_BLOCKS) {
           store.setCollectStatus(row.coinid, S.COLLECTED_UNFOUND);
@@ -879,10 +892,23 @@ function create(o) {
     const canVerify = validMx(safe) && sameNode();
     for (const row of store.sweeps(S.SWEEP_POSTED)) {
       if (budget.sweepReads-- <= 0) return;
-      const st = await coinState(row.coinid);
-      if (st === "GONE") {   // the collect that made this coin was rolled back: nothing swept, nothing stolen
-        store.deleteSweep(row.coinid);
-        activity("warn", "Sweep abandoned: the collected coin was rolled back by a chain reorg; the stake will be collected again | coin:" + row.coinid + " | on:" + row.address);
+      const st = await coinState(row.coinid), age = t - row.sweepBlock;
+      // No row (0.19.421): how our own landed sweep looks, and also a theft or a reorg. Only our output at the safe proves
+      // the sweep. The row is never deleted on it: a coin the node does not list is not "rolled back" (Guardian.sweepVerdict).
+      if (st === "NOROW") {
+        const a = canVerify ? await arrived(safe, row) : { reliable: false, coinid: null };
+        if (a.coinid) { markSwept(row, a.coinid, safe, t); continue; }
+        if (a.reliable && age >= VERIFY_MAX) {   // read at the safe, and not there after VERIFY_MAX blocks: spent elsewhere
+          store.setSweepStatus(row.coinid, S.TAKEN, null);
+          notify("Future Cash ⚠️", "A collected stake (" + row.amount + ") is no longer on its address and did NOT reach your safe address. Your old key may be compromised: check now.");
+          activity("error", "⚠️ ALERT: a collected stake is gone from its address but NOT seen at your safe: check for key-reuse loss | coin:" + row.coinid + " | from:" + row.address);
+          continue;
+        }
+        if (!a.reliable && age >= VERIFY_MAX) {
+          store.setSweepStatus(row.coinid, S.SWEPT, "unverified");
+          notify("Future Cash", "A stake was spent but the node couldn't confirm it reached your safe address: please verify it arrived.");
+          activity("warn", "Sweep spent — arrival unverified: please check it arrived | coin:" + row.coinid + " | from:" + row.address);
+        }
         continue;
       }
       if (st === "SPENT") {
@@ -898,7 +924,7 @@ function create(o) {
         if (!a.reliable && t - row.sweepBlock >= VERIFY_MAX) {
           store.setSweepStatus(row.coinid, S.SWEPT, "unverified");
           notify("Future Cash", "A stake was spent but the node couldn't confirm it reached your safe address: please verify it arrived.");
-          activity("warn", "Sweep spent but UNVERIFIED: please check it arrived | coin:" + row.coinid + " | from:" + row.address);
+          activity("warn", "Sweep spent — arrival unverified: please check it arrived | coin:" + row.coinid + " | from:" + row.address);
         }
         continue;
       }

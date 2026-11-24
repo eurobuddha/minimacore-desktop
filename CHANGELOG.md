@@ -7,6 +7,20 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.421] — Future Cash Next: a spent coin is read as the real node shows it
+
+- The node never lists a spent coin (`coins coinid:` of one answers `[]`, core TxPoWSearcher.searchCoins), and `[]` is also
+  what a reorg or a coin outside the node's window looks like. Future Cash Next read `[]` as "rolled back by a reorg" and
+  only a row with `spent:true` (which the node never sends) as spent: a posted collect never became COLLECTED, a stake
+  collected elsewhere was never finished, a landed rescue sweep was DELETED with "rolled back by a chain reorg", and the
+  theft alarm could never fire.
+- Now `[]` is unknown, never a conclusion and never a deleted row. A collect is done when its output is at the payout (this
+  token and amount, created at or after the collect or the stake's maturity); a sweep when its output is at the safe. As the
+  Pandamonium 2.2.113 Guardian (collectDone / sweepVerdict), plus one thing it does not do: with a same-node safe that can be
+  read, a swept coin that is gone from its address and not at the safe after 30 blocks raises the theft alarm; an external
+  safe that cannot be read ends as "spent — arrival unverified" after 30 blocks.
+- The tests' stand-in node now answers as the real one: a spent coin is never listed.
+
 ## [0.19.420] — A stop waits while the node saves: no Quit, Restart or Stop cuts a MegaMMR again
 
 - main/node-manager.js stop(): the old stop armed SIGTERM at 12 s and SIGKILL at 25 s BEFORE it sent `quit`, and core's `quit` writes every database before it answers: on a MegaMMR node that is megammr.mmr (1.5 GB), deleted and written again (MiniFile.saveObjectDirect), and a cut file loads without a word. On 23 Nov 2026 a Quit sent SIGTERM 12 s after "Saving all db" and the 1.5 GB MegaMMR (663,414 coins) came back as 49.1 MB (61 coins); a SIGKILL cut another save at 19:23. Now `quit` is sent first (again every 2 s while the node is still booting and nothing listens), and the node is waited for while it shows any sign of life: a line on its output or a write in its databases folder. It is signalled only when it has said it saved ("Shut down completed OK.." or "Main Instance Cleared..") and then does not exit by itself (megammrsync, restore and archive leave it that way: SIGTERM after 5 s, not a cut), or after 10 minutes with no output and no database write (SIGTERM; SIGKILL 2 minutes after that with no sign of life). Every stop comes through it: Stop, Restart, the node kind, the import's and the resync's restarts, a chat backup restore, Quit. A second stop waits for the first.

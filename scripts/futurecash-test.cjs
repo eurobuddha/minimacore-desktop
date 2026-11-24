@@ -72,12 +72,12 @@ function standIn(o = {}) {
     if ((m = /^txndelete id:(\S+)$/.exec(c))) { delete (n.txns || {})[m[1]]; return { status: true }; }
     if ((m = /^coins address:(\S+)(?: checkmempool:true| tokenid:(\S+))?$/.exec(c))) {
       const all = [].concat(n.wallet || [], Object.values(n.at).flat(), Object.values(n.coins));
-      return { status: true, response: all.filter(x => FC.canon(x.address) === FC.canon(m[1]) && (!m[2] || x.tokenid === m[2])) };
+      return { status: true, response: all.filter(x => !x.spent && FC.canon(x.address) === FC.canon(m[1]) && (!m[2] || x.tokenid === m[2])) };   // the node never lists a spent coin
     }
     if (/^send /.test(c)) { n.sends = (n.sends || []).concat(c); return { status: true, response: { txpowid: ID(777) } }; }
     if (/^coins relevant:true sendable:true checkmempool:true tokenid:0x00/.test(c)) return { status: true, response: [] };
     if ((m = /^coins relevant:true address:(0x[0-9A-Fa-f]+)$/.exec(c))) return { status: true, response: (n.at[U(m[1])] || []).filter(x => !x.spent) };
-    if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])] || [].concat(n.wallet || [], Object.values(n.at).flat()).find(y => U(y.coinid) === U(m[1])); return { status: true, response: x ? [x] : [] }; }
+    if ((m = /^coins coinid:(0x[0-9A-Fa-f]+)$/.exec(c))) { const x = n.coins[U(m[1])] || [].concat(n.wallet || [], Object.values(n.at).flat()).find(y => U(y.coinid) === U(m[1])); return { status: true, response: x && !x.spent ? [x] : [] }; }   // as the real node: a spent coin answers [] (TxPoWSearcher.searchCoins)
     if (c === "status") return { status: true, response: { locked: false } };
     return { status: false, error: "the stand-in does not know: " + c };
   }
@@ -314,6 +314,7 @@ test("a posted collect is followed to its end: spent is collected; unspent after
   node.n.tip = 158; await e.pass(158);
   assert.equal(e._store().collect(ID(1)).status, "DETECTED", "8 blocks on, unspent: tried again");
   await e.collectNow(ID(1)); node.n.coins[ID(1)].spent = true; node.n.at[FC.KNOWN_ADDRESS] = [];
+  node.n.wallet = [{ coinid: ID(60), address: PAY0, amount: "10", tokenid: "0x00", created: "159", spent: false }];   // the collect's output (the stake itself is no longer listed)
   await e.pass(159);
   assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE");
   assert.ok(e.activity().some(l => l.msg.startsWith("Collected 10 [safe] | stake:" + ID(1))));
@@ -324,6 +325,7 @@ test("a clean stake collected elsewhere ends COLLECTED_SAFE, never queued for a 
   const { e, node } = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
   await e.pass(150); assert.equal(e._store().collect(ID(1)).status, "DETECTED");
   node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(1)] = Object.assign({}, s1, { spent: true });
+  node.n.wallet = [{ coinid: ID(60), address: PAY0, amount: "10", tokenid: "0x00", created: "151", spent: false }];   // what the contract paid
   await e.pass(151); assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE");
 });
 
@@ -341,6 +343,48 @@ async function guardian(nodeOpts, o = {}) {
   x.g = g;
   return x;
 }
+
+// ---- 0.19.420: the real node NEVER lists a spent coin (`coins coinid:` of one answers []), and the stand-in above does the same ----
+test("a spent coin answers []: a collect is proved by its output, a landed sweep by its arrival; [] alone is never 'rolled back' and never deletes a row; gone and not at the safe is the alarm", async () => {
+  // a DETECTED stake the node no longer lists: not collected until its output is at the payout
+  const s1 = stake(1, PAY0, { mature: 140 });
+  const a = await audited({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
+  await a.e.pass(150); a.node.n.at[FC.KNOWN_ADDRESS] = []; a.node.n.coins[ID(1)] = Object.assign({}, s1, { spent: true });
+  await a.e.pass(151); assert.equal(a.e._store().collect(ID(1)).status, "DETECTED", "no row and no output: unknown, nothing concluded");
+  a.node.n.wallet = [{ coinid: ID(60), address: PAY0, amount: "10", tokenid: "0x00", created: "151", spent: false }];
+  await a.e.pass(151 + 31); assert.equal(a.e._store().collect(ID(1)).status, "COLLECTED_SAFE", "its output at the payout proves it");
+  // an at-risk stake: collected, its coin found and swept to a same-node safe
+  const s2 = stake(2, PAY1, { mature: 100, amount: "7" });
+  const g = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s2] } });
+  await g.e.pass(150);
+  assert.equal(g.e._store().collect(ID(2)).status, "COLLECT_POSTED");
+  g.node.n.at[FC.KNOWN_ADDRESS] = []; g.node.n.coins[ID(2)] = Object.assign({}, s2, { spent: true });
+  await g.e.pass(151); assert.equal(g.e._store().collect(ID(2)).status, "COLLECT_POSTED", "the stake is not listed and nothing is at the payout yet: still posted");
+  g.node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  await g.e.pass(152);
+  assert.equal(g.e._store().sweeps("SWEEP_POSTED").length, 1, "collected (by its output), found and swept");
+  const kv = g.e._store().kv; kv.set(FC.K.SAFE_MODE, "samenode"); kv.set(FC.K.CLEAN_ADDR, JSON.stringify({ mx: SAFE_MX, hex: SAFE_HEX }));   // the safe is this node's: arrival can be read
+  g.node.n.wallet[0].spent = true;   // the sweep mined: the node no longer lists the swept coin
+  await g.e.pass(153);
+  assert.equal(g.e._store().sweeps("SWEEP_POSTED").length, 1, "no row is not 'rolled back': the sweep is kept");
+  assert.ok(!g.e.activity().some(l => /rolled back|abandoned/i.test(l.msg)), "never said rolled back");
+  g.node.n.wallet.push({ coinid: ID(70), address: SAFE_HEX, amount: "7", tokenid: "0x00", created: "153", spent: false });
+  await g.e.pass(154);
+  assert.equal(g.e._store().sweeps("SWEPT").length, 1, "its output at the safe proves the sweep");
+  assert.ok(g.e.activity().some(l => l.msg.startsWith("Secured 7 | coin:" + ID(50))));
+  // the same, but the coin went elsewhere: gone from its address, never at the safe — the alarm, after VERIFY_MAX
+  const s3 = stake(3, PAY1, { mature: 100, amount: "7" });
+  const h = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s3] } });
+  await h.e.pass(150); h.node.n.at[FC.KNOWN_ADDRESS] = []; h.node.n.coins[ID(3)] = Object.assign({}, s3, { spent: true });
+  h.node.n.wallet = [{ coinid: ID(52), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  await h.e.pass(152);
+  h.e._store().kv.set(FC.K.SAFE_MODE, "samenode"); h.e._store().kv.set(FC.K.CLEAN_ADDR, JSON.stringify({ mx: SAFE_MX, hex: SAFE_HEX }));
+  h.node.n.wallet[0].spent = true;
+  await h.e.pass(160); assert.equal(h.e._store().sweeps("SWEEP_POSTED").length, 1, "inside VERIFY_MAX: waiting");
+  await h.e.pass(152 + 30);
+  assert.equal(h.e._store().sweeps("TAKEN").length, 1, "gone and not at the safe: the theft alarm");
+  assert.ok(h.e.activity().some(l => /ALERT/.test(l.msg) && l.msg.includes(ID(52))));
+});
 
 test("no grant, nothing signed in the background: the guardian does not start and a pass only reads", async () => {
   const at = { [FC.KNOWN_ADDRESS]: [stake(1, PAY0, { mature: 100 }), stake(2, PAY1, { mature: 100 })] };
@@ -362,17 +406,19 @@ test("the guardian, granted: a clean matured stake is collected (auto-collect on
   assert.equal(e._store().collect(ID(1)).status, "COLLECT_POSTED_SAFE"); assert.equal(e._store().collect(ID(2)).status, "COLLECT_POSTED");
   // the chain: both stakes spent; the at-risk payout now holds the collected coin
   node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(1)] = Object.assign({}, s0, { spent: true }); node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });
-  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }];
+  node.n.wallet = [{ coinid: ID(50), address: PAY1, amount: "7", tokenid: "0x00", created: "151", spent: false }, { coinid: ID(51), address: PAY0, amount: "3", tokenid: "0x00", created: "151", spent: false }];
   node.sent.length = 0; await e.pass(152);
   assert.equal(e._store().collect(ID(1)).status, "COLLECTED_SAFE"); assert.equal(e._store().collect(ID(2)).status, "SWEEP_QUEUED");
   assert.deepEqual(steps(node.sent), ["txncreate id:ID", "txninput id:ID coinid:" + ID(50), "txnoutput id:ID address:" + SAFE_MX + " amount:7 tokenid:0x00 storestate:false",
     "txnlist id:ID", "txnsign id:ID publickey:" + KEY1, "txnbasics id:ID", "txnlist id:ID", "txnpost id:ID", "txndelete id:ID"], "the native's sweep: sign before basics, the gate before each");
   assert.ok(node.sent.includes("coins address:" + PAY1 + " checkmempool:true"), "found by its own address");
-  // spent: an external safe cannot be looked at, so it is marked swept
+  // spent (the node no longer lists it): an external safe cannot be looked at, so after VERIFY_MAX it is swept, unverified
   node.n.wallet[0].spent = true; node.n.coins[ID(50)] = node.n.wallet[0];
   await e.pass(153);
+  assert.equal(e._store().sweeps("SWEEP_POSTED").length, 1, "not concluded at once: no row is not proof");
+  await e.pass(152 + 30);
   assert.equal(e._store().sweeps("SWEPT").length, 1);
-  assert.ok(e.activity().some(l => l.msg.startsWith("Secured 7 | coin:" + ID(50))));
+  assert.ok(e.activity().some(l => l.msg.startsWith("Sweep spent — arrival unverified") && l.msg.includes(ID(50))));
 });
 
 test("the guardian waits rather than guess: no fresh audit, no clean collect; rescue off, no at-risk collect; a locked vault, nothing", async () => {
@@ -491,7 +537,8 @@ test("the coin guard: a collected coin waiting for its sweep is held for Future 
   assert.ok(reg.foreign("pandapools", ID(50)) && reg.foreign("wallet", ID(50)) && !reg.foreign("futurecash", ID(50)), "held from every other owner, not from itself");
   assert.deepEqual(e.coinHolds().map(h => h.coinid).sort(), [ID(50)], "the claimed collect is done; the sweep is still owed");
   delete node.n.answer.txnsign; node.n.tip = 161; await e.pass(161);   // tried again, swept
-  node.n.wallet[0].spent = true; await e.pass(162);
+  node.n.wallet[0].spent = true; await e.pass(162);   // the node no longer lists it: an external safe cannot be read, so it ends unverified after 30 blocks
+  await e.pass(161 + 30);
   assert.ok(!reg.list().some(r => r.coinid === ID(50) && r.state === "held"), "released once swept");
   await e.stop(); assert.equal(e.coinHolds(), null, "a closed store says nothing: the guard keeps what it holds");
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
@@ -724,6 +771,8 @@ test("M2: an at-risk collect whose coin is never found ends COLLECTED_UNFOUND af
   const { e, node } = await guardian({ at: { [FC.KNOWN_ADDRESS]: [s1] } });
   await e.pass(150);
   node.n.at[FC.KNOWN_ADDRESS] = []; node.n.coins[ID(2)] = Object.assign({}, s1, { spent: true });   // spent, and nothing ever lands on PAY1
+  // a node that SAYS spent (a row with spent:true; the real node lists none, then only the output proves a collect, 0.19.420)
+  node.n.answer["coins coinid:" + ID(2)] = async () => ({ status: true, response: [Object.assign({}, s1, { spent: true })] });
   await e.pass(151);
   assert.equal(e._store().collect(ID(2)).status, "COLLECTED"); assert.equal(e.activeWork().posted, 1);
   await e.pass(269); assert.equal(e._store().collect(ID(2)).status, "COLLECTED", "still looked for");
