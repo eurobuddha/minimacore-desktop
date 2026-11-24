@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.422] — AtomiX: a market is never published as zero because a balance read failed
+
+- Review of minimaCore Desktop 0.18.328 (MAJOR 2), the same code in all three desktop apps. `makerAvail` turned a failed read into 0 (`Number(b.minima) || 0`: `balances()` gives "0" when the `balance` RPC fails and "—" when the USDT read fails), and Save, Publish and the desk's republish then published a zero order: the market left every book and a key use was spent, with no error.
+- main/makeravail.js (new): Save and Publish refuse on a failed read ("Your … balance could not be read just now …: nothing was published"); a real zero is still zero; Withdraw and the currency switch (a tombstone carries no size) go as before. `balances()` now says when the Minima-side read failed (`minimaErr`).
+- Test: scripts/makeravail-test.cjs (in test:ethwallet) (the module does not exist on 0.19.421).
+
 ## [0.19.421] — Future Cash Next: a spent coin is read as the real node shows it
 
 - The node never lists a spent coin (`coins coinid:` of one answers `[]`, core TxPoWSearcher.searchCoins), and `[]` is also
