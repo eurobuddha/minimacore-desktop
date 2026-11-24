@@ -388,6 +388,7 @@ class NodeManager extends EventEmitter {
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
     const args = this.buildArgs();
+    this.keetsAtStart = config.load().params.keets === true && require("./keets-mode").enabledInArgs(args);
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
     // view; truncating each arg at 57 chars only clipped the tail, it still showed the head of the credential.
@@ -515,9 +516,13 @@ class NodeManager extends EventEmitter {
 
   // ---- state/logs ----
   setState(s) { this.state = s; this.emit("status", this.snapshot()); }
+  // Startup Params may already hold the next launch's choice while this process still runs.
+  keetsEnabled() {
+    return this.proc ? this.keetsAtStart === true : config.load().params.keets === true;
+  }
   snapshot() {
     const kind = this.kind();
-    return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
+    return { state: this.state, keetsEnabled: this.keetsEnabled(), health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
              jar: this.jarPath(), rpcPort: this.rpcPort(), kind,
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),

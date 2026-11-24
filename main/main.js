@@ -326,24 +326,34 @@ ipcMain.handle("mcd:mailBackfill", () => mail.startBackfill());
 
 // KeetChat — pubkey-addressed E2E messages over the keets transport (main/chat.js owns
 // the sidecar inbox; renderer reads/writes through these only). Both node kinds.
-ipcMain.handle("mcd:chatInit", async () => { await chat.init(); return chat.myIdentity(); });
-ipcMain.handle("mcd:chatIdentity", () => chat.myIdentity());
-ipcMain.handle("mcd:chatSetName", (_e, n) => { chat.setName(n); return chat.myIdentity(); });
-ipcMain.handle("mcd:chatThreads", () => chat.threads());
-ipcMain.handle("mcd:chatThread", (_e, pk) => chat.thread(pk));
-ipcMain.handle("mcd:chatSend", (_e, to, text) => chat.send(to, text));
-ipcMain.handle("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name));
-ipcMain.handle("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
-ipcMain.handle("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
-ipcMain.handle("mcd:chatStatus", () => chat.status());
-ipcMain.handle("mcd:chatMedia", (_e, ref, force, sender) => { if (typeof ref !== "string" || ref.length > 620 || !/^keets:\/\/[A-Za-z0-9._~\/?=&%-]+$/.test(ref)) throw new Error("bad media ref"); return chat.fetchMedia(ref, force === true, sender); });   // checked here too (0.18.327); chat.fetchMedia checks it whole
-ipcMain.handle("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
-ipcMain.handle("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
-ipcMain.handle("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
-ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
+function requireChat() {
+  if (!node.keetsEnabled()) throw new Error("Keets is off.");
+}
+function handleChat(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    requireChat();
+    return handler(event, ...args);
+  });
+}
+handleChat("mcd:chatInit", async () => { await chat.init(); return chat.myIdentity(); });
+handleChat("mcd:chatIdentity", () => chat.myIdentity());
+handleChat("mcd:chatSetName", (_e, n) => { chat.setName(n); return chat.myIdentity(); });
+handleChat("mcd:chatThreads", () => chat.threads());
+handleChat("mcd:chatThread", (_e, pk) => chat.thread(pk));
+handleChat("mcd:chatSend", (_e, to, text) => chat.send(to, text));
+handleChat("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name));
+handleChat("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
+handleChat("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
+handleChat("mcd:chatStatus", () => chat.status());
+handleChat("mcd:chatMedia", (_e, ref, force, sender) => { if (typeof ref !== "string" || ref.length > 620 || !/^keets:\/\/[A-Za-z0-9._~\/?=&%-]+$/.test(ref)) throw new Error("bad media ref"); return chat.fetchMedia(ref, force === true, sender); });   // checked here too (0.18.327); chat.fetchMedia checks it whole
+handleChat("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
+handleChat("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
+handleChat("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
+handleChat("mcd:chatSendImage", async (_e, to) => {
   const r = await dialog.showOpenDialog(win, { title: "Send a photo",
     filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }], properties: ["openFile"] });
   if (r.canceled || !r.filePaths.length) return null;
+  requireChat();
   return chat.sendImageFile(to, r.filePaths[0]);
 });
 ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo, subject) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo, subject));
@@ -389,7 +399,7 @@ ipcMain.handle("mcd:chatExportBackup", async (_e, pass) => {
   if (typeof pass !== "string" || pass.length < 8) throw new Error("Use a password of at least 8 characters.");
   let keypair = null;
   try { keypair = fs.readFileSync(keetsKeypairFile()); } catch (e) { /* keets never ran: chats only */ }
-  try { await chat.init(); } catch (e) { /* node down: the manifest's address stays blank */ }
+  try { if (node.keetsEnabled()) await chat.init(); } catch (e) { /* node down: the manifest's address stays blank */ }
   const all = chatStore.all(), payaddr = {};
   for (const [k, v] of Object.entries(all.meta)) if (k.startsWith("payaddr:")) payaddr[k.slice(8)] = v;
   const file = chatbackup.exportBackup(pass, { keypair, keetsPubkey: chat.myIdentity().pubkey, chatName: all.meta.myname || "",
@@ -409,7 +419,7 @@ ipcMain.handle("mcd:chatOpenBackup", async (_e, pass) => {
   try { opened = chatbackup.openBackup(pass, fs.readFileSync(r.filePaths[0])); }
   catch (e) { throw new Error(e.message === "BAD_PASSWORD" ? "Wrong password, or this is not a chat backup." : e.message); }
   pendingChatBackup = opened;
-  try { await chat.init(); } catch (e) { /* node down */ }
+  try { if (node.keetsEnabled()) await chat.init(); } catch (e) { /* node down */ }
   return { canceled: false, keetsPubkey: opened.manifest.keetsPubkey || "", maxAddress: opened.manifest.maxAddress || "",
     current: chat.myIdentity().pubkey, contacts: opened.contacts.length, messages: opened.messages.length, hasMax: opened.hasMax };
 });
@@ -470,12 +480,13 @@ mail.emitter.on("incoming", (info) => {
 // KeetChat: updates -> renderer; OS notification on fresh incoming when unfocused
 chat.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:chat"); });
 chat.emitter.on("incoming", (info) => {
+  if (!node.keetsEnabled()) return;
   try {
     if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
     const title = info.count > 1 ? "KeetChat" : (info.name || "KeetChat");
     const body = info.count > 1 ? info.count + " new messages" : (info.preview || "New message");
     const n = new Notification({ title, body, silent: false });
-    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:chat-focus"); } });
+    n.on("click", () => { if (win && !win.isDestroyed() && node.keetsEnabled()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:chat-focus"); } });
     n.show();
   } catch (e) { /* notifications are best-effort */ }
 });

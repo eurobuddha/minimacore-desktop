@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.343] — KeetChat follows the Keets transport setting
+
+- With Keets off, Chat disappears and old notifications cannot open it. Enabling Keets at the next node start brings Chat back with its existing history.
+
 ## [0.18.342] — KeetChat keeps a node worker available
 
 - Photo downloads and background read and delivery receipts use one RPC worker at a time. Redrawing a thread reuses a pending download. Cached media opens immediately.

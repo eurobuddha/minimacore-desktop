@@ -97,7 +97,7 @@ test("an inbox entry whose sender or id is not plain sends nothing with it; a ba
   await assert.rejects(chat.sendImageFile("0x" + "ab".repeat(32) + " datahex:0x00", "/tmp/a.png"), /recipient/);
   assert.deepEqual(sent, [], "nothing sent");
   const main = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
-  assert.ok(/ipcMain\.handle\("mcd:chatMedia", \(_e, ref, force, sender\) => \{ if \(typeof ref !== "string" \|\| ref\.length > 620/.test(main), "the IPC checks the ref too");
+  assert.ok(/handleChat\("mcd:chatMedia", \(_e, ref, force, sender\) => \{ if \(typeof ref !== "string" \|\| ref\.length > 620/.test(main), "the IPC checks the ref too");
 });
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
@@ -249,7 +249,7 @@ test("a node leaving running state discards an outstanding inbox reply", async (
     return { status: true, response: {} };
   });
   try {
-    chat.onNodeStatus({ state: "running" }); await turn();
+    chat.onNodeStatus({ state: "running", keetsEnabled: true }); await turn();
     chat.onNodeStatus({ state: "stopping" });
     finishInbox({ status: true, response: [{ id: "stale-inbox", from: peer, message: "stale" }] });
     await turn(); assert.equal(chat.status().running, false);

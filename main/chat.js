@@ -101,7 +101,10 @@ let myinfo = null;      // { pubkey, drive } from `keets action:info`
 let lastErr = "";
 
 // swappable node-command runner (tests use _setRunner, same as mail.js)
-let runner = (cmd, timeoutMs) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd, timeoutMs);
+let runner = (cmd, timeoutMs) => {
+  if (!node.keetsEnabled()) throw new Error("Keets is off.");
+  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd, timeoutMs);
+};
 
 // The bundled Parlons node has two RPC workers. All slow background chat work shares one slot.
 // KeetsAPI allows 5 s to connect plus 120 s for a sidecar reply. Keep the slot until the node
@@ -306,7 +309,7 @@ async function pollOnce() {
 }
 
 function onNodeStatus(snapshot) {
-  if (snapshot.state === "running") startLoop();
+  if (snapshot.state === "running" && snapshot.keetsEnabled) startLoop();
   else if (pollTimer) stopLoop();
 }
 

@@ -147,16 +147,13 @@ async function boot() {
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
   api.onChat(onChatUpdate);
-  api.onChatFocus(() => { selectTab("chat"); ChatPanel.focusLatest(); });
+  api.onChatFocus(focusChat);
   api.onPandapools(onPandapoolsUpdate);
   api.onAtomix(onAtomixUpdate);
   api.onEthWallet(onEthWalletUpdate);
   api.onShop(onShopUpdate);
   api.onVestr(onVestrUpdate);
   api.onWebWallet(onWebWalletUpdate);
-
-  // KeetChat rides the keets transport, which both node kinds run (0.18.17+).
-  const chtab = el("chatTab"); if (chtab) chtab.hidden = false;
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -188,6 +185,7 @@ function onStatus(s) {
 
   const wasRunning = running;
   running = s.state === "running";
+  setChatAvailable(s.keetsEnabled === true);
   if (running && (waitingForNode || !wasRunning)) {
     waitingForNode = false;
     startRefresh();
@@ -533,6 +531,7 @@ function showRestoreOverlay() {
 
 // ---- tabs / refresh --------------------------------------------------------
 function selectTab(view) {
+  if (view === "chat" && el("chatTab").hidden) return;
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   activeView = view;
@@ -1366,11 +1365,31 @@ async function refreshMailBadge() {
 }
 // ---- KeetChat — the panel lives in renderer/chat.js (keets transport; main/chat.js owns the inbox) --------
 ChatPanel.init({ api, esc, el, toast, copy, showPrompt, showConfirm });
+function setChatAvailable(enabled) {
+  const tab = el("chatTab");
+  if (tab.hidden === !enabled) return;
+  tab.hidden = !enabled;
+  if (!enabled) {
+    ChatPanel.reset();
+    el("chatBody").replaceChildren();
+    el("chatBadge").hidden = true;
+    if (activeView === "chat") selectTab("balances");
+  }
+}
+function focusChat() {
+  if (el("chatTab").hidden) return;
+  selectTab("chat");
+  if (activeView === "chat") ChatPanel.focusLatest();
+}
 function renderChat() {
   if (!running) { el("chatBody").innerHTML = `<div class="empty">Start your node to use Chat.</div>`; return; }
   ChatPanel.render();
 }
-function onChatUpdate() { ChatPanel.onUpdate(); refreshChatBadge(); }
+function onChatUpdate() {
+  if (el("chatTab").hidden) return;
+  ChatPanel.onUpdate();
+  refreshChatBadge();
+}
 async function refreshChatBadge() {
   const n = await ChatPanel.badge();
   const b = el("chatBadge"); if (!b) return;
