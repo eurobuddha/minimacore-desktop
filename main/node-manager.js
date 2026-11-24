@@ -70,6 +70,8 @@ const ANSWER_NOTE = "The node has been told to stop and has not answered yet. Wa
 const reclaimNote = (pid) => "This app's node from an earlier launch is still running (pid " + pid + "). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.";
 const stillNote = (pid, min) => "The node (pid " + pid + ") has not stopped after " + min + " minutes and is still running. You can close the app: the next launch waits for this node before it starts one.";
 // The node says it has BEGUN its shutdown (core Main.shutdown's first line: "Shut down started.." / "Shut down started.. Compacting All Databases").
+/** the reply of a command that has shut the node's insides down and saved (megammrsync, megammr import, archive resync, restore) */
+const SHUT_REPLY = /\brestart\b/i;
 const SHUT_STARTED_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Shut down started\.\.(?: Compacting All Databases)?$/;
 const SHUTDOWN_FILE = "minimacore-shutdown.json";   // in the data folder: how the last stop ended, and the MegaMMR it left (recordStop)
 const DB_SUB_MAX = 64;         // the most files looked at in one folder under databases/ (dbTouchedAt)
@@ -627,8 +629,9 @@ class NodeManager extends EventEmitter {
     // 0.19.439 (review, MAJOR, RAN): the log alone is never believed. After `quit` is sent the node is still on the network for seconds
     // (core shuts the network down first, in silence), and a peer's line in that window passed as "saved": SIGTERM before anything was saved.
     // "Saved" now also needs what no peer can produce: the answer of a command that shuts the node's insides down (shutCmdOk: status true
-    // comes only after the save), or, when that answer never came, the answer of `quit` itself. A plain `quit` needs neither rule: the
-    // node exits by itself. (Left: a resync whose answer was lost AND is still saving AND stalls afterSavedMs AND a peer line in between.)
+    // comes only after the save, and its message says the node must be restarted), or the answer of `quit` itself. A plain `quit` needs
+    // neither rule: the node exits by itself. A resync whose answer was lost gets no early signal at all: core closed the RPC port before
+    // its save, so `quit` is refused; the stop waits out the silence rule and is recorded clean when the node had said it saved (0.19.440).
     let from = this.shutCmdAt || 0, quitOk = false;
     const believed = () => !!this.shutCmdAt && (this.shutCmdOk || quitOk);
     const mark = () => { if (!from) from = this.now(); };
@@ -638,6 +641,10 @@ class NodeManager extends EventEmitter {
       progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => (from && believed() && this.savedAt > from ? this.savedAt : 0),
       // for the RECORD of this stop only, never for a signal: what the log said after the app's own SIGTERM (a node saving in its shutdown hook)
       saidSavedAt: () => (from && this.savedAt > from ? this.savedAt : 0),
+      // 0.19.440 (review, RAN): a resync whose answer was lost. Core has closed the RPC port by then, so `quit` can never answer and the
+      // log cannot be believed for a signal: the stop waits out the silence rule. But a node that said it had saved after that command
+      // and then wrote nothing for silenceMs was not cut, and the next start must not say "that file may be incomplete".
+      satSaved: () => !!this.shutCmdAt && this.savedAt > this.shutCmdAt,
       // from ANY point of the run, and a command that shuts its insides down counts too: believing it only ever makes this stop wait
       shutStartedAt: () => this.shutStartedAt || this.shutCmdAt || 0,
       settled: () => Promise.race([closed, sleep(2_000)]),
@@ -695,7 +702,10 @@ class NodeManager extends EventEmitter {
       if (!termAt && saved && now - Math.max(t0, saved, progress) >= T.afterSavedMs) {
         termAt = now; clean = true; this.log("[app] the node has saved and has not exited by itself: SIGTERM"); o.signal("SIGTERM");
       } else if (!termAt && quiet >= T.silenceMs) {
-        termAt = now; this.log("[app] the node has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes since it was told to quit: SIGTERM (it may not have saved everything)"); o.signal("SIGTERM");
+        termAt = now;
+        if (o.satSaved && o.satSaved()) { clean = true; this.log("[app] the node said it had saved after a resync whose answer never came, and has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes: SIGTERM"); }
+        else this.log("[app] the node has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes since it was told to quit: SIGTERM (it may not have saved everything)");
+        o.signal("SIGTERM");
       } else if (!termAt && !hookAt && gentle && quit !== "answered" && !saved && now - t0 >= T.unansweredMs
           && (quit ? sighted && !started : now - Math.max(t0, progress) >= T.unansweredMs && !(sighted && started))) {
         hookAt = now; this.log("[app] the node has not answered `quit` for " + Math.round(T.unansweredMs / 1000) + " seconds and " + (quit ? "has not said it is shutting down" : "has written nothing since")
@@ -892,8 +902,11 @@ class NodeManager extends EventEmitter {
         await this.start();                   // w.before known: settled by the health poll before the node is called "running"
         throw new Error("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.");
       }
-      if (j && j.status === true) this.shutCmdOk = true;   // it answered after its save: its "saved" line is its own (stopInner)
-      else this.shutCmdAt = 0;                              // refused: nothing was shut down, and no later "saved" line is this command's (0.19.439)
+      // It answered after its save: its "saved" line is its own (stopInner). 0.19.440 (review, RAN): status true alone is not that
+      // answer. Core compares the action exactly and answers `megammrsync action:RESYNC` with status true at once, nothing shut down;
+      // every command that did shut the node down says so in its message ("… please restart", "Restart Minima for restore …").
+      if (j && j.status === true && SHUT_REPLY.test(String((j.response && j.response.message) || j.message || ""))) this.shutCmdOk = true;
+      else this.shutCmdAt = 0;                              // refused, or it ran nothing: no later "saved" line is this command's (0.19.439)
       if (j && j.status === true) {
         this.acceptMegaNow("a resync, a restore or a MegaMMR import has run");   // before the stop records what the MegaMMR holds
         await this.stop();

@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.440] — The stop path after a resync: only a real shutdown answer counts, and a lost answer is not recorded as a cut
+
+- Independent review of 0.19.439 ("safe to install, strictly safer than 0.19.438"; two Required findings, both reproduced), main/node-manager.js.
+- Core compares a command's action exactly: `megammrsync action:RESYNC` is answered with status true at once and shuts nothing down. That answer was taken as "the node has saved", and a peer's "saved" line could then get the node SIGTERM before its save. Only an answer whose message says the node must be restarted counts now (megammrsync, a MegaMMR import, archive resync, restore all say so).
+- A resync or import whose answer was lost: core has closed its RPC port by then, so `quit` can never answer (0.19.439's comment was wrong). The stop waits out the 10-minute silence rule, as 0.19.439 did, but no longer records a cut for a node that had said it saved: the next start does not say "that file may be incomplete".
+- Tests: the stand-in refuses `quit` after a resync, as core does; three new or corrected tests (two fail on 0.19.439). Stop-path tests 20 of 20.
+- Not done: the 10-minute wait itself in the lost-answer case; `megammrfile.js` reading "saved" from the log during an import; the app's exit signal to a node mid-resync-save.
+
 ## [0.19.439] — A "saved" line in the log is never believed by itself: the stop needs the node's own answer too
 
 - Independent review of 0.19.429–0.19.438 (MAJOR 1–3, both reproduced by the reviewer), main/node-manager.js. After `quit` is sent the node is still on the network for seconds (core shuts the network down first, writing nothing), and a peer can make it print a whole "Main Instance Cleared.." line: the stop believed it and sent SIGTERM 5 s later, before the node had saved anything (recorded as clean). A resync the node REFUSED also left its mark set for the rest of the run, so every later such line was believed.

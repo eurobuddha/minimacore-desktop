@@ -43,6 +43,7 @@ async function startStandin(saveMs, pieces, quiet, hang, forge, chatter, gap) {
   // `quit` over RPC: the node runs its whole shutdown, then answers (the stand-in is told by SIGUSR2)
   m.rpc = async (c) => {
     if (c !== "quit") throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    if (seen.resynced) throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });   // core closes its RPC port in a resync, before the save (0.19.440)
     seen.quits++; seen.child.kill("SIGUSR2");
     return new Promise((res) => { const done = () => res({ status: true, response: { message: "Shutdown complete" } }); seen.child.stdout.on("data", (d) => { if (/Shut down completed OK|Shutdown called when already shutting down/.test(d)) done(); }); /* core answers at once when it is already shut down */ seen.child.on("exit", done); });
   };
@@ -92,7 +93,7 @@ test("a node that has saved and sits there (megammrsync, restore, archive) is en
   fresh({ silenceMs: 60_000, afterSavedMs: 300 });
   const s = await startStandin(500, 2, false, false);
   try {
-    m.shutCmdAt = m.now(); s.child.kill("SIGUSR1");   // as runResync marks the command that shuts the node's insides down (0.19.429)
+    m.shutCmdAt = m.now(); m.shutCmdOk = true; s.resynced = true; s.child.kill("SIGUSR1");   // as runResync marks a command that answered "… please restart" (0.19.429, 0.19.440)
     for (let i = 0; i < 200 && !/Main Instance Cleared/.test(s.lines); i++) await wait(20);
     await wait(100);
     const t0 = Date.now(); await m.stop(); const took = Date.now() - t0;
@@ -150,8 +151,40 @@ test("a \"saved\" line printed AFTER `quit`, in the silent phase before the save
 });
 
 // 0.19.439 (review, MAJOR, RAN): a REFUSED resync left shutCmdAt set for the rest of the run, so every later "saved" line was believed.
+// 0.19.440 (review, RAN): the lost answer. `quit` is refused (the port is closed), the log is not believed for a signal, and the stop
+// waited the silence rule and recorded a CUT for a node that had saved: "that file may be incomplete" right after an import.
+test("a resync whose answer was lost: no early signal; after the silence rule the stop is recorded clean, because the node had said it saved", { timeout: 60_000 }, async () => {
+  fresh({ silenceMs: 1_500, afterSavedMs: 300, quitRetryMs: 200 });
+  const s = await startStandin(500, 2, false, false);
+  try {
+    m.shutCmdAt = m.now(); s.resynced = true; s.child.kill("SIGUSR1");   // sent, never answered: shutCmdOk stays false
+    for (let i = 0; i < 200 && !/Main Instance Cleared/.test(s.lines); i++) await wait(20);
+    await wait(100);
+    const t0 = Date.now(); await m.stop(); const took = Date.now() - t0;
+    assert.ok(took >= 1_400, "no signal before the silence rule (" + took + " ms)");
+    assert.equal(s.exit.code, 143); assert.equal(size(), 2 * PIECE);
+    assert.equal(record().cut, null, "it had said it saved: not a cut (0.19.439 recorded one)");
+  } finally { s.off(); restore(); }
+});
+
+// 0.19.440 (review, RAN): core answers a mis-cased action with status true at once and shuts nothing down
+test("status true without the \"please restart\" message is not the answer of a shutdown: nothing is marked", { timeout: 60_000 }, async () => {
+  fresh({ silenceMs: 30_000, afterSavedMs: 300, pollMs: 50 });
+  const s = await startStandin(3_000, 6, true, false, "");
+  try {
+    const quit = m.rpc; m.rpc = async (c) => (/^megammrsync /.test(c) ? { status: true, response: {} } : quit(c));
+    const stop = m.stop; m.stop = async () => {}; const start = m.start; m.start = async () => {};   // the restart after it is not this test's subject
+    try { await m.runResync("megammrsync action:RESYNC host:127.0.0.1:9").catch(() => {}); } finally { m.stop = stop; m.start = start; }
+    assert.equal(m.shutCmdOk, false); assert.equal(m.shutCmdAt, 0);
+    m.nodeLine("Minima @ 01/01/2026 00:00:00 [1.0 MB] : Main Instance Cleared..");
+    await m.stop();
+    assert.deepEqual(s.exit, { code: 0, sig: null }, "the node exited by itself"); assert.equal(size(), 6 * PIECE);
+    assert.ok(!m.logs.some((l) => /SIGTERM|SIGKILL/.test(l) && /^\[app\]/.test(l)), "no signal");
+  } finally { s.off(); restore(); }
+});
+
 test("a refused megammrsync marks nothing: a peer's \"saved\" line after it does not make the next stop signal", { timeout: 60_000 }, async () => {
-  fresh({ silenceMs: 30_000, afterSavedMs: 300 });
+  fresh({ silenceMs: 30_000, afterSavedMs: 300, pollMs: 50 });
   const s = await startStandin(3_000, 6, true, false, "");
   try {
     const quit = m.rpc; m.rpc = async (c) => (/^megammrsync /.test(c) ? { status: false, error: "Could not connect" } : quit(c));
