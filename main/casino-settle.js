@@ -90,7 +90,28 @@ const ADDR = /^0x(?:[0-9A-Fa-f]{2}){1,32}$/;            // an address the covena
 const DEC = /^\d{1,30}(?:\.\d{1,44})?$/;                // a plain decimal
 const INT = /^[1-9]\d{0,9}$/;                           // a positive whole number (range, payout)
 const BLOCKN = /^\d{1,12}$/;
-const copyable = (v) => typeof v === "string" && (HEXV.test(v) || DEC.test(v));
+const MAXN = (1n << 64n) - 1n;   // the node's largest number (MiniNumber): its VM throws on a larger one
+const inRange = (whole, decimals) => { const w = BigInt(whole); return w < MAXN || (w === MAXN && !/[1-9]/.test(decimals || "")); };
+const copyable = (v) => typeof v === "string" && (HEXV.test(v) || (DEC.test(v) && inRange(v.split(".")[0], v.split(".")[1])));
+// What a TAKER wrote (states 8-11; the contract's take does not check 8, 9 and 10 at all). A reveal must copy them so that the
+// contract's SAMESTATE finds them equal, and SAMESTATE compares the VALUE as the node's VM reads it. Accepted here is every text
+// that (1) is one safe command token, (2) the VM reads without throwing, and (3) comes back as the same VM value through
+// `txnstate value:` (proven with the classes of the shipped node, resources/minima.jar: the command parser, StateVariable and
+// kissvm Value; the test holds the table): hex of even length up to the VM's 64 KiB; a number, with "-" or not, up to 20 whole
+// digits and 127 decimals (what the node can print) within +-(2^64-1), the VM's range (a larger one makes the VM throw: such a
+// bet can never be revealed); TRUE or FALSE; a [string] of letters, digits, "_", "." and "-" only. Anything else is refused,
+// with the reason, and the coin is listed.
+const HEXANY = /^0x(?:[0-9A-Fa-f]{2}){1,65536}$/;
+const NUMV = /^-?(\d{1,20})(?:\.(\d{1,127}))?$/;
+const STRV = /^\[[A-Za-z0-9_.\-]{0,1024}\]$/;
+/** "" when the value can be copied into a reveal, else why not. */
+function takerValue(v) {
+  if (typeof v !== "string") return "is missing";
+  if (HEXANY.test(v) || v === "TRUE" || v === "FALSE" || STRV.test(v)) return "";
+  const m = NUMV.exec(v); if (!m) return "is not 0x hex of even length, a plain number, TRUE, FALSE or a [string] of letters, digits, \"_\", \".\" and \"-\"";
+  return inRange(m[1], m[2]) ? "" : "is a number outside the node's range (2^64 - 1): the contract itself cannot read it";
+}
+const valueBytes = (v) => HEXANY.test(v) ? (v.length - 2) / 2 : v.length;
 /** The same value as the contract compares it: hex without regard to case, a number by its value. */
 const sameValue = (a, b) => typeof a === "string" && typeof b === "string" && ((HEXV.test(a) && HEXV.test(b) && a.toUpperCase() === b.toUpperCase()) || (DEC.test(a) && DEC.test(b) && decCmp(a, b) === 0));
 const TXID = "cs_[a-z]{5,7}_\\d{1,16}_\\d{1,6}";
@@ -102,7 +123,9 @@ const SHAPES = [
   new RegExp("^txn(?:create|basics|post|delete) id:" + TXID + "$"),
   new RegExp("^txninput id:" + TXID + " coinid:" + HEXS + "$"),
   new RegExp("^txnoutput id:" + TXID + " amount:" + DECS + " address:0x(?:[0-9A-Fa-f]{2}){1,32} tokenid:(?:0x00|" + HEXS + ") storestate:(?:true|false)$"),
-  new RegExp("^txnstate id:" + TXID + " port:(?:[0-9]|1[0-3]) value:(?:0x(?:[0-9A-Fa-f]{2}){1,64}|" + DECS + ")$"),
+  new RegExp("^txnstate id:" + TXID + " port:(?:[0-7]|1[23]) value:(?:0x(?:[0-9A-Fa-f]{2}){1,64}|" + DECS + ")$"),
+  // states 8-11, a taker's own: the shapes of takerValue (and each value has passed takerValue itself)
+  new RegExp("^txnstate id:" + TXID + " port:(?:[89]|1[01]) value:(?:0x(?:[0-9A-Fa-f]{2}){1,65536}|-?\\d{1,20}(?:\\.\\d{1,127})?|TRUE|FALSE|\\[[A-Za-z0-9_.\\-]{0,1024}\\])$"),
   new RegExp("^txnsign id:" + TXID + " publickey:" + HEXS + "$")
 ];
 
@@ -300,8 +323,12 @@ async function judge(coin, ctx, manual) {
   const to = st.get(7); if (typeof to !== "string" || !DEC.test(to)) return bad("state 7 (the timeout) is not a plain number");
   const expired = BigInt(row.age) > BigInt(to.split(".")[0]);   // the covenant's @COINAGE GT timeout, at the tip
   const left = expired ? 0 : Number(BigInt(to.split(".")[0]) - BigInt(row.age)) + 1;
-  { const why = unread([0, 1, 2, 3, 4, 5, 6, 7, 8, 11]); if (why) return bad(why); }
-  for (const n of [0, 8]) if (!HEXV.test(st.get(n))) return bad(notHex(n));
+  { const why = unread([0, 1, 2, 3, 4, 5, 6, 7]); if (why) return bad(why); }
+  if (!HEXV.test(st.get(0))) return bad(notHex(0));
+  // state 8 (the player's key) and state 11 (the pick) are read on every spend of a taken bet: 8 by a signature check, which
+  // throws on anything but hex. A bet whose state 8 is not hex can be revealed, but can then be paid to nobody: nothing is signed.
+  if (!HEXANY.test(String(st.get(8)))) return bad(st.get(8) === undefined ? "state 8 is missing: the contract cannot read it and refuses every spend of this coin, so nothing is signed for it" : "state 8 is not 0x hex of even length: the contract's signature check throws on it once the bet is revealed, so the pot could be paid to nobody, revealed or not, and nothing is signed for it");
+  { const why = takerValue(st.get(11)); if (why) return bad("state 11 " + why + ": the contract cannot read it and refuses every spend of this coin, so nothing is signed for it"); }
   const claim = (key) => {
     if (up(k0) === up(k8)) return bad("states 0 and 8 hold the same key: the contract takes its signature as the other side's move, which fails, so the timeout claim cannot be made");
     row.action = "claim"; row.auto = true; row.plan = Object.assign({ kind: "claim", key }, base); if (!row.held) row.note = "The other side let the timeout pass: this wallet can take the whole pot.";
@@ -314,7 +341,12 @@ async function judge(coin, ctx, manual) {
     if (!house) { row.leftFor = "until this wallet can claim the pot"; if (!row.held) row.note = "Waiting for the house to reveal."; return row; }
     row.leftFor = "before the player can take the whole pot";
     const commit = st.get(2); if (typeof commit !== "string" || !HEX64.test(commit)) return bad("state 2 (the house commit) is not 0x and 64 hex digits");
-    for (const port of [1, 3, 4, 5, 7, 8, 9, 10, 11]) if (!copyable(st.get(port))) return bad("state " + port + " is not 0x hex or a plain number, so it cannot be copied into the reveal");
+    for (const port of [1, 3, 4, 5, 7]) if (!copyable(st.get(port))) return bad("state " + port + " is not 0x hex or a plain number, so it cannot be copied into the reveal");
+    for (const port of [9, 10]) { const why = takerValue(st.get(port)); if (why) return bad("state " + port + " " + why + ", so it cannot be copied into the reveal"); }
+    { // the reveal carries every state twice (the coin, and the new coin): over the node's 64K transaction limit it can never be made
+      const bytes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].reduce((a, n) => a + valueBytes(st.get(n)), 32);
+      if (2 * bytes > 65536) return bad("its states are " + bytes + " bytes, and a reveal carries them twice: that is over the node's 64K limit for one transaction, so this bet cannot be revealed");
+    }
     const secret = secretFor("casino_secret_for_", commit);
     if (secret === "") return bad("the secret of this offer is not on this computer, so it cannot be revealed here");
     if (secret === null) return bad("the secret saved for this offer does not match its commit");
@@ -530,5 +562,5 @@ function invalidate() { known = new Set(); strangers = new Set(); secretCache.cl
 
 module.exports = {
   emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY, HOLD_AGE, REVEAL_ANYWAY_LEFT,
-  _setClock: (fn) => { now = fn; }, _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run
+  _setClock: (fn) => { now = fn; }, _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run, _takerValue: takerValue
 };

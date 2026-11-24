@@ -138,7 +138,8 @@ function use(n, secrets = {}) {
 const houseSecret = { ["casino_secret_for_" + HC]: HS }, playerSecret = { ["casino_psecret_for_" + PC]: PS };
 /** No text ever holds ";", and nothing but the listed verbs ever reached the node. */
 function clean(n) {
-  for (const t of n.texts) assert.ok(!/[;\x00-\x1f\x7f]/.test(t), "a command held a ; or a control character: " + JSON.stringify(t));
+  const NEWSCRIPT = 'newscript script:"' + S.SCRIPT + '" trackall:false';   // the one text with quotes: the module's own constant, no coin value in it
+  for (const t of n.texts) assert.ok(t === NEWSCRIPT || !/[;"'\\\x00-\x1f\x7f]/.test(t), "a command held a ; a quote, a backslash or a control character: " + JSON.stringify(t));
   for (const p of n.ran) assert.match(p, /^(block|keys|scripts|getaddress|coins|newscript|txncreate|txninput|txnoutput|txnstate|txnsign|txnbasics|txnpost|txndelete)\b/, "an unexpected command: " + p);
 }
 
@@ -265,7 +266,11 @@ test("blocks left before the other side can take the pot are shown for a taken o
 });
 
 test("a coin with a ; or an odd value in ANY port, its coin id, token or amount is never turned into a command, and is listed whole", async () => {
-  const evil = ["0xAB;send amount:1 address:" + XA, "1500 address:" + XA, '0xAB" address:"' + XA, "[text]", "TRUE", "0xABC", "1e3", "-1", "0xAB\n", "", " 0x" + "AB".repeat(32)];
+  const evil = ["0xAB;send amount:1 address:" + XA, "1500 address:" + XA, '0xAB" address:"' + XA, "[text]", "TRUE", "0xABC", "1e3", "-1", "0xAB\n", "", " 0x" + "AB".repeat(32),
+    "[a;send amount:1 address:" + XA + "]", "[a b]", '[a"b]', "[a\\b]", "[a]b]", "TRUE;quit", "-1;quit", "-1 address:" + XA, "[x]\n", "[x] address:" + XA, "True", "99999999999999999999"];
+  // 0.18.338: what a taker may write in states 9, 10 and 11 is copied when it is one safe token the node reads back the same
+  // ([text], TRUE, -1 of the list above); state 11 is only read, never used, by a timeout claim
+  const safe = ["[text]", "TRUE", "-1"], copied = { reveal: [9, 10, 11], claim: [11] };
   const kinds = { reveal: [() => taken(), houseSecret, "0.14"], resolve: [() => revealed({ 0: XK, 1: XA, 8: K1, 9: ADDR1, 11: String(result(HS, PS, 2)) }), playerSecret, "0.14"], claim: [() => taken({ 0: XK, 8: K1 }), {}, "0.14"], cancel: [() => offer(), {}, "0.07"] };
   // the ports each action reads: an odd value there and NOTHING is built (not even txncreate); in any other port the value is never read,
   // the action goes through and the covenant accepts it
@@ -276,15 +281,16 @@ test("a coin with a ; or an odd value in ANY port, its coin id, token or amount 
     const n = standin(), c = coin(n, 1, value, Object.assign(mk(), { [port]: v }), kind === "claim" ? { created: 1 } : {}); use(n, secrets);
     await S.pass(); await S.cancelAll().catch(() => {}); await S.settle(c.coinid).catch(() => {});
     const l = await S.list();
-    for (const p of n.built()) assert.ok(!p.includes(v) || v === "", kind + " port " + port + ": the value " + JSON.stringify(v) + " reached " + p);
+    const ok = safe.includes(v) && (copied[kind] || []).includes(port);
+    for (const p of n.built()) assert.ok(!p.includes(v) || v === "" || ok, kind + " port " + port + ": the value " + JSON.stringify(v) + " reached " + p);
     assert.ok(!n.ran.some(p => /^send/.test(p)), "a second command ran"); clean(n);
     if (l.rows.length && l.rows[0].problem) { assert.equal(l.rows[0].coinid, c.coinid); listed++; }
     const where = kind + " port " + port + " " + JSON.stringify(v);
-    if (reads[kind].includes(port)) assert.deepEqual(n.built(), [], where + ": nothing is built");
+    if (reads[kind].includes(port) && !ok) assert.deepEqual(n.built(), [], where + ": nothing is built");
     else assert.equal(n.built().filter(p => p === "txnpost id:ID").length, 1, where + ": a port the action does not read does not stop it");
     n.mine(); assert.ok(n.verdicts.every(Boolean), where + ": whatever was posted is valid under the covenant");
   }
-  assert.ok(listed > 150, "the odd coins of this wallet are listed as not settled, with their whole coin id (" + listed + ")");
+  assert.ok(listed > 400, "the odd coins of this wallet are listed as not settled, with their whole coin id (" + listed + ")");
   // the coin itself
   for (const bad of [{ coinid: "0xC1;send amount:1 address:" + XA }, { tokenid: "0x00 tokenid:" + MXUSD }, { value: "0.14 amount:99" }, { created: "12;quit" }]) {
     const n = standin(); coin(n, 1, "0.14", taken(), bad); use(n, houseSecret);
@@ -297,7 +303,8 @@ test("a coin with a ; or an odd value in ANY port, its coin id, token or amount 
 
 test("the module sends only its own command shapes: anything else, a ; chain or a control character is refused before the node", async () => {
   const n = standin(); use(n);
-  for (const c of ["send amount:1 address:" + XA, "txnpost id:cs_cancel_1_1;send amount:1 address:" + XA, "txnsign id:cs_cancel_1_1 publickey:auto", "txnstate id:cs_reveal_1_1 port:12 value:[x]", "txnstate id:cs_reveal_1_1 port:14 value:1",
+  for (const c of ["send amount:1 address:" + XA, "txnpost id:cs_cancel_1_1;send amount:1 address:" + XA, "txnsign id:cs_cancel_1_1 publickey:auto", "txnstate id:cs_reveal_1_1 port:12 value:[x]", "txnstate id:cs_reveal_1_1 port:14 value:1", "txnstate id:cs_reveal_1_1 port:7 value:-1", "txnstate id:cs_reveal_1_1 port:0 value:TRUE",
+    "txnstate id:cs_reveal_1_1 port:9 value:[a b]", 'txnstate id:cs_reveal_1_1 port:9 value:[a"b]', "txnstate id:cs_reveal_1_1 port:9 value:[a\\b]", "txnstate id:cs_reveal_1_1 port:10 value:[a]b]", "txnstate id:cs_reveal_1_1 port:9 value:true", "txnstate id:cs_reveal_1_1 port:9 value:0xABC",
     "txnoutput id:cs_cancel_1_1 amount:1 address:" + ADDR1 + " tokenid:0x00 storestate:false address:" + XA, "coins address:" + XA + " depth:4096", "txncreate id:x", "keys action:genkey", "block\n", "vault"]) {
     await assert.rejects(S._run(c), (e) => e.notSent === true, c);
   }
@@ -573,6 +580,74 @@ test("an amount the node gave as a JSON number (it has been through a double) is
   assert.deepEqual(await S.pass(), { done: [], failed: [] }); assert.equal(signs(n), 0);
   assert.match((await S.list()).rows[0].problem, /its token, amount or creation block cannot be read/); assert.ok(c);
   assert.deepEqual([S.AUTO_TRIES, S.AUTO_PER_PASS, S.AUTO_PER_DAY, S.CLAIMS_PER_DAY], [TRIES, PER_PASS, PER_DAY, CLAIMS_DAY]);
+});
+
+// 0.18.338 (review of 0.18.330, MAJOR 4): the contract's take does not check what a taker writes in states 8, 9 and 10, and the
+// reveal must copy states 7-11 so that SAMESTATE finds them equal. The module refused takes the contract would let it reveal.
+// NODE_READS: what the SHIPPED node does with each value (true: its VM reads it AND it comes back as the same VM value through
+// its command parser, StateVariable and the wire form). Made with scripts/casino-state-roundtrip.java against resources/minima.jar
+// (sha256 fc63eb672374e7ceb7cfba17d0e098e3c2991c9a0ef124b0a14fae111c088ef9); no node was started.
+const R = (c, k) => c.repeat(k);
+const NODE_READS = [
+  ["0xAB", true], ["0xab", true], ["0x00", true], ["0x" + R("AB", 65), true], ["0x" + R("ab", 65), true], ["0xABC", true], ["0x", false], ["0xZZ", false],
+  ["-1", true], ["-0.5", true], ["-0", true], ["0", true], ["1", true], ["1.0", true], ["1.50", true], ["007", true], ["TRUE", true], ["FALSE", true], ["true", false], ["True", false],
+  ["[x]", true], ["[]", true], ["[a.b_c-d]", true], ["[0xAB]", true], ["[12]", true], ["[TRUE]", true], ["[a b]", true], ["[a:b]", true], ['[a"b]', true], ["[a\\b]", true], ["[a[b]", true], ["[a]b]", true], ["[a{b]", true],
+  ["hello", false], ["", false], ["1234567890123456789012345678901", false], ["18446744073709551615", true], ["18446744073709551616", false], ["18446744073709551615.0", true], ["18446744073709551615.5", false],
+  ["18446744073709551614.9", true], ["-18446744073709551615", true], ["-18446744073709551616", false], ["99999999999999999999", false], ["10000000000000000000.12345678901", true],
+  ["0." + R("1", 44), true], ["0." + R("1", 45), true], ["0." + R("0", 126) + "1", true], ["0." + R("1", 127), true], ["1." + R("9", 64), true], ["12345678901234567890." + R("1", 50), true],
+  ["1e3", false], ["+1", false], ["-", false], ["--1", false], ["-1.", true], ["1.", false], [".5", false], ["-.5", true], ["- 1", false], ["-0x1", false], ["1,5", false]
+];
+// What the module must copy (the reviewer's list, and the rest of each shape); and what it leaves refused although the node reads it
+// back: odd-length hex and "-1." / "-.5" (not what the node prints), and a [string] with anything but letters, digits, "_", "." "-".
+const COPIED = ["0x" + R("AB", 65), "0x" + R("ab", 65), "0xAB", "0xab", "0x00", "-1", "-0.5", "-0", "0", "1", "1.0", "1.50", "007", "0." + R("1", 44), "0." + R("1", 127), "TRUE", "FALSE", "[x]", "[]", "[a.b_c-d]", "[0xAB]", "[12]", "[TRUE]",
+  "18446744073709551615", "18446744073709551615.0", "18446744073709551614.9", "-18446744073709551615", "10000000000000000000.12345678901", "0." + R("1", 45), "0." + R("0", 126) + "1", "1." + R("9", 64), "12345678901234567890." + R("1", 50)];
+
+test("what a taker may write: the module copies only what the shipped node reads back as the same value, and copies all of the reviewer's shapes", () => {
+  for (const [v, node] of NODE_READS) {
+    const mine = S._takerValue(v) === "";
+    assert.ok(!mine || node, "the module would copy " + JSON.stringify(v) + ", which the node does not read back the same");
+    assert.equal(mine, COPIED.includes(v), JSON.stringify(v) + (mine ? " is copied" : " is refused: " + S._takerValue(v)));
+    assert.ok(!mine || !/[;"'\\\s\x00-\x1f\x7f]/.test(v), "a copied value is one plain token");
+  }
+  for (const v of COPIED) assert.ok(NODE_READS.some(([x, node]) => x === v && node), "in the table: " + v);
+  assert.equal(S._takerValue("1234567890123456789012345678901"), 'is not 0x hex of even length, a plain number, TRUE, FALSE or a [string] of letters, digits, "_", "." and "-"', "31 whole digits: above 2^64 - 1, the node's VM throws on it");
+  assert.equal(S._takerValue("18446744073709551615.5"), "is a number outside the node's range (2^64 - 1): the contract itself cannot read it");
+  assert.equal(S._takerValue(undefined), "is missing");
+});
+
+test("a take with 65-byte hex, -1, TRUE, a [string] or a 31-digit number in state 9, 10 or 11 is REVEALED, and the contract accepts the reveal", async () => {
+  const shapes = ["0x" + R("AB", 65), "0x" + R("ab", 65), "-1", "TRUE", "FALSE", "[x]", "[]", "[a.b_c-d]", "10000000000000000000.12345678901", "0." + R("0", 126) + "1", "-0.5", "18446744073709551615"];
+  for (const port of [9, 10, 11]) for (const v of shapes) {
+    const n = standin(), c = coin(n, 1, "0.14", taken({ [port]: v })); use(n, houseSecret); const where = "state " + port + " = " + JSON.stringify(v.slice(0, 40));
+    assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", c.coinid]], where + ": revealed");
+    assert.ok(n.ran.includes("txnstate id:" + n.ran.find(p => /^txncreate/.test(p)).slice(13) + " port:" + port + " value:" + v), where + ": copied as it is");
+    n.mine(); assert.deepEqual(n.verdicts, [true], where + ": the contract accepts it"); assert.equal(c.spent, true); clean(n);
+    // and the revealed bet can still be claimed by the house when the player lets the timeout pass
+    const p2 = n.coinsAt(CONTRACT)[0]; n.tip = p2.created + 1501; assert.deepEqual((await S.pass()).done.map(d => d.action), ["claim"], where); n.mine(); assert.deepEqual(n.verdicts, [true, true], where + ": and the claim");
+  }
+  { // 65-byte hex in state 8 (a "key" nobody can sign with): revealed, and claimed after the timeout
+    const n = standin(), c = coin(n, 1, "0.14", taken({ 8: "0x" + R("CD", 65) })); use(n, houseSecret);
+    assert.deepEqual((await S.pass()).done.map(d => d.action), ["reveal"]); n.mine(); assert.deepEqual(n.verdicts, [true]); assert.ok(c.spent);
+  }
+});
+
+test("what cannot be copied is not signed for, and the row says exactly why: state 8 that is not hex, a number the node cannot read, a string with other characters, states too large for one transaction", async () => {
+  const cases = [
+    [{ 8: "-1" }, /^state 8 is not 0x hex of even length: the contract's signature check throws on it once the bet is revealed, so the pot could be paid to nobody, revealed or not, and nothing is signed for it$/],
+    [{ 8: "TRUE" }, /^state 8 is not 0x hex of even length/],
+    [{ 9: "1234567890123456789012345678901" }, /^state 9 is not 0x hex of even length, a plain number, TRUE, FALSE or a \[string\] of letters, digits, "_", "\." and "-", so it cannot be copied into the reveal$/],
+    [{ 10: "18446744073709551616" }, /^state 10 is a number outside the node's range \(2\^64 - 1\): the contract itself cannot read it, so it cannot be copied into the reveal$/],
+    [{ 9: "[a b]" }, /^state 9 is not 0x hex of even length/], [{ 10: '[a"b]' }, /^state 10 is not/], [{ 9: "0xABC" }, /^state 9 is not/], [{ 11: "true" }, /^state 11 is not .*refuses every spend of this coin/],
+    [{ 9: "0x" + R("AB", 20000), 10: "0x" + R("CD", 13000) }, /^its states are 33\d\d\d bytes, and a reveal carries them twice: that is over the node's 64K limit for one transaction, so this bet cannot be revealed$/]
+  ];
+  for (const [over, why] of cases) {
+    const n = standin(), c = coin(n, 1, "0.14", taken(over)); use(n, houseSecret);
+    assert.deepEqual(await S.pass(), { done: [], failed: [] }); await S.settle(c.coinid).catch(() => {}); assert.equal(signs(n), 0); assert.deepEqual(n.built(), []);
+    const row = (await S.list()).rows[0]; assert.match(row.problem, why); assert.equal(row.coinid, c.coinid); assert.equal(row.manualOk, false);
+  }
+  // the stand-in's contract agrees about state 8: revealed, such a bet is paid to nobody (so a reveal would only spend a signature and show the secret)
+  const dead = { coinid: cid(1), tokenid: "0x00", value: "0.14", st: revealed({ 8: "-1" }) };
+  for (const key of [K1, XK]) assert.equal(covenant(dead, { outputs: [{ amount: "0.14", address: ADDR1, tokenid: "0x00", storestate: false }], state: { 13: PS }, signed: [up(key)] }, 99999), false);
 });
 
 test("the window: one dialog from the notice and from Settings, ids copyable, Cancel offer / Settle now / Cancel all; no bet, offer or take channel", () => {
