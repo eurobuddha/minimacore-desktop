@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.436] — The Dexicon page's Activity read is let through; a forged fill record no longer keeps the Quit warning on
+
+- Independent review of 0.19.428 (MINOR 10), main/dexicon.js.
+- `coins … depth:` from the page took at most 6 digits (0.19.424). The page's Activity reads `depth:` tip + 6 for a trade that has no post block yet (renderer/dexicon/ui/activity.js), and the tip has 7 digits: that read was refused, so such a trade's proceeds coin was not found. 7 digits are allowed.
+- "Fills with an outcome not known yet" (the Quit and Shutdown warnings, the Freeze blocker) counted ANY `fill_%` record saying status unknown. Since 0.19.425 the engine settles only its own unanswered record, so a record the page wrote was never settled and kept the warning and the blocker on for good. Only the records the engine settles are counted: role maker, a `fill_unanswered_` key, its unanswered id, a plain positive fill.
+- Test: scripts/dexicon-host.test.cjs (two fail on 0.19.435: "not available to Dexicon: coins with depth"; the forged record counted 1).
+
 ## [0.19.435] — Future Cash Next: no false theft alarm, a landed collect ends, one coin proves one collect
 
 - Independent review of 0.19.428 (MINOR 8 and 9), main/futurecash.js. The theft alarm ("A collected stake … did NOT reach your safe address. Your old key may be compromised", status TAKEN) is final. It was raised on one read, and two harmless things look the same to that read: our own sweep landed and its coin at the same-node safe was spent onward before any pass saw it; or a reorg dropped the collect, so the coin being swept no longer exists.

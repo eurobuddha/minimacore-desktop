@@ -136,7 +136,9 @@ const READ_PARAMS = {
   txpow: { onchain: H64, txpowid: H64 },
   txnview: { data: /^0x[0-9A-Fa-f]{2,200000}$/ },
   coins: { coinid: H64, address: ADDR, tokenid: HEXID, relevant: BOOL, sendable: BOOL, simplestate: BOOL, checkmempool: BOOL, megammr: BOOL,
-    order: /^(asc|desc)$/, depth: /^\d{1,6}$/, coinage: /^\d{1,7}$/ }
+    // depth to 7 digits (0.19.436): the page's Activity reads `depth:` tip + 6 for a trade with no post block yet (renderer/dexicon/ui/activity.js
+    // outCreated), and the tip has 7 digits: with 6 that read was refused
+    order: /^(asc|desc)$/, depth: /^\d{1,7}$/, coinage: /^\d{1,7}$/ }
 };
 const NEWSCRIPT = /^newscript (?:script:"[^"\\]{1,60000}" trackall:false|trackall:false script:"[^"\\]{1,60000}")$/;
 /** throws unless c is exactly `verb name:value …` with each name once, known for this verb, and its value in shape */
@@ -584,7 +586,12 @@ function makeHost(opts = {}) {
   const takes = () => Object.keys(kv("pending_takes")).length + Object.keys(kv("void_takes")).length;
   // 0.18.142: fills of this node's orders whose txnpost was never answered (service.desktop.js POST UNANSWERED): the
   // chain decides which way they went, and the engine can only read that while it runs. For the Quit and Shutdown warnings.
-  const unknown = () => { const r = sqlShim.sql("SELECT v FROM ax_kv WHERE k LIKE 'fill_%'"); if (!r.status) throw new Error(r.error); return r.rows.filter(x => { try { return JSON.parse(x.V || x.v || "{}").status === "unknown"; } catch (e) { return false; } }).length; };
+  // 0.19.436: only the records the engine itself settles (service.desktop.js settleFills since 0.19.425: its OWN unanswered record, role
+  // maker under a fill_unanswered_ key with its unanswered id and a plain positive fill). Any fill_% record saying "unknown" was counted,
+  // so one the page wrote, which nothing ever settles, kept the Quit warning and the Freeze blocker on for good.
+  const UNANSWERED_ID = /^0x0{48}[0-9a-f]{16}$/;
+  const unknown = () => { const r = sqlShim.sql("SELECT k, v FROM ax_kv WHERE k LIKE 'fill_%'"); if (!r.status) throw new Error(r.error); return r.rows.filter(x => { try { const f = JSON.parse(x.V || x.v || "{}");
+    return f.status === "unknown" && f.role === "maker" && String(x.K || x.k).indexOf("fill_unanswered_") === 0 && UNANSWERED_ID.test(String(f.applied)) && /^\d+(\.\d+)?$/.test(String(f.filled)) && /[1-9]/.test(String(f.filled)); } catch (e) { return false; } }).length; };
   /** The ready answer, read now from the running engine and its store, unswallowed; null when it cannot be said whole. Kept by a
    *  stop (last): a held engine does nothing, so what it had open when it stopped is what it has open until it runs again. */
   function workNow() {

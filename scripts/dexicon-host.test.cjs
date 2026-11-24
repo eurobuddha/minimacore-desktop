@@ -1569,9 +1569,10 @@ test("the page's reads carry only the engine's own parameters: no history where:
     "history relevant:true max:100 offset:0", "txpow onchain:" + H, "txpow txpowid:" + H, "txnview data:0x00AB",
     "coins coinid:" + H, "coins coinid:" + H + " megammr:true checkmempool:true", "coins relevant:true sendable:true checkmempool:true coinage:3 tokenid:0x00 address:" + H,
     "coins simplestate:true order:desc depth:1500 address:0x50414E4441504F4F4C53", "coins order:desc address:" + H + " coinage:0 depth:72",
+    "coins simplestate:true address:" + H + " tokenid:0x00 coinage:0 depth:2428206",   // 0.19.436: the Activity's read for a trade with no post block yet (tip + 6: 7 digits)
     'newscript script:"RETURN SIGNEDBY(' + H + ')" trackall:false', 'newscript trackall:false script:"RETURN TRUE"']) ok(c);
   for (const c of ["history action:customsize where:1=1", "history relevant:true max:100 offset:0 where:x", "history relevant:true max:99999 offset:0",
-    "coins megammr:true", "coins tokenid:0x00 megammr:true", "coins where:x", "coins coinid:" + H + " coinid:" + H, "coins coinid:" + H.slice(0, 20), "coins  coinid:" + H,
+    "coins megammr:true", "coins tokenid:0x00 megammr:true", "coins address:" + H + " depth:12345678", "coins where:x", "coins coinid:" + H + " coinid:" + H, "coins coinid:" + H.slice(0, 20), "coins  coinid:" + H,
     "balance megammr:true", "txpow address:" + H, "txpow onchain:" + H + " txpowid:" + H, "scripts address:" + H, "status complete:true", "random size:99999",
     'newscript script:"RETURN TRUE" trackall:true', 'newscript script:"RETURN TRUE" trackall:false clean:true', 'newscript trackall:false script:"A\\" clean:true script:\\"B"', "newscript script:RETURN trackall:false"]) no(c);
 });
@@ -1590,6 +1591,13 @@ test("0.19.425: a page-written record with status unknown never raises a live or
   vm.runInContext("AX.maker.load(AX.mds, function (e, l) { __out = { remaining: AX.maker.find(l, '" + ORDER + "').remaining }; });", b.ctx);
   await M.until(() => b.ctx.__out);
   assert.equal(b.ctx.__out.remaining, "40", "the live order is untouched (it rose to 1000040)");
+  // 0.19.436: and that record, which nothing settles, is not counted as a fill with an unknown outcome (it kept the Quit warning and the Freeze blocker on for good)
+  assert.equal((await b.host.activeWork()).unknown, 0, "a page-written record is not the engine's unanswered fill");
+  for (const [k, f] of [["fill_unanswered_x1", { role: "taker", status: "unknown", applied: FID, filled: "5" }], ["fill_unanswered_x2", { role: "maker", status: "unknown", applied: "0x" + "9".repeat(64), filled: "5" }],
+    ["fill_unanswered_x3", { role: "maker", status: "unknown", applied: FID, filled: "0" }], ["fill_0x" + "8".repeat(64), { role: "maker", status: "unknown", applied: FID, filled: "5" }]])
+    await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('" + k + "', '" + JSON.stringify(f) + "')");
+  assert.equal((await b.host.activeWork()).unknown, 0, "nor any other shape settleFills leaves alone");
+  // (the engine's own unanswered record still counts: test "H3: txnpost never answered" above)
 });
 
 // 0.19.428 (full review 23 Nov, MAJOR): `newscript` replaces the node's row for an address: a page newscript of one of our
