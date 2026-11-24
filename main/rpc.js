@@ -33,13 +33,18 @@ const V = require("./cmdverb");
 // megammrsync action:resync runs for as long as the chain takes to load (tens of minutes on a slow link): its own bound
 // (0.19.219). Cut at 180 s it looked "unanswered" while the node went on and could still swap the wallet.
 const RESYNC_TIMEOUT_MS = 60 * 60 * 1000;
+const MEGA_READ_TIMEOUT_MS = 150_000;   // above the 120 s the PandaPools engine allows its own megammr lookup
 function timeoutFor(command) {   // the verb read as the node reads it, in every piece of a chain (main/cmdverb.js, 0.19.190, as released 0.18.175)
   const ps = V.parts(command);
   if (ps.some(part => V.is(part, "megammrsync") && V.fold(V.paramValue(part, "action") || "") === "resync")) return RESYNC_TIMEOUT_MS;
   // megammr action:import reads a whole MegaMMR file (1.6 GB for the mainnet one) in batches of 256 blocks, each allowed 10 minutes (megammr.java)
   // and action:integrity reads the same whole file at once and checks every coin's proof in it (megammr.java)
   if (ps.some(part => V.is(part, "megammr") && ["import", "integrity"].includes(V.fold(V.paramValue(part, "action") || "")))) return RESYNC_TIMEOUT_MS;
-  return ps.some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p))) ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS;
+  if (ps.some(part => WRITE_PREFIXES.some(p => V.beginsAs(part, p)))) return WRITE_TIMEOUT_MS;
+  // A read with megammr:true (balance, coins) walks the node's whole MegaMMR coin table: tens of seconds on the mainnet one.
+  // At the 30 s read bound PandaPools' reserve lookup (which budgets 120 s itself) gave up as "Reserves unresolved" (0.19.427).
+  if (ps.some(part => V.fold(V.paramValue(part, "megammr") || "") === "true")) return MEGA_READ_TIMEOUT_MS;
+  return READ_TIMEOUT_MS;
 }
 
 /** One HTTP round trip to the node, ungated. Only rpcCall below may call this. */

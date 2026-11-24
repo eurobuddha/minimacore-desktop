@@ -257,3 +257,13 @@ test('a lost signer holds the queue for the minimum grace even when `block` answ
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main', 'noderun.js'), 'utf8');
   assert.ok(/const minHoldMs = opts\.minHoldMs == null \? 60 \* 1000 : opts\.minHoldMs;/.test(src), 'the default grace is 60 s');
 });
+
+// 0.19.427: a read that walks the MegaMMR gets more than the 30 s read bound
+require("node:test").test("a megammr:true read is given 150 s; a plain read 30 s; a write 180 s", () => {
+  const T = require("../main/rpc.js")._timeoutFor, assert = require("node:assert/strict"), H = "0x" + "AB".repeat(32);
+  assert.equal(T("balance tokenid:0x00 megammr:true"), 150000);
+  assert.equal(T("coins coinid:" + H + " megammr:true"), 150000);
+  assert.equal(T("coins coinid:" + H + " megammr:false"), 30000);
+  assert.equal(T("balance tokenid:0x00"), 30000);
+  assert.equal(T("txnpost id:a"), 180000);
+});

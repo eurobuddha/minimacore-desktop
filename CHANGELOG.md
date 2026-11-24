@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.427] — A read that walks the MegaMMR is given 150 seconds, not 30
+
+- Stand-in audit 23 Nov 2026 (MINOR). `balance … megammr:true` and `coins … megammr:true` walk the node's whole MegaMMR coin table. The app cut every read at 30 s, while the PandaPools engine allows its own reserve lookup 120 s: on a full mainnet MegaMMR the lookup ended as "Reserves unresolved".
+- main/rpc.js timeoutFor: a command carrying `megammr:true` gets 150 s. Writes (180 s) and plain reads (30 s) are unchanged.
+- Test: scripts/rpc-test.cjs (fails on 0.19.426: 30000).
+
 ## [0.19.426] — The AtomiX room's Ethereum Send takes the ETH Wallet's guarded path; no fee tier passes the ceiling
 
 - Full review 23 Nov 2026 (MAJOR), as minimaCore Desktop 0.18.323. The AtomiX room's Send signed at whatever gas price the Ethereum endpoint returned (no ceiling: one hostile or broken endpoint among the fallbacks set the fee; in the reviewer's run a 21,000-gas send was signed with a 0.945 ETH fee), with no address checksum check and no one-send-at-a-time guard.
