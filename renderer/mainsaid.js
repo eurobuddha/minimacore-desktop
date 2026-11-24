@@ -199,6 +199,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["PORT_GATEWAY", I18N.N_("the Parlons wallet gateway"), { top: false, group: "PORT_WHAT" }],
     ["PORT_PANEL", I18N.N_("the Parlons panel"), { top: false, group: "PORT_WHAT" }],
     ["ANOTHER_PROGRAM", I18N.N_("another program"), { top: false }],
+    // main/writermark.js (0.19.438): an older copy on a folder a newer copy of the SAME app wrote, with the way back
+    ["OLDER_COPY_AT", I18N.N_("This data folder was last used by {name} {was}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open {name} {was} or newer. To go back to this older version on purpose, quit the app, delete the file {file} and open this copy again. This copy is at {exe}")],
+    ["OLDER_COPY", I18N.N_("This data folder was last used by {name} {was}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open {name} {was} or newer. To go back to this older version on purpose, quit the app, delete the file {file} and open this copy again.")],
     ["NODE_OLD_STUCK", I18N.N_("could not stop this app's node left running by an earlier launch (pid {pid})")],
     ["NODE_JAVA", I18N.N_("could not launch java: {error}")],
     ["NODE_EXITED", I18N.N_("node exited unexpectedly ({code})")],

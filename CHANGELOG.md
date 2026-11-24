@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.438] — The "older copy" refusal compares within one app only, and names its way back
+
+- Independent review of 0.19.428 (MINOR 12), main/writermark.js. The mark in `<data folder>/minimacore-writer.txt` (0.19.423) carried only a version. Two apps of this family pointed at one custom data folder have unrelated version numbers (0.18.x and 0.19.x): the one with the lower number was refused for good, and nothing said how to get out of a refusal.
+- The file now holds one line an app: `app <version> <the app's bundle id>`. A copy is compared only with the line of its own app. The line builds 0.19.423 to 0.19.437 wrote and read (`app <version>`, no app named) is still written, and only raised, so those older copies go on refusing; here it is read only in a file that names no app at all (a mark one of them left), which cannot be told apart and is still compared with every copy.
+- **The way back, for a deliberate return to an older version**: quit the app, delete the file `<data folder>/minimacore-writer.txt`, open the older copy. The refusal now ends "To go back to this older version on purpose, quit the app, delete the file {its full path} and open this copy again.", and README.md has it ("Going back to an older version"). Nothing else reads that file; the next start writes it again.
+- The refusal is said in zh, ru and uk.
+- Tests: scripts/writermark-test.cjs (fails on 0.19.437: the other app's higher number refused this one), scripts/mainsaid-test.cjs.
+
 ## [0.19.437] — A take's page newscripts read the wallet's scripts once, not once each
 
 - Independent review of 0.19.428 (MINOR 14), main/dexicon.js. The guard of 0.19.428 read the node's `scripts` for every page newscript (a take sends up to 32), though the signing check already reads the same lists.

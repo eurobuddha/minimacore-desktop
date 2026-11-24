@@ -159,6 +159,10 @@ test("node start, node kind, wallet replacement, config: each listed sentence is
     "The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.", "-blockaskeyuses cannot be set in the extra arguments. The wallet's key mode sets it.", "-rpc cannot be set in the extra arguments. The app sets it itself.", "Unknown key mode.",
     "The node in this version of the app cannot run a block key wallet.", "This wallet uses block key uses, and that node cannot run it.", "Restoring a backup file replaces this wallet's keys. Use Backup & Recovery, Restore from file: it checks the backup's key mode first."]) check(s);
   // a stop while the node saves, and what the next start says about it (0.19.420)
+  { // 0.19.438: the older-copy refusal, as main/writermark.js says it (with and without this copy's own path)
+    const W = require("../main/writermark.js"), d = fs.mkdtempSync(path.join(require("os").tmpdir(), "wm-said-")); W.mark(d, "0.19.438", "com.example.app");
+    check(W.problem(d, "0.19.105", "Pandamonium Desktop", "/Applications/Old Copy/Pandamonium Desktop.app/Contents/MacOS/Pandamonium Desktop", "com.example.app")); check(W.problem(d, "0.19.105", "Pandamonium Desktop", "", "com.example.app"));
+  }
   for (const s of [require("../main/node-manager.js").ANSWER_NOTE, require("../main/node-manager.js").reclaimNote(4242), require("../main/node-manager.js").stillNote(4242, 30)]) check(s);   // 0.19.430
   for (const s of [require("../main/node-manager.js").SAVING_NOTE, "The node's last shutdown was cut short (SIGKILL) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.",
     "Your MegaMMR looks incomplete (51490816 bytes, was 1610612736 bytes): import the MegaMMR file again.", "Your MegaMMR looks incomplete (61 coins, was 663414): import the MegaMMR file again."]) check(s);

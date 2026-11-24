@@ -5943,3 +5943,10 @@
   "The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.",
   "The node is still running"
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "This data folder was last used by {name} {was}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open {name} {was} or newer. To go back to this older version on purpose, quit the app, delete the file {file} and open this copy again. This copy is at {exe}": "此数据文件夹上次由 {name} {was} 使用。当前这份是 {mine}，版本较旧，可能损坏较新版本写入的数据。节点未启动，未作任何更改。请打开 {name} {was} 或更新的版本。如果确实要回到这个较旧的版本，请退出应用，删除文件 {file}，然后重新打开这份应用。这份应用位于 {exe}",
+  "This data folder was last used by {name} {was}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open {name} {was} or newer. To go back to this older version on purpose, quit the app, delete the file {file} and open this copy again.": "此数据文件夹上次由 {name} {was} 使用。当前这份是 {mine}，版本较旧，可能损坏较新版本写入的数据。节点未启动，未作任何更改。请打开 {name} {was} 或更新的版本。如果确实要回到这个较旧的版本，请退出应用，删除文件 {file}，然后重新打开这份应用。"
+}, { review: [
+  "This data folder was last used by {name} {was}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open {name} {was} or newer. To go back to this older version on purpose, quit the app, delete the file {file} and open this copy again. This copy is at {exe}",
+  "This data folder was last used by {name} {was}. This copy is {mine}, which is older and can damage what the newer one wrote. The node was not started and nothing was changed. Open {name} {was} or newer. To go back to this older version on purpose, quit the app, delete the file {file} and open this copy again."
+] });

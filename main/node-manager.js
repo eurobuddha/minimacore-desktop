@@ -526,7 +526,7 @@ class NodeManager extends EventEmitter {
     if (argvWhy) { this.lastError = argvWhy; this.log("[app] node NOT started: " + argvWhy); this.setState("error"); return; }
     // An OLDER copy of the app never starts a node on a folder a newer copy wrote (0.19.423, main/writermark.js)
     const APPVER = require("../package.json").version, APPNAME = flavor.productName || "this app";
-    const older = writermark.problem(this.dataDir(), APPVER, APPNAME, process.execPath);
+    const older = writermark.problem(this.dataDir(), APPVER, APPNAME, process.execPath, flavor.appId);   // compared within this app only (0.19.438)
     if (older) { this.lastError = older; this.log("[app] node NOT started: " + older); this.setState("error"); return; }
     // A fact of THIS launch, for the first-run seed step (main.js mcd:firstRunSeed, 0.19.220): did the data folder hold no
     // node data (nothing but a key-mode marker) when this launch first started the node? Read once, before java touches it.
@@ -541,7 +541,7 @@ class NodeManager extends EventEmitter {
     const blocked = await this.reclaimStaleNode();
     if (blocked) { this.lastError = blocked; this.setState("error"); return; }
     this.startNotes();   // how the last stop ended, and the MegaMMR it left, before the node reads it
-    try { writermark.mark(this.dataDir(), APPVER); }
+    try { writermark.mark(this.dataDir(), APPVER, flavor.appId); }
     catch (e) { this.lastError = "the data folder could not be marked with this app's version (" + e.message + "): the node was not started"; this.log("[app] node NOT started: " + this.lastError); this.setState("error"); return; }
     // Redact EVERY secret, not just the RPC password. effectiveParams() resolves the Keychain markers back to
     // their real values before they become argv, so a -mysql DSN (password and all) was going into the Logs
