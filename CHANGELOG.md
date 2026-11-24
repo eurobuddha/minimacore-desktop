@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.425] — A record the page wrote can never put an amount back on a live order
+
+- Full review 23 Nov 2026 (MAJOR). The page may write TAKER fill records. One saying `status:"unknown"` and naming a live order's applied fill id was settled as the engine's own unanswered fill: found "lost", and its `filled` (any number) was added back to the order. In the reviewer's run a live order went from 40 to 1000040, and the maker would then co-sign takes far past what was ordered.
+- main/dexicon/service.desktop.js settleFills: only the engine's own unanswered record is settled: role maker, a `fill_unanswered_` key, its unanswered id, a plain positive fill.
+- Test: scripts/dexicon-host.test.cjs (fails on 0.19.424: the order's remaining became 1000040).
+
 ## [0.19.424] — The Dexicon page's reads carry only the engine's own parameters
 
 - Full review 23 Nov 2026 (MAJOR). The page's bridge allowed a list of VERBS with any parameters. A page that had been taken over could send `history action:customsize where:<text>` (the node pastes it into a query on its H2 database, which can write and read files on this Mac), `coins megammr:true` with no coin id (the node copies its whole unspent-coin table under the database lock: AtomiX settlement stalls), and a `newscript` with any parameters (`clean:true`, `trackall:true`).

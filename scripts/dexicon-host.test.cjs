@@ -1575,3 +1575,19 @@ test("the page's reads carry only the engine's own parameters: no history where:
     "balance megammr:true", "txpow address:" + H, "txpow onchain:" + H + " txpowid:" + H, "scripts address:" + H, "status complete:true", "random size:99999",
     'newscript script:"RETURN TRUE" trackall:true', 'newscript script:"RETURN TRUE" trackall:false clean:true', 'newscript trackall:false script:"A\\" clean:true script:\\"B"', "newscript script:RETURN trackall:false"]) no(c);
 });
+
+// 0.19.425 (full review 23 Nov, MAJOR): a taker record the page may write, saying status "unknown" and naming one of a
+// live order's applied fill ids, was settled as the engine's own unanswered fill: "lost", and its `filled` put back.
+test("0.19.425: a page-written record with status unknown never raises a live order: only the engine's own unanswered record is settled", async () => {
+  const b = await boot(), ORDER = "0x" + "3".repeat(32), now = Math.floor(Date.now() / 1000), FID = "0x" + "0".repeat(48) + "ab".repeat(8);
+  await sql(b.host, "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('myorders', '" + JSON.stringify([{ orderId: ORDER, side: "sell", price: "0.0123", amount: "100", remaining: "40", coins: ["0x" + "C2".repeat(32)], scripts: [], address: b.node.ADDRESS, seq: now, expiry: now + 3600, status: "live", fillsFrom: now - 100, fills: [FID] }]) + "')");
+  // what the page is allowed to write: a TAKER record (a coin the node does not know, so the probe answers "not there")
+  const forged = JSON.stringify({ role: "taker", status: "unknown", orderId: ORDER, applied: FID, filled: "1000000", ts: 1, coins: ["0x" + "EE".repeat(32)], spent: ["0x" + "DD".repeat(32)] });
+  await b.host.command({ op: "sql", query: "MERGE INTO ax_kv (k, v) KEY(k) VALUES ('fill_0x" + "9".repeat(64) + "', '" + forged + "')" });
+  vm.runInContext("settleFills();", b.ctx);
+  await new Promise((r) => setTimeout(r, 600));
+  b.ctx.__out = null;
+  vm.runInContext("AX.maker.load(AX.mds, function (e, l) { __out = { remaining: AX.maker.find(l, '" + ORDER + "').remaining }; });", b.ctx);
+  await M.until(() => b.ctx.__out);
+  assert.equal(b.ctx.__out.remaining, "40", "the live order is untouched (it rose to 1000040)");
+});

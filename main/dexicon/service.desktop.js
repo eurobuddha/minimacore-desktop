@@ -426,7 +426,15 @@ function settleFills() {
             if (i >= rows.length) return;
             var row = rows[i++], f = null;
             try { f = JSON.parse(row.V || row.v); } catch (e) { return step(); }
-            if (f && f.status === 'unknown') return settleUnknown(String(row.K || row.k), f, step);   // POST UNANSWERED (header)
+            // POST UNANSWERED (header). 0.19.425 (full review 23 Nov, MAJOR): only the engine's OWN unanswered record is settled:
+            // a maker record under a fill_unanswered_ key, carrying its unanswered id and a plain positive fill. The page may
+            // write taker records (main/dexicon.js dexSql): one saying status:"unknown" with a live order's fill id as `applied`
+            // was "lost" here and put its `filled` (any number) back on the order, raising a live order without limit.
+            if (f && f.status === 'unknown') {
+                var key = String(row.K || row.k);
+                if (f.role !== 'maker' || key.indexOf('fill_unanswered_') !== 0 || !UNANSWERED_ID.test(String(f.applied)) || !/^\d+(\.\d+)?$/.test(String(f.filled)) || !/[1-9]/.test(String(f.filled))) return step();
+                return settleUnknown(key, f, step);
+            }
             if (!f || f.status !== 'settling' || !f.txpowid) return step();
             var probe = (f.coins && f.coins.length) ? f.coins[0] : null;
             if (!probe || !/^0x[0-9A-Fa-f]{64}$/.test(String(probe))) return step();
