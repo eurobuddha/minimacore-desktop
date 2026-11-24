@@ -256,6 +256,21 @@ test("waitGone, the unanswered bound case by case: a hung node nothing listens o
   assert.equal(x.sigs.length, 0, "not at the unanswered bound; the ceiling (1.5 s here) came before the silence bound (3 s)"); assert.equal(x.r.gaveUp, true);
 });
 
+test("0.19.433: a write in an H2 store one folder under databases/ (walletsql, txpowsql…) is a sign of life; nothing deeper is walked", () => {
+  fresh();
+  const db = path.join(dataDir(), "1.1", "databases"), old = new Date(Date.now() - 3_600_000), at = (f, d) => fs.utimesSync(f, d, d);
+  fs.mkdirSync(path.join(db, "walletsql", "deep"), { recursive: true });
+  const top = path.join(db, "megammr.mmr"), h2 = path.join(db, "walletsql", "wallet.mv.db"), deep = path.join(db, "walletsql", "deep", "x");
+  for (const f of [top, h2, deep]) fs.writeFileSync(f, "x");
+  for (const f of [deep, path.join(db, "walletsql", "deep"), h2, path.join(db, "walletsql"), top, db]) at(f, old);
+  assert.equal(Math.round(m.dbTouchedAt() / 1000), Math.round(old.getTime() / 1000), "all an hour old");
+  const now = new Date(Date.now() - 5_000); at(h2, now);   // H2 rewrites its file in place: the folder's own time does not move
+  assert.equal(Math.round(m.dbTouchedAt() / 1000), Math.round(now.getTime() / 1000), "the H2 file's write is seen (it was not: 0.19.432 answers the hour-old time)");
+  at(h2, old); at(deep, now);
+  assert.equal(Math.round(m.dbTouchedAt() / 1000), Math.round(old.getTime() / 1000), "one level down, no further");
+  restore();
+});
+
 test("the next start compares the MegaMMR with the last clean stop: its file size before the node starts, its coins once it runs", async () => {
   fresh();
   fs.mkdirSync(path.dirname(mmr()), { recursive: true }); fs.writeFileSync(mmr(), Buffer.alloc(515908));

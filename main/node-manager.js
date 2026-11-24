@@ -72,6 +72,7 @@ const stillNote = (pid, min) => "The node (pid " + pid + ") has not stopped afte
 // The node says it has BEGUN its shutdown (core Main.shutdown's first line: "Shut down started.." / "Shut down started.. Compacting All Databases").
 const SHUT_STARTED_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Shut down started\.\.(?: Compacting All Databases)?$/;
 const SHUTDOWN_FILE = "minimacore-shutdown.json";   // in the data folder: how the last stop ended, and the MegaMMR it left (recordStop)
+const DB_SUB_MAX = 64;         // the most files looked at in one folder under databases/ (dbTouchedAt)
 const CONT_MAX = 64;           // the most lines read as the continuation of one cut line (nodeLine)
 const LINE_MAX = 64 * 1024;   // a "line" the node never ends is cut here (it is then judged as the pieces it arrives in)
 const NET_RESTART_COOLDOWN_MS = 10 * 60_000;   // a network restart drops every peer — never do it in a loop
@@ -700,7 +701,9 @@ class NodeManager extends EventEmitter {
   /** A stop gave up waiting (ceilingMs) and the node process is still there: its pid, else 0. */
   stillRunning() { return this.proc && this.stopGaveUp === this.proc ? this.proc.pid : 0; }
 
-  /** The newest change in the node's databases folders (<data>/<version>/databases), in ms; 0 when there is none to read. A save writes there. */
+  /** The newest change in the node's databases folders (<data>/<version>/databases), in ms; 0 when there is none to read. A save writes there:
+   *  megammr.mmr and the other files directly in it, and the H2 stores one folder down (walletsql, archivesql, txpowsql, coindb, txblockdb:
+   *  0.19.433, they were not looked at, so a node writing only those counted as silent). One level down and no further, at most DB_SUB_MAX files a folder. */
   dbTouchedAt() {
     let at = 0;
     const d = this.dataDir();
@@ -708,7 +711,12 @@ class NodeManager extends EventEmitter {
     for (const v of vers) {
       const db = path.join(d, v, "databases");
       let names; try { names = fs.readdirSync(db); at = Math.max(at, fs.statSync(db).mtimeMs); } catch (e) { continue; }
-      for (const n of names) { try { at = Math.max(at, fs.statSync(path.join(db, n)).mtimeMs); } catch (e) {} }
+      for (const n of names) {
+        let st; try { st = fs.statSync(path.join(db, n)); at = Math.max(at, st.mtimeMs); } catch (e) { continue; }
+        if (!st.isDirectory()) continue;
+        let inner = []; try { inner = fs.readdirSync(path.join(db, n)).slice(0, DB_SUB_MAX); } catch (e) {}
+        for (const x of inner) { try { at = Math.max(at, fs.statSync(path.join(db, n, x)).mtimeMs); } catch (e) {} }
+      }
     }
     return at;
   }

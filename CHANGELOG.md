@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.433] — A stop sees the node writing its H2 stores, not only the files beside them
+
+- Independent review of 0.19.428 (MINOR 6). A stop takes a write in the node's databases folder as a sign that the node is saving. Only the files directly in `<data>/<version>/databases` were looked at (megammr.mmr and the like); the H2 stores live one folder down (walletsql, archivesql, txpowsql, coindb, txblockdb), and H2 rewrites its file in place, so the folder's own time does not move: a node writing only those counted as silent.
+- main/node-manager.js dbTouchedAt: each folder under databases/ is looked into, one level and no further, at most 64 files a folder.
+- Test: scripts/lifecycle-test.cjs (fails on 0.19.432: the hour-old time is answered).
+
 ## [0.19.432] — "Your MegaMMR looks incomplete" no longer stays for good after a deliberate change
 
 - Independent review of 0.19.428 (MINOR 5). The note compares the MegaMMR with the figures of the last clean stop (its coins, its file's size), and those figures were kept for as long as the MegaMMR was found short. After a deliberate resync, an import or "Keep MegaMMR on, empty" the MegaMMR is smaller on purpose, so "Your MegaMMR looks incomplete… import the MegaMMR file again" came back at every start with no way to end it.
