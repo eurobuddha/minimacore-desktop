@@ -854,13 +854,12 @@ test("0.19.444: a photo already on disk never waits behind fetches; only the PEE
 
 test("0.19.444: receipts for a mailbox full of messages go out one at a time (0.19.443: all at once, each dialling an offline sender)", () => {
   const src = fs.readFileSync(path.join(__dirname, "..", "main", "chat.js"), "utf8");
-  assert.ok(/function receipt\(cmd\) \{ receiptQueue = receiptQueue\.then\(\(\) => nodeCmd\(cmd\)\)\.catch\(\(\) => \{\}\); return receiptQueue; \}/.test(src));
   assert.equal((src.match(/\breceipt\("keets action:send to:"/g) || []).length, 2, "the delivered and the read receipt");
   assert.ok(!/nodeCmd\("keets action:send to:" \+ (msg\.from|pubkey) \+ " datahex:" \+ hexOf\((rcpt|payload)\)\)\.catch/.test(src), "no receipt is fired without waiting any more");
   // and the queue itself: three receipts, never two at the node
   let inFlight = 0, most = 0; const rel = [];
   const nodeCmd = () => new Promise((r) => { inFlight++; most = Math.max(most, inFlight); rel.push(() => { inFlight--; r(); }); });
-  const receipt = new Function("nodeCmd", "let receiptQueue = Promise.resolve();\n" + src.match(/function receipt\(cmd\) \{[^\n]*\}/)[0] + "\nreturn receipt;")(nodeCmd);
+  const receipt = new Function("nodeCmd", "let generation = 0, receiptQueue = Promise.resolve();\n" + src.match(/function receipt\(cmd\) \{[\s\S]*?\n\}/)[0] + "\nreturn receipt;")(nodeCmd);
   receipt("a"); receipt("b"); const last = receipt("c");
   return (async () => { for (let i = 0; i < 3; i++) { for (let k = 0; k < 6; k++) await new Promise((r) => setImmediate(r)); assert.equal(inFlight, 1); rel[i](); } await last; assert.equal(most, 1); })();
 });

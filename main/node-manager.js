@@ -522,6 +522,7 @@ class NodeManager extends EventEmitter {
     // THE gate, on the argv as it will really be run (either node kind): the key-mode tokens in it must be
     // exactly the recorded mode's, whatever field they came from. See keymode.argvProblem.
     const args = this.buildArgs();
+    this.keetsAtStart = config.load().params.keets === true && require("./keets-mode").enabledInArgs(args);
     // the memory this start gives the node (the Parlons Node's -Xmx; 0 = Java's own default, the plain node): a MegaMMR import
     // reads it to tell whether a changed memory setting is not applied yet (main/megammrfile.js)
     const xmx = args.find(a => /^-Xmx\d+m$/.test(a)); this.heapMbNow = xmx ? parseInt(xmx.slice(4), 10) : 0;
@@ -1041,9 +1042,13 @@ class NodeManager extends EventEmitter {
 
   // ---- state/logs ----
   setState(s) { this.state = s; this.emit("status", this.snapshot()); }
+  // Startup Params may already hold the next launch's choice while this process still runs.
+  keetsEnabled() {
+    return this.proc ? this.keetsAtStart === true : config.load().params.keets === true;
+  }
   snapshot() {
     const kind = this.kind();
-    return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
+    return { state: this.state, keetsEnabled: this.keetsEnabled(), health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
              jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || (m ? "importing" : ""))(config.load().megammrImport), megafileBanner: this.megafileBanner || null, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
              stopNote: this.state === "stopping" || this.reclaiming ? this.stopNote : "", shutdownNotes: this.shutdownNotes.slice(),
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),

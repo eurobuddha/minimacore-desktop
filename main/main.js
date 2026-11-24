@@ -452,7 +452,7 @@ const freeze = require("./freeze").create({
     vestr: { start: whenRunning(() => vestr.startLoop()), stop: () => vestr.stopLoop() },
     // Future Cash Next: frozen, it makes no pass and holds no store open; never while a collect or a sweep is under way
     futurecash: { start: whenRunning(() => futurecash.start()), stop: () => futurecash.stop(), blockers: async () => require("./freeze").futurecashBlockers(await Promise.resolve().then(fcWork).catch(() => null)) },
-    chat: { start: whenRunning(() => chat.startLoop()), stop: () => chat.stopLoop() },
+    chat: { start: whenRunning(() => { if (node.keetsEnabled()) chat.startLoop(); }), stop: () => chat.stopLoop() },
     // The hold a wallet replacement uses; by the time start runs it is no longer in the frozen list. gate: before what is
     // in flight is read, nothing new can start (AtomiX and PandaPools held with their engines up; the Exchange takes no new command).
     dexicon: { gate: async () => { dexicon.gate(); await Promise.all([atomix.hold(), pandapools.hold()]); }, start: () => node.onEnginesRelease(), stop: () => node.onEnginesHold() }
@@ -631,51 +631,63 @@ ipcMain.handle("mcd:mailBackfill", () => mail.startBackfill());
 
 // KeetChat — pubkey-addressed E2E messages over the keets transport (main/chat.js owns
 // the sidecar inbox; renderer reads/writes through these only). Both node kinds.
-ipcMain.handle("mcd:chatInit", async () => { await chat.init(); return chat.myIdentity(); });
-ipcMain.handle("mcd:chatIdentity", () => chat.myIdentity());
-ipcMain.handle("mcd:chatSetName", (_e, n) => { chat.setName(n); return chat.myIdentity(); });
-ipcMain.handle("mcd:chatThreads", () => chat.threads());
-ipcMain.handle("mcd:chatThread", (_e, pk) => chat.thread(pk));
-ipcMain.handle("mcd:chatSend", (_e, to, text) => chat.send(to, text));
-ipcMain.handle("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name));
-ipcMain.handle("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
-ipcMain.handle("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
-ipcMain.handle("mcd:chatStatus", () => chat.status());
-ipcMain.handle("mcd:chatMedia", (_e, ref, force) => chat.fetchMedia(ref, force === true));   // force: a click on the photo or on Play (0.19.444)
-ipcMain.handle("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
-ipcMain.handle("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
-ipcMain.handle("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
-ipcMain.handle("mcd:chatContacts", () => chat.contacts());
-ipcMain.handle("mcd:chatClearThread", (_e, pk) => chat.clearThread(pk));
-ipcMain.handle("mcd:chatDeleteMessage", (_e, id) => chat.deleteMessage(id));
-ipcMain.handle("mcd:chatSendVoice", (_e, to, bytes, mime, secs, wave) => chat.sendVoice(to, bytes, mime, secs, wave));
+function requireChat() {
+  if (!node.keetsEnabled()) throw new Error("Keets is off.");
+}
+function handleChat(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    requireChat();
+    return handler(event, ...args);
+  });
+}
+handleChat("mcd:chatInit", async () => { await chat.init(); return chat.myIdentity(); });
+handleChat("mcd:chatIdentity", () => chat.myIdentity());
+handleChat("mcd:chatSetName", (_e, n) => { chat.setName(n); return chat.myIdentity(); });
+handleChat("mcd:chatThreads", () => chat.threads());
+handleChat("mcd:chatThread", (_e, pk) => chat.thread(pk));
+handleChat("mcd:chatSend", (_e, to, text) => chat.send(to, text));
+handleChat("mcd:chatAddContact", (_e, pk, name) => chat.addContact(pk, name));
+handleChat("mcd:chatRenameContact", (_e, pk, name) => chat.renameContact(pk, name));
+handleChat("mcd:chatRemoveContact", (_e, pk) => chat.removeContact(pk));
+handleChat("mcd:chatStatus", () => chat.status());
+handleChat("mcd:chatMedia", (_e, ref, force) => chat.fetchMedia(ref, force === true));   // force: a click on the photo or on Play (0.19.444)
+handleChat("mcd:chatSendPayment", (_e, to, amount, token) => chat.sendPayment(to, amount, token));
+handleChat("mcd:chatRequestPayAddr", (_e, to) => chat.requestPayAddr(to));
+handleChat("mcd:chatPayAddr", (_e, to) => chat.payAddrOf(to));
+handleChat("mcd:chatContacts", () => chat.contacts());
+handleChat("mcd:chatClearThread", (_e, pk) => chat.clearThread(pk));
+handleChat("mcd:chatDeleteMessage", (_e, id) => chat.deleteMessage(id));
+handleChat("mcd:chatSendVoice", (_e, to, bytes, mime, secs, wave) => chat.sendVoice(to, bytes, mime, secs, wave));
 // Files (0.19.2). The renderer never names a path: sending goes through an open dialog, saving through a save dialog
 // whose default name is the peer's file name made safe. A saved file is never opened by the app.
-ipcMain.handle("mcd:chatFileSend", async (_e, to) => {
+handleChat("mcd:chatFileSend", async (_e, to) => {
   const r = await dialog.showOpenDialog(win, { properties: ["openFile"], title: lang.t("File (up to 100 MB)") });
   if (r.canceled || !r.filePaths.length) return null;
+  requireChat();
   return chat.fileSend(to, r.filePaths[0]);
 });
-ipcMain.handle("mcd:chatFileOffer", (_e, peer, ref) => chat.fileOffer(peer, ref));
-ipcMain.handle("mcd:chatFileRun", (_e, peer, ref, id) => chat.fileRun(peer, ref, id));
-ipcMain.handle("mcd:chatFilePause", (_e, id) => chat.filePause(id));
-ipcMain.handle("mcd:chatFileStatus", (_e, id) => chat.fileStatus(id));
-ipcMain.handle("mcd:chatFileTransfers", (_e, peer) => chat.fileTransfers(peer));
-ipcMain.handle("mcd:chatFileRemove", (_e, id) => chat.fileRemove(id));
-ipcMain.handle("mcd:chatFileKeep", (_e, id, on) => chat.fileKeep(id, on));
-ipcMain.handle("mcd:chatFileShareAgain", (_e, id) => chat.fileShareAgain(id));
-ipcMain.handle("mcd:chatFileSave", async (_e, id) => {
+handleChat("mcd:chatFileOffer", (_e, peer, ref) => chat.fileOffer(peer, ref));
+handleChat("mcd:chatFileRun", (_e, peer, ref, id) => chat.fileRun(peer, ref, id));
+handleChat("mcd:chatFilePause", (_e, id) => chat.filePause(id));
+handleChat("mcd:chatFileStatus", (_e, id) => chat.fileStatus(id));
+handleChat("mcd:chatFileTransfers", (_e, peer) => chat.fileTransfers(peer));
+handleChat("mcd:chatFileRemove", (_e, id) => chat.fileRemove(id));
+handleChat("mcd:chatFileKeep", (_e, id, on) => chat.fileKeep(id, on));
+handleChat("mcd:chatFileShareAgain", (_e, id) => chat.fileShareAgain(id));
+handleChat("mcd:chatFileSave", async (_e, id) => {
   const st = chat.fileStatus(id);
   if (!st || !st.canSave) throw new Error("The file is not verified yet.");
   const r = await dialog.showSaveDialog(win, { defaultPath: require("./chatfiles").safeName(st.name) });
   if (r.canceled || !r.filePath) return { canceled: true };
+  requireChat();
   await chat.fileSave(id, r.filePath);
   return { canceled: false, path: r.filePath };
 });
-ipcMain.handle("mcd:chatSendImage", async (_e, to) => {
+handleChat("mcd:chatSendImage", async (_e, to) => {
   const r = await dialog.showOpenDialog(win, { title: lang.t("Send a photo"),
     filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp"] }], properties: ["openFile"] });
   if (r.canceled || !r.filePaths.length) return null;
+  requireChat();
   return chat.sendImageFile(to, r.filePaths[0]);
 });
 ipcMain.handle("mcd:mailPay", (_e, to, payaddr, amount, tokenid, tokenname, memo, subject) => mail.pay(to, payaddr, amount, tokenid, tokenname, memo, subject));
@@ -721,7 +733,7 @@ ipcMain.handle("mcd:chatExportBackup", async (_e, pass) => {
   if (typeof pass !== "string" || pass.length < 8) throw new Error("Use a password of at least 8 characters.");
   let keypair = null;
   try { keypair = fs.readFileSync(keetsKeypairFile()); } catch (e) { /* keets never ran: chats only */ }
-  try { await chat.init(); } catch (e) { /* node down: the manifest's address stays blank */ }
+  try { if (node.keetsEnabled()) await chat.init(); } catch (e) { /* node down: the manifest's address stays blank */ }
   const all = chatStore.all(), payaddr = {};
   for (const [k, v] of Object.entries(all.meta)) if (k.startsWith("payaddr:")) payaddr[k.slice(8)] = v;
   const file = chatbackup.exportBackup(pass, { keypair, keetsPubkey: chat.myIdentity().pubkey, chatName: all.meta.myname || "",
@@ -741,7 +753,7 @@ ipcMain.handle("mcd:chatOpenBackup", async (_e, pass) => {
   try { opened = chatbackup.openBackup(pass, fs.readFileSync(r.filePaths[0])); }
   catch (e) { throw new Error(e.message === "BAD_PASSWORD" ? "Wrong password, or this is not a chat backup." : e.message); }
   pendingChatBackup = opened;
-  try { await chat.init(); } catch (e) { /* node down */ }
+  try { if (node.keetsEnabled()) await chat.init(); } catch (e) { /* node down */ }
   return { canceled: false, keetsPubkey: opened.manifest.keetsPubkey || "", maxAddress: opened.manifest.maxAddress || "",
     current: chat.myIdentity().pubkey, contacts: opened.contacts.length, messages: opened.messages.length, hasMax: opened.hasMax };
 });
@@ -818,12 +830,13 @@ mail.emitter.on("incoming", (info) => {
 // KeetChat: updates -> renderer; OS notification on fresh incoming when unfocused
 chat.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:chat"); });
 chat.emitter.on("incoming", (info) => {
+  if (!node.keetsEnabled()) return;
   try {
     if (!info || (win && !win.isDestroyed() && win.isFocused())) return;
     const title = info.count > 1 ? "KeetChat" : (info.name || "KeetChat");
     const body = info.count > 1 ? lang.t("{n} new messages", { n: info.count }) : (info.preview || lang.t("New message"));
     const n = new Notification({ title, body, silent: false });
-    n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:chat-focus"); } });
+    n.on("click", () => { if (win && !win.isDestroyed() && node.keetsEnabled()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); win.webContents.send("mcd:chat-focus"); } });
     n.show();
   } catch (e) { /* notifications are best-effort */ }
 });
@@ -841,7 +854,10 @@ shop.emitter.on("incoming", (info) => {
 let mailStarted = false;
 // Asked at every "running" (each start is a no-op while its loop runs): an app unfrozen with the node stopped starts with the node.
 node.on("status", (s) => { if (s.state === "running") { mailStarted = true; freeze.start("mail"); freeze.start("minimall"); } });   // not when frozen (Apps tab)
-node.on("status", (s) => { if (s.state === "running") freeze.start("chat"); });
+node.on("status", (s) => {
+  if (s.state === "running" && s.keetsEnabled) freeze.start("chat");
+  else chat.stopLoop();
+});
 
 // PandaPools (AMM) — read model + actions; the AMM logic is the reused MDS core (main/pandapools/*).
 ipcMain.handle("mcd:ppPools", () => pandapools.pools());

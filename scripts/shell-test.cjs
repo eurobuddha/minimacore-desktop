@@ -342,7 +342,7 @@ test("C5: the Web Wallet send stops if logged out meanwhile and says main's reas
   assert.ok(!/\.mailapp \.mm-cs \{[^}]*text-overflow: ellipsis/.test(mailCss) && /\.mailapp \.mm-cs \{[^}]*overflow-wrap: anywhere/.test(mailCss), "the Mail header's address is whole");
   assert.ok(/id="sTokId"/.test(raw) && /idb\.textContent = idb\.hidden \? "" : tid; idb\.onclick = \(\) => copy\(tid\);/.test(raw) && /\.send-tokid \{[^}]*overflow-wrap: anywhere/.test(shellCss), "the chosen token's whole id beside the picker, one click to copy");
   const chat = fs.readFileSync(path.join(R, "chat.js"), "utf8");
-  assert.ok(/const done = \(v\) => \{ document\.removeEventListener\("keydown", esc\); ov\.remove\(\); resolve\(v\); \};/.test(chat), "no Escape listener is left behind by a button or a click outside");
+  assert.ok(/const done = \(v\) => \{ dismissChat\.delete\(cancel\); document\.removeEventListener\("keydown", esc\); ov\.remove\(\); resolve\(v\); \};/.test(chat), "no Escape listener is left behind by a button or a click outside");
   for (const c of ["zh", "ru", "uk"]) { require("../renderer/i18n/" + c + ".js"); const cat = I18N.catalog(c); for (const k of ["just now", "awaiting payment", "Unverified", "Sending…"]) assert.ok(cat[k] && cat[k] !== k, c + ": " + k); }
 });
 

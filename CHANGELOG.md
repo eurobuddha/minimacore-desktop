@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.446] — KeetChat follows the Keets transport setting
+
+- With Keets off, Chat disappears and old notifications cannot open it. Enabling Keets at the next node start brings Chat back with its existing history.
+
 ## [0.19.445] — The Parlons Node answers eight commands at once (was two)
 
 - The cause under the stall of 24 Nov 2026 (0.19.443, 0.19.444): the Parlons Node's admin RPC, through which this app sends every command, had two worker threads. Any two slow commands held both, and every other command (a balance, a chat send, a trading engine's read, `quit`) waited until its own time ran out. It has eight now. The node's own RPC server gives every request its own thread, so commands are safe side by side; this app still sends its signing commands one at a time.

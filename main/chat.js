@@ -96,19 +96,29 @@ function fanout(msg, m) {
 const emitter = new EventEmitter();
 let pollTimer = null;
 const payAddrReplied = new Map();   // peer -> last auto-reply ms (10-min cooldown)
-let polling = false;
+let generation = 0;
+let polling = null;
 let myinfo = null;      // { pubkey, drive } from `keets action:info`
 let lastErr = "";
 
 // swappable node-command runner (tests use _setRunner, same as mail.js)
-let runner = (cmd) => rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+let runner = (cmd) => {
+  if (!node.keetsEnabled()) throw new Error("Keets is off.");
+  return rpcCall(node.rpcPort(), config.rpcSecret(), cmd);
+};
 // 0.19.444 (review of 0.19.443): "delivered" and "read" receipts go out ONE at a time. Twenty messages drained from the mailbox
 // sent twenty receipts at once, each dialling a sender who had gone offline for 15 s: both of the Parlons Node's two places for minutes.
 let receiptQueue = Promise.resolve();
-function receipt(cmd) { receiptQueue = receiptQueue.then(() => nodeCmd(cmd)).catch(() => {}); return receiptQueue; }
+function receipt(cmd) {
+  const mine = generation;
+  receiptQueue = receiptQueue.then(() => { if (mine === generation) return nodeCmd(cmd); }).catch(() => {});
+  return receiptQueue;
+}
 function _setRunner(fn) { runner = fn; }
 async function nodeCmd(cmd) {
+  const mine = generation;
   const r = await runner(oneCommand(cmd));   // ONE command each (main/rpc.js, 0.19.194)
+  if (mine !== generation) throw new Error("Chat node changed");
   const j = typeof r === "string" ? JSON.parse(r) : r;
   if (!j || j.status !== true) throw new Error((j && j.error) || "keets command failed");
   return j.response;
@@ -171,14 +181,17 @@ function forgetIdentity() { myinfo = null; }
 
 // ---- inbox drain ----------------------------------------------------------
 async function pollOnce() {
-  if (polling) return;
-  polling = true;
+  const mine = generation;
+  if (polling === mine) return;
+  polling = mine;
   try {
     if (!myinfo) await init();
     await refreshCompanionsDir();
+    if (mine !== generation) return;
     const inbox = await nodeCmd("keets action:inbox");
     let fresh = 0, lastName = "", lastPreview = "";
     for (const msg of inbox) {
+      if (mine !== generation) return;
       const m = schema.chatDecode(msg.message);
       // a peer's ref is at most a media url's length (0.19.233; the shared schema stays as mds/keetchat has it): a longer one is dropped
       if (typeof m.ref === "string" && m.ref.length > 600) m.ref = "";
@@ -291,7 +304,7 @@ async function pollOnce() {
   } catch (e) {
     lastErr = e.message || "" + e;   // sidecar starting / node restarting — retry next tick
   } finally {
-    polling = false;
+    if (polling === mine) polling = null;
   }
 }
 
@@ -302,6 +315,8 @@ function startLoop() {
   pollOnce().catch(() => {});
 }
 function stopLoop() {
+  generation++;
+  mediaInFlight.clear();
   mediaForget();   // 0.19.444: what could not be fetched from the node that is going is asked for again from the next one
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (files) { try { files.close(); } catch (e) { /* transfers pause; their state is on disk */ } files = null; }
@@ -393,10 +408,11 @@ function fetchMedia(ref, force) {
   const blocked = () => { const now = module.exports.mediaNow(), r = mediaFailed.get(ref), d = mediaDriveDown.get(place.drive); return (r && now < r.until) || (d && now < d); };
   if (!force && blocked()) return Promise.reject(new Error(MEDIA_LATER));
   // asked again when its turn comes: the photo before it may just have shown that this sender's drive cannot be reached
-  const run = mediaQueue.then(() => { if (!force && blocked()) throw new Error(MEDIA_LATER); return fetchMediaNow(ref, place); });
+  const mine = generation;
+  const run = mediaQueue.then(() => { if (mine !== generation) throw new Error("Chat node changed"); if (!force && blocked()) throw new Error(MEDIA_LATER); return fetchMediaNow(ref, place); });
   mediaQueue = run.then(() => {}, () => {});   // the next one starts when this one has ended, whatever its end
   const p = run.then((v) => { mediaFailed.delete(ref); mediaDriveDown.delete(place.drive); return v; }, (e) => {
-    if (MEDIA_PEER_SIDE.test(String(e && e.message))) {
+    if (mine === generation && MEDIA_PEER_SIDE.test(String(e && e.message))) {
       const now = module.exports.mediaNow(), was = mediaFailed.get(ref), wait = Math.min(MEDIA_RETRY_MAX_MS, was ? was.wait * 2 : MEDIA_RETRY_MS);
       mediaFailed.set(ref, { until: now + wait, wait });
       if (mediaFailed.size > 2000) mediaFailed.delete(mediaFailed.keys().next().value);
@@ -404,7 +420,7 @@ function fetchMedia(ref, force) {
       if (mediaDriveDown.size > 500) mediaDriveDown.delete(mediaDriveDown.keys().next().value);
     }
     throw e;
-  }).finally(() => { mediaInFlight.delete(ref); });
+  }).finally(() => { if (mediaInFlight.get(ref) === p) mediaInFlight.delete(ref); });
   mediaInFlight.set(ref, p);
   return p;
 }

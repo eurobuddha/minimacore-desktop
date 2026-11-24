@@ -19,6 +19,9 @@
   let booted = false;
   const mediaCache = {};     // ref -> data url (session only)
   let player = null, playingRef = "";
+  let generation = 0;
+  const dismissChat = new Set();
+  const available = () => !D.el("chatTab").hidden;
 
   function h(s) { return D.esc("" + (s == null ? "" : s)); }
 
@@ -100,6 +103,7 @@
   // ---- dialogs: Android AlertDialog shapes on the app's overlay --------------------
   const KEEP = {};                  // an action that returns this leaves the dialog open (Copy details)
   function dialog(opts) {
+    if (!opts.recovery && !available()) return Promise.resolve(null);
     // opts: { title, body (html), actions: [{label, value, danger}], onOpen(ov) }
     return new Promise((resolve) => {
       const actions = (opts.actions || [{ label: I18N.t("Close"), value: null }])
@@ -109,7 +113,9 @@
           ${opts.title ? `<div class="chat-dialog__title">${h(opts.title)}</div>` : ""}${opts.body || ""}
           <div class="chat-dialog__actions">${actions}</div></div></div></div>`);
       const ov = D.el("chatOv");
-      const done = (v) => { document.removeEventListener("keydown", esc); ov.remove(); resolve(v); };   // the Escape listener goes with the dialog (0.19.263)
+      const cancel = () => done(null);
+      const done = (v) => { dismissChat.delete(cancel); document.removeEventListener("keydown", esc); ov.remove(); resolve(v); };
+      if (!opts.recovery) dismissChat.add(cancel);
       ov.querySelectorAll(".chat-dialog__btn").forEach((b) => {
         const a = opts.actions[parseInt(b.dataset.i, 10)];
         b.onclick = () => { const v = typeof a.value === "function" ? a.value(ov) : a.value; if (v !== KEEP) done(v); };
@@ -174,6 +180,7 @@
 
   // ---- lightbox: the phone's ChatImageActivity (black, pinch/zoom → wheel/drag) ----
   function lightbox(dataUrl, caption) {
+    if (!available()) return;
     document.body.insertAdjacentHTML("beforeend",
       `<div class="chat-lightbox" id="chatLb">
         <img id="chatLbImg" alt="photo" src="${dataUrl}" />
@@ -185,11 +192,12 @@
     const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
     const onMove = (e) => { if (!dragging) return; tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply(); };
     const onUp = () => { dragging = false; };
-    const close = () => { lb.remove(); document.removeEventListener("keydown", onKey); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const close = () => { dismissChat.delete(close); lb.remove(); document.removeEventListener("keydown", onKey); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
     const onKey = (e) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", onKey);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    dismissChat.add(close);
     D.el("chatLbClose").onclick = close;
     lb.onclick = (e) => { if (e.target === lb) close(); };
     lb.onwheel = (e) => { e.preventDefault(); scale = Math.max(1, Math.min(6, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (scale === 1) { tx = 0; ty = 0; } apply(); };
@@ -230,7 +238,7 @@
         ${r.hasMax ? "" + th("• The backup's MAX# identity is for the phone apps; this computer keeps no MAX# chat, so it is not restored here.") + "<br>" : ""}
         ${th("• The node restarts.")}</div>
         <input id="chatRestoreWord" placeholder="${th("type RESTORE")}" autocomplete="off" /></div>`;
-    const v = await dialog({ title: I18N.t("Replace this computer's chat identity?"), body, actions: [
+    const v = await dialog({ recovery: true, title: I18N.t("Replace this computer's chat identity?"), body, actions: [
       { label: I18N.t("Cancel"), value: null },
       { label: I18N.t("Restore"), danger: true, value: (ov) => ov.querySelector("#chatRestoreWord").value.trim().toUpperCase() }] });
     if (v == null) return;
@@ -310,6 +318,8 @@
   }
 
   async function toggleAudio(ref, onChange) {
+    const mine = generation;
+    if (!available()) return;
     if (player && playingRef === ref) {
       if (player.paused) player.play(); else player.pause();
       onChange(); return;
@@ -317,6 +327,7 @@
     if (player) { player.pause(); player = null; playingRef = ""; onChange(); }
     try {
       const u = mediaCache[ref] || await D.api.chatMedia(ref, true);   // the user pressed Play: asked for now, whatever failed before
+      if (mine !== generation || !available()) return;
       mediaCache[ref] = u;
       player = new Audio(u); playingRef = ref;
       player.onended = () => { playingRef = ""; player = null; onChange(); };
@@ -429,6 +440,7 @@
   }
 
   async function select(pubkey) {
+    if (!available()) return;
     sel = pubkey;
     const t = threads.find(x => x.pubkey === pubkey);
     const name = t ? displayName(t) : I18N.t("New contact");
@@ -631,6 +643,8 @@
   }
   const fmtSecs = (n) => Math.trunc(n / 60) + ":" + String(Math.trunc(n) % 60).padStart(2, "0");
   async function doVoice() {
+    const mine = generation;
+    if (!available()) return;
     const peer = sel, mime = voiceMime();
     if (!peer) return;
     if (!mime || !navigator.mediaDevices) { D.toast(I18N.t("Microphone unavailable"), "err"); return; }
@@ -638,6 +652,7 @@
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }, video: false }); }
     catch (e) { D.toast(I18N.t("Microphone unavailable"), "err"); return; }
     const stop = () => stream.getTracks().forEach((t) => t.stop());
+    if (mine !== generation || !available()) { stop(); return; }
     let rec, ctx;
     const chunks = [], samples = [];
     try {
@@ -697,8 +712,14 @@
       actions: [{ label: I18N.t("Cancel"), value: null }, { label: "MxUSD", value: "mxusd" }, { label: "Minima", value: "minima" }] });
     if (!token) return;
     const label = token === "mxusd" ? "MxUSD" : "Minima";
-    const amt = await D.showPrompt(I18N.t("Send {label} to {addr}", { label: label, addr: addr }), "", "amount", { message: I18N.t("This sends real {label} from this node's wallet.", { label: label }) });
-    if (!amt) return;
+    if (!available()) return;
+    const prompt = D.showPrompt(I18N.t("Send {label} to {addr}", { label: label, addr: addr }), "", "amount", { message: I18N.t("This sends real {label} from this node's wallet.", { label: label }) });
+    const cancelButton = D.el("promptCancel");
+    const cancel = () => { if (cancelButton && cancelButton.isConnected) cancelButton.click(); };
+    dismissChat.add(cancel);
+    let amt;
+    try { amt = await prompt; } finally { dismissChat.delete(cancel); }
+    if (!amt || !available()) return;
     try {
       const r = await D.api.chatSendPayment(sel, amt.trim(), token);
       D.toast(r && r.receiptFailed ? I18N.t("{label} payment sent; the chat message about it could not be sent.", { label: label }) : I18N.t("{label} payment sent", { label: label }), r && r.receiptFailed ? "warn" : "ok");
@@ -722,10 +743,12 @@
   }
 
   async function render() {
+    const mine = generation;
+    if (!available()) return;
     await boot();
     if (!me.pubkey) { try { me = await D.api.chatInit(); } catch (e) {} }
     const body = D.el("chatBody");
-    if (!body) return;
+    if (!body || mine !== generation || !available()) return;
     body.innerHTML = shell();
     wire();
     await refreshThreads();
@@ -751,6 +774,11 @@
       if (t) select(t.pubkey);
     },
     _test(deps) { D = deps; return { payHtml, preview, verifyPayment }; },
-    reset() { me = { pubkey: "", name: "" }; sel = null; threads = []; booted = false; if (player) { player.pause(); player = null; playingRef = ""; } }
+    reset() {
+      generation++;
+      for (const close of dismissChat) close();
+      me = { pubkey: "", name: "" }; sel = null; threads = []; booted = false;
+      if (player) { player.pause(); player = null; playingRef = ""; }
+    }
   };
 })();

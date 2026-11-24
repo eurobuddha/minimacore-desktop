@@ -161,7 +161,7 @@ async function boot() {
   api.onLog(appendLog);
   api.onMail(onMailUpdate);
   api.onChat(onChatUpdate);
-  api.onChatFocus(() => { selectTab("chat"); ChatPanel.focusLatest(); });
+  api.onChatFocus(focusChat);
   api.onPandapools(onPandapoolsUpdate);
   api.onAtomix(onAtomixUpdate);
   api.onEthWallet(onEthWalletUpdate);
@@ -169,9 +169,6 @@ async function boot() {
   api.onVestr(onVestrUpdate);
   api.onFutureCash(() => { if (activeView === "futurecash") futureCashLoad(false); });   // a pass on a new block changed something
   api.onWebWallet(onWebWalletUpdate);
-
-  // KeetChat rides the keets transport, which both node kinds run (0.18.17+).
-  const chtab = el("chatTab"); if (chtab) chtab.hidden = false;
 
   // Run onboarding until BOTH the node wizard and the wallet step are done. A stale pre-0.1.1 config can have
   // setupDone:true but walletDone:false (no walletMode/peersUrl) — that must still show the wizard, not skip it.
@@ -212,6 +209,7 @@ function onStatus(s) {
 
   const wasRunning = running;
   running = s.state === "running";
+  setChatAvailable(s.keetsEnabled === true);
   if (running && (waitingForNode || !wasRunning)) {
     waitingForNode = false;
     entropyNode();   // the node is back: an open Entropy screen proves it again before a roll may use it
@@ -399,8 +397,6 @@ function paramsPatch(f, cfg) {
     customConnect: f.net === "custom" ? f.customPeer : "", params: f.P, extraArgs: f.extraArgs
   } };
 }
-// 0.19.441: the Keets setting of a flavour whose node knows -keetschatonly: three options, the phone's wording (its "no Chat tab" and
-// "battery" are not true here: this app always shows Chat)
 const KEETS_MODES_NOTE = "Chat and network: KeetChat, and blocks and transactions also travel over keets, as before. Chat only: KeetChat, files and the mailbox stay, but blocks and transactions use the classic Minima network only. Classic only: no keets at all - less RAM. Your chats and keets identity stay on this computer in every setting. Applies after a restart.";
 function psSwitch(id, title, on, body) {
   return `<div class="ps-sw"><span class="ps-sw__t" id="${id}L">${esc(title)}</span><button class="switch switch--m2" role="switch" id="${id}" aria-checked="${on ? "true" : "false"}" aria-labelledby="${id}L"></button></div>
@@ -546,6 +542,7 @@ function renderParams(host, firstRun, done) {
   $("pSave").onclick = async () => {
     const patch = collect(); if (!patch) return;
     try { CFG = await api.saveConfig(patch); } catch (e) { toast(ipcError(e), "err"); return; }
+    if (!running) setChatAvailable((await api.nodeStatus()).keetsEnabled === true);
     toast(t("Saved - applies when the node restarts"), "ok"); leave();
   };
   if ($("pSaveRestart")) $("pSaveRestart").onclick = async () => {
@@ -1084,6 +1081,7 @@ function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: t
 function selectTab(view) {
   // Entropy holds a seed phrase: leaving it erases everything it holds, and a finished phrase is asked about first (then this runs again).
   if (activeView === "entropy" && view !== "entropy" && !entropyLeaving(() => selectTab(view))) return;
+  if (view === "chat" && el("chatTab").hidden) return;
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
@@ -2331,11 +2329,34 @@ async function refreshMailBadge() {
 }
 // ---- KeetChat — the panel lives in renderer/chat.js (keets transport; main/chat.js owns the inbox) --------
 ChatPanel.init({ api, esc, el, toast, copy, showPrompt, showConfirm });
+function setChatAvailable(enabled) {
+  const tab = el("chatTab");
+  if (tab.hidden === !enabled) return;
+  tab.hidden = !enabled;
+  if (!enabled) {
+    ChatPanel.reset();
+    el("chatBody").replaceChildren();
+    el("chatBadge").hidden = true;
+    if (lastTabView === "chat") lastTabView = "balances";
+    if (lastShellView === "chat") lastShellView = "balances";
+    if (activeView === "chat") selectTab("balances");
+  }
+  if (activeView === "apps") renderApps();
+}
+function focusChat() {
+  if (el("chatTab").hidden) return;
+  selectTab("chat");
+  if (activeView === "chat") ChatPanel.focusLatest();
+}
 function renderChat() {
   if (!running) { el("chatBody").innerHTML = `<div class="empty">${th("Start your node to use Chat.")}</div>`; return; }
   ChatPanel.render();
 }
-function onChatUpdate() { ChatPanel.onUpdate(); refreshChatBadge(); }
+function onChatUpdate() {
+  if (el("chatTab").hidden) return;
+  ChatPanel.onUpdate();
+  refreshChatBadge();
+}
 async function refreshChatBadge() {
   const n = await ChatPanel.badge();
   const b = el("chatBadge"); if (!b) return;
@@ -3178,7 +3199,7 @@ function thawOnOpen() {
 }
 function renderApps() {
   const hidden = hiddenApps();
-  el("appsList").innerHTML = TRAY_APPS.concat(APPS_TABS).map(a => {
+  el("appsList").innerHTML = TRAY_APPS.concat(APPS_TABS).filter(a => a.id !== "chat" || !el("chatTab").hidden).map(a => {
     const core = a.id === "core", off = hidden.includes(a.id), ice = FROZEN.includes(a.id), noIce = NO_FREEZE[a.id];
     return `<div class="apps-row">
     ${a.icon ? `<img class="apps-row__ic" src="${a.icon}" alt="">` : CORE_MARK.replace("tray__ic", "apps-row__ic")}
