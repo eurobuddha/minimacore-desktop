@@ -359,6 +359,8 @@ async function balances() {
   const out = { minima: "0", meta: null, eth: "0", ethWei: "0", usdt: "0", usdtRaw: "0" };
   const bal = await runner("balance tokenid:" + A.trading.active().tokenId).catch(() => null);
   const r0 = bal && bal.response && bal.response[0];
+  // a read that failed is not a balance of zero (main/makeravail.js): said to the maker's publish
+  if (!bal || bal.status !== true || !Array.isArray(bal.response)) out.minimaErr = (bal && bal.error) ? String(bal.error) : "the node did not answer";
   // node returns response:[] for a token the wallet holds none of → a zeroed breakdown (consistent UI card).
   out.minima = r0 ? String(r0.sendable) : "0";
   out.meta = r0
@@ -701,7 +703,7 @@ async function sendReview(asset, to, amt) {
 async function sendExecute(asset, to, amt) { return ethSendExecute(axSendAsset(asset), to, amt, "med"); }
 
 // ---- maker (donor onSaveOrder/onPublish/onWithdraw; the vm service keep-alives whatever is saved) ----
-async function makerAvail() { const b = await balances(); return { minima: Number(b.minima) || 0, usdt: Number(b.usdt) || 0 }; }
+async function makerAvail(strict) { return require("./makeravail").makerAvailFrom(await balances(), !!strict); }
 async function makerCfg() {
   const A = AX();
   await p(cb => A.maker.loadConfig(() => cb(null)));
@@ -737,7 +739,7 @@ async function makerSave(cfg, manual) {
   const A = AX();
   await p(cb => A.maker.saveConfig(jvm(cfg), jvm(manual), () => cb(null)));
   await p(cb => A.maker.refreshPeg(() => cb(null)));
-  const avail = await makerAvail();
+  const avail = await makerAvail(true);
   await withTimeout(p(cb => A.maker.publish(jvm(avail), e => cb(e))), 60000, "publish");
   emitter.emit("update");
   return { ok: true };
@@ -745,7 +747,7 @@ async function makerSave(cfg, manual) {
 async function makerPublish() {
   const A = AX();
   await p(cb => A.maker.refreshPeg(() => cb(null)));
-  const avail = await makerAvail();
+  const avail = await makerAvail(true);
   await withTimeout(p(cb => A.maker.publish(jvm(avail), e => cb(e))), 60000, "publish");
   emitter.emit("update");
   return { ok: true };
