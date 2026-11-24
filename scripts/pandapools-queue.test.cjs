@@ -104,3 +104,61 @@ test("PandaPools glue: a txnpost answered after an identity change is pending; a
     assert.deepEqual(await signed, { status: false });
   } finally { api.stopLoop(); }
 });
+
+// 0.18.331: the engine's "posted, outcome unknown" is not a failure. The wrappers resolve { unknown:true }, write a pending Activity row
+// with the claimed input coin ids (whole), and refuse the same action until the chain has settled it (the coins spent, or the claims freed).
+test("PandaPools glue: an outcome-unknown post resolves as unknown, leaves a pending Activity row with its input coin ids, and holds that action until the chain settles it", async () => {
+  const api = require("../main/pandapools.js"); api._setDataDir(DIR);
+  const A = "0x" + "a1".repeat(32), B = "0x" + "b2".repeat(32), C = "0x" + "c3".repeat(32), unspent = new Set([A, B, C]);
+  let postAnswers = false;
+  // like the node: `coins coinid:` never returns a spent coin (spent or unknown: []); txnpost answers with the pre-mining id at response.txpowid
+  api._setRunner((c) => c === "block" ? Promise.resolve({ status: true, response: { block: 0 } }) : c === "checkmode" ? Promise.resolve({ status: true, response: { writemode: true, dblocked: false } })
+    : /^coins coinid:/.test(c) ? Promise.resolve({ status: true, response: unspent.has(c.split("coinid:")[1].split(" ")[0]) ? [{ coinid: c.split("coinid:")[1].split(" ")[0], spent: false }] : [] })
+    : /^txnpost /.test(c) ? (postAnswers ? Promise.resolve({ status: true, response: { txpowid: "0x" + "7".repeat(64) } }) : Promise.reject(new Error("RPC timeout"))) : Promise.resolve({ status: false }));
+  await api.init(); const ctx = api._ctx(), P = ctx.PoolMgr, Claims = ctx.PoolInputClaims;
+  try {
+    api._setPools([{ address: "0x" + "A1".repeat(32), tok: "0x" + "DD".repeat(32), tokName: "Panda" }]);
+    ctx.Router.route = () => ({ ok: true, totalIn: ctx.PP.D(1), totalOut: ctx.PP.D(2), effPrice: ctx.PP.D(2), spotBefore: ctx.PP.D(2), poolsUsed: 1, poolsAvailable: 1 });
+    // the engine's own post path, as poolmgr.js runs it: claim the inputs under the txn handle, txnpost, then ok / "post rejected" / POST_UNKNOWN
+    let n = 0, calls = 0;
+    const post = (inputs, done) => { calls++; const txid = "pp_test_" + (++n); Claims.post(inputs, txid, (saved) => { assert.equal(saved, true); ctx.MDS.cmd("txnpost id:" + txid, (rp) => {
+      if (rp && rp.status === true) done.ok(rp.response.txpowid);
+      else if (rp && rp.status === false && rp.pending !== true) Claims.release(inputs, txid, () => done.fail("post rejected (refused)"));
+      else done.fail(P.POST_UNKNOWN + " (" + rp.error + ")"); }); }); };
+    P.swap = (route, m2t, done) => post([A, B], done);
+    const quote = () => api.quoteSwap("0x" + "DD".repeat(32), true, "1").quoteId;
+    const r = await api.swap(quote());
+    assert.equal(r.unknown, true); assert.deepEqual(r.coinids, [A, B]); assert.equal("txpowid" in r, false);
+    assert.match(r.message, /^The swap may have gone through: the node did not answer when it was posted\. Check Activity before retrying\./); assert.ok(r.message.includes(A) && r.message.includes(B), "the held coin ids, whole");
+    assert.doesNotMatch(r.message, /fail/i);
+    const rows = (await api.activity()).filter(x => x.type === "SWAP");
+    assert.equal(rows.length, 1); assert.equal(rows[0].unknown, true); assert.equal(rows[0].failed, false); assert.equal(rows[0].statusText, "Pending: sent, outcome unknown");
+    assert.ok(rows[0].summary.startsWith("May have gone through (the node did not answer the post): Sold 1 MINIMA for 2 Panda. Inputs held: " + A + ", " + B), rows[0].summary);
+    // held: the same action is refused, in words that are not "failed", and the engine is not called again
+    assert.deepEqual((await api.unknownOpen()).map(u => [u.kind, u.coinids]), [["Swap", [A, B]]]);
+    await assert.rejects(api.swap(quote()), (e) => /^The last swap may have gone through: .* still held \(/.test(e.message) && e.message.includes(A) && /Nothing was sent\.$/.test(e.message));
+    assert.equal(calls, 1);
+    // one coin spent is not settled yet; both spent (it went through): free again
+    unspent.delete(A); await assert.rejects(api.swap(quote()), /may have gone through/);
+    unspent.delete(B); assert.deepEqual(await api.unknownOpen(), []);
+    postAnswers = true; P.swap = (route, m2t, done) => post([C], done);
+    assert.equal((await api.swap(quote())).txpowid, "0x" + "7".repeat(64)); assert.equal(calls, 2);
+    // a deposit: held per pool; the claim freed by the engine (never posted) frees the action; a real refusal is still a failure
+    const pool = { address: "0x" + "AA".repeat(32), opk: "0x" + "BB".repeat(32), oadr: "0x" + "CC".repeat(32) }, other = { address: "0x" + "AB".repeat(32), opk: pool.opk, oadr: pool.oadr };
+    api._setPools([pool, other]); const D1 = "0x" + "d4".repeat(32); unspent.add(D1); postAnswers = false;
+    let dep = 0; P.deposit = (p, m, t, done) => { dep++; if (dep === 1) post([D1], done); else done.ok("0x" + "8".repeat(64)); };
+    const d = await api.deposit(pool.address, "1", "1"); assert.equal(d.unknown, true); assert.deepEqual(d.coinids, [D1]); assert.match(d.message, /^The deposit to this pool may have gone through/);
+    await assert.rejects(api.deposit(pool.address, "1", "1"), /^Error: The last deposit to this pool may have gone through/); assert.equal(dep, 1);
+    assert.equal((await api.deposit(other.address, "1", "1")).txpowid, "0x" + "8".repeat(64), "another pool is not held");
+    await new Promise((res) => Claims.release([D1], "pp_test_3", res));
+    assert.equal((await api.deposit(pool.address, "1", "1")).txpowid, "0x" + "8".repeat(64), "the claim is gone: not held");
+    P.deposit = (p, m, t, done) => done.fail("post rejected (refused)");
+    await assert.rejects(api.deposit(pool.address, "1", "1"), /^Error: post rejected \(refused\)$/);
+    const acts = await api.activity(); assert.equal(acts.filter(x => x.unknown).length, 2); assert.ok(acts.find(x => x.unknown && x.type === "ADD").summary.includes("(pool " + pool.address + "). Inputs held: " + D1));
+    // the window: amber, never "failed"
+    const ui = fs.readFileSync(path.join(__dirname, "..", "renderer", "pools.js"), "utf8");
+    assert.equal((ui.match(/toast\("(Swap|Create|Add|Migrate|Withdraw) failed: /g) || []).length, 0, "every action's failure goes through ppFail");
+    assert.ok(ui.includes('if (/may have gone through/.test(m)) toast(m, "warn"); else toast(label + " failed: " + m, "err");'));
+    assert.ok(ui.includes('b.disabled = true; b.textContent = "LAST SWAP MAY HAVE GONE THROUGH: CHECK ACTIVITY";'));
+  } finally { try { api.stopLoop(); } catch (e) {} try { api.flush(); } catch (e) {} try { ctx.ActivityChain.stop(); } catch (e) {} }
+});

@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.331] — PandaPools: "posted, outcome unknown" is said as that, written to Activity, and holds the action
+
+- Review of 0.18.329 (finding 2). When the node does not answer a `txnpost` (or the post is pending), the engine keeps the posted inputs claimed and ends the action with `done.fail(PoolMgr.POST_UNKNOWN + …)`. The wrappers (main/pandapools.js swap, createPool, deposit, withdraw, migrate) turned that into a rejection: the window said "Swap failed: posted, outcome unknown…", and nothing was written to Activity (the record ran only on ok), for a transaction that may be in the mempool.
+- Desktop side only (the vendored engine under main/pandapools/ is untouched, and not re-vendored): the wrappers recognise the engine's POST_UNKNOWN prefix and resolve `{ unknown:true, message, coinids }`. A pending Activity row is written ("May have gone through (the node did not answer the post): …. Inputs held: " and the claimed input coin ids, whole, read from the engine's own claim table by the handle of that post; status "Pending: sent, outcome unknown"). The window says in amber "The swap may have gone through: … Check Activity before retrying", never "failed".
+- The same action (a swap; a deposit, withdrawal or migration of that pool; a pool creation) is refused, with the held coin ids, until the chain has settled it: every claimed coin spent (it went through) or its claim freed by the engine's sweep (it was never posted). The swap button is disabled meanwhile. `mcd:ppUnknown` lists what is still open. The list is in memory: after a restart the engine's own claims still refuse those inputs.
+- Not changed here: an unknown pool creation or migration does not save the new pool's recipe (the engine hands it over only on success), and an unknown withdrawal does not queue the payout address for collection ("Collect to wallet" does it by hand).
+- Test: scripts/pandapools-queue.test.cjs (in test:pandapools), over the real glue, loader, SQLite shim and the engine's own PoolInputClaims; fails on 0.18.330.
+
 ## [0.18.330] — P2P Chance: a settle-only mode for the offers and bets a wallet still has on chain
 
 - Review of 0.18.329 (finding 1): 0.18.318 removed P2P Chance entirely, so a wallet with an open offer or bet at `0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F` could no longer cancel, reveal, collect or claim it. An untaken offer has no deadline and can still be taken in another client; once taken, the house has the timeout (1500 blocks) to reveal or the taker takes the whole pot, and the house secret sat in the keychain with nothing to use it.

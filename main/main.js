@@ -514,6 +514,7 @@ ipcMain.handle("mcd:ppDeposit", (_e, addr, addM, addT) => pandapools.deposit(add
 ipcMain.handle("mcd:ppClose", (_e, addr) => pandapools.close(addr));
 ipcMain.handle("mcd:ppMigrate", (_e, addr, x0, y0) => pandapools.migrate(addr, x0, y0));
 ipcMain.handle("mcd:ppCollect", () => pandapools.collectToWallet());
+ipcMain.handle("mcd:ppUnknown", () => pandapools.unknownOpen());   // posts whose outcome the chain has not shown yet (0.18.331)
 ipcMain.handle("mcd:ppInvalidate", async () => { await pandapools.invalidate(); return true; });
 ipcMain.handle("mcd:ppBackup", () => pandapools.backup());
 ipcMain.handle("mcd:ppRestore", (_e, json) => pandapools.restore(json));

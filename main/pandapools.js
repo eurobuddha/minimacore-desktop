@@ -68,6 +68,7 @@ function buildMds() {
       // An answer that arrives after the wallet identity changed (epoch) is not handed on, but a txnpost was SENT: it is pending too (0.18.326),
       // never a bare {status:false}, which would free the claims of a transaction that may have been broadcast.
       var isPost = /^\s*txnpost\b/i.test(String(command)), POST_UNKNOWN = { status: false, pending: true, error: "the node did not answer txnpost, so the transaction may have been posted: its inputs stay held until the chain shows what happened" };
+      if (isPost) { var pm = /\bid:([A-Za-z0-9_-]{1,150})(?:\s|$)/.exec(String(command)); lastPostId = pm ? pm[1] : ""; }   // the engine's claim handle of this post (0.18.331)
       runner(command).then(function (r) { if (!cb) return; if (epoch===contextEpoch) { cb(r); return; } cb(isPost ? POST_UNKNOWN : {status:false}); }, function (e) { if (!cb) return;
         if (isPost && !(e && e.notSent === true)) { cb(POST_UNKNOWN); return; }
         cb({ status: false }); }); },
@@ -132,6 +133,7 @@ function onNodeRestarted() {
 }
 /** Wallet identity changes invalidate live work, never the saved recipes or usage floors. */
 async function invalidate() {
+  unknownPosts = []; lastPostId = "";   // the old wallet's unknown posts are not this wallet's (0.18.331)
   quarantineRequired=true;stopLoop();contextEpoch++;
   const old=ctx,storage=sqlShim;
   if(old&&old.ActivityChain)old.ActivityChain.stop();
@@ -322,6 +324,8 @@ function activity() {
   const active = ctx;
   return new Promise(function (resolve) { active.ActivityChain.snapshot(function (snap) {
     var rows = snap.rows.map(function (r) { return active.ActivityChain.rowModel(r, activityLabels(active)); });
+    // an unknown-outcome row (0.18.331) has no transaction id: it is pending, said so (the engine's text is "No transaction ID saved")
+    rows.forEach(function (r) { if (r && !r.failed && !r.txpowid && String(r.summary || "").indexOf(UNKNOWN_MARK) === 0) { r.unknown = true; r.statusText = "Pending: sent, outcome unknown"; } });
     var error = [snap.error, active.History.error()].filter(Boolean).join(" · ");
     if (error) rows.unshift({ type: "STATUS", summary: error });
     resolve(rows);
@@ -433,6 +437,53 @@ function quoteAndStash(tok, minimaToToken, amountIn) {
     capped: !!route.capped, maxPools: ctx.Router.MAX_POOLS, quoteId: qid };
 }
 
+// ---- "posted, outcome unknown" is not a failure (0.18.331) ----
+// The engine ends an action with done.fail(PoolMgr.POST_UNKNOWN + …) when the node did not answer the txnpost (or said pending): the
+// transaction may be in the mempool, and the engine keeps its inputs claimed. The wrappers turned that into a rejection, the window
+// said "Swap failed", and nothing was written to Activity, so the natural next step was to do it again. Here the wrappers recognise
+// the prefix and RESOLVE { unknown:true, message, coinids }, write a pending Activity row (with the claimed input coin ids, read from
+// the engine's own claim table by the handle of that post), and refuse the same action until the chain has settled it: every claimed
+// coin spent (it went through) or its claim freed (the engine's sweep found it was never posted). The vendored engine is untouched.
+// ponytail: the list is in memory; after a restart the engine's own claims still refuse those inputs, only this plain refusal is gone.
+var lastPostId = "", unknownPosts = [];
+var UNKNOWN_MARK = "May have gone through (the node did not answer the post): ";
+function claimsOf(handle) {
+  if (!sqlShim || !/^[A-Za-z0-9_-]{1,150}$/.test(String(handle))) return [];
+  var r; try { r = sqlShim.sql("SELECT coinid FROM pp_posted_inputs WHERE handle='" + handle + "'"); } catch (e) { r = null; }
+  return (r && r.status === true && Array.isArray(r.rows)) ? r.rows.map(function (row) { return String(row.COINID || row.coinid || ""); }).filter(function (id) { return /^0x[0-9a-fA-F]{64}$/.test(id); }) : [];
+}
+/** The unknown posts the chain has not settled yet: a claimed coin the node still lists (or cannot say) keeps one open. */
+async function unknownOpen() {
+  var open = [];
+  for (var i = 0; i < unknownPosts.length; i++) {
+    var u = unknownPosts[i], ids = claimsOf(u.handle), live = false;
+    for (var j = 0; j < ids.length && !live; j++) {
+      var r = await runner("coins coinid:" + ids[j]).catch(function () { return null; });
+      if (!(r && r.status === true && Array.isArray(r.response) && r.response.length === 0)) live = true;   // unspent or unreadable: still held
+    }
+    if (live) open.push(u);
+  }
+  unknownPosts = open;
+  return open.map(function (u) { return { kind: u.kind, coinids: u.coinids.slice(), at: u.at }; });
+}
+async function refuseWhileUnknown(kind, words) {
+  var u = (await unknownOpen()).find(function (x) { return x.kind === kind; });
+  if (u) throw new Error("The last " + words + " may have gone through: the chain has not shown yet what happened, and its inputs are still held (" + u.coinids.join(", ") + "). Check Activity before retrying. Nothing was sent.");
+}
+/** An engine fail callback: the unknown outcome resolves (a pending Activity row, the action held); anything else rejects as before. */
+function unknownOr(kind, words, type, summary, refaddr, resolve, reject) {
+  return function (msg) {
+    msg = String(msg);
+    if (!ctx || !ctx.PoolMgr || msg.indexOf(ctx.PoolMgr.POST_UNKNOWN) !== 0) { reject(new Error(msg)); return; }
+    var handle = lastPostId, ids = claimsOf(handle);
+    try { ctx.Store.actRecord(type, UNKNOWN_MARK + summary + (ids.length ? ". Inputs held: " + ids.join(", ") : ""), "", lastTip, refaddr || ""); } catch (e) {}
+    if (ids.length) unknownPosts.push({ kind: kind, handle: handle, coinids: ids, at: Date.now() });
+    emitter.emit("update");
+    resolve({ unknown: true, coinids: ids, message: "The " + words + " may have gone through: the node did not answer when it was posted. Check Activity before retrying." +
+      (ids.length ? " Its inputs stay held until the chain shows what happened: " + ids.join(", ") + "." : "") });
+  };
+}
+
 // Post the EXACT confirmed route (frozen-quote). If the pool moved since the quote, the covenant/txncheck rejects it
 // (fail-closed) and the user keeps their funds — the donor's "no slippage surprise" guarantee. No re-quote, no floor.
 async function swap(quoteId) {
@@ -440,18 +491,20 @@ async function swap(quoteId) {
   var q = lastQuotes[quoteId];
   if (!q || !q.route || !q.route.ok) throw new Error("This quote expired — re-enter the amount to get a fresh quote.");
   var route = q.route, minimaToToken = q.minimaToToken;
+  await refuseWhileUnknown("Swap", "swap");
+  // Always frame from MINIMA's side: paying MINIMA to get the token = SOLD MINIMA; paying the token to get
+  // MINIMA = BOUGHT MINIMA. (minimaToToken → totalIn is the MINIMA leg; else totalOut is the MINIMA leg.)
+  var minimaAmt = minimaToToken ? route.totalIn : route.totalOut;
+  var tokenAmt = minimaToToken ? route.totalOut : route.totalIn;
+  var summary = (minimaToToken ? "Sold " : "Bought ") + s(minimaAmt) + " MINIMA for " + s(tokenAmt) + " " + (q.tokenLabel || "token");
   return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.swap(route, minimaToToken, {
       ok: function (txpowid) {
-        // Always frame from MINIMA's side: paying MINIMA to get the token = SOLD MINIMA; paying the token to get
-        // MINIMA = BOUGHT MINIMA. (minimaToToken → totalIn is the MINIMA leg; else totalOut is the MINIMA leg.)
-        var minimaAmt = minimaToToken ? route.totalIn : route.totalOut;
-        var tokenAmt = minimaToToken ? route.totalOut : route.totalIn;
-        ctx.Store.actRecord("SWAP", (minimaToToken ? "Sold " : "Bought ") + s(minimaAmt) + " MINIMA for " + s(tokenAmt) + " " + (q.tokenLabel || "token"), txpowid, lastTip, "");
+        ctx.Store.actRecord("SWAP", summary, txpowid, lastTip, "");
         delete lastQuotes[quoteId];
         emitter.emit("update"); resolve({ txpowid: txpowid, totalIn: s(route.totalIn), totalOut: s(route.totalOut) });
       },
-      fail: function (msg) { reject(new Error(msg)); },
+      fail: unknownOr("Swap", "swap", "SWAP", summary, "", function (u) { delete lastQuotes[quoteId]; resolve(u); }, reject),   // the quote is spent either way: no second post of it
     });
   }), 200000, "The swap timed out — check Activity and your balance before retrying.");
 }
@@ -525,6 +578,7 @@ function createPreview(tokDecimals, x0, y0) {
 async function createPool(tokenid, tokDecimals, x0, y0) {
   await init();
   if (!plainAmount(x0) || !plainAmount(y0)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the engine (0.18.229)
+  await refuseWhileUnknown("Create", "pool creation");
   return withTimeout(new Promise(function (resolve, reject) {
     ctx.PoolMgr.createPool(tokenid, tokDecimals, x0, y0, {
       created: function (p, txpowid) {
@@ -533,7 +587,7 @@ async function createPool(tokenid, tokDecimals, x0, y0) {
         ctx.Store.actRecord("CREATE", "Created a pool with " + s(p.reserveM) + " MINIMA", txpowid, lastTip, p.address);
         emitter.emit("update"); resolve({ txpowid: txpowid, address: p.address });
       },
-      fail: function (msg) { reject(new Error(msg)); },
+      fail: unknownOr("Create", "pool creation", "CREATE", "Create a pool with " + String(x0) + " MINIMA", "", resolve, reject),
     });
   }), 200000, "Creating the pool timed out — check Activity and your balance before retrying.");
 }
@@ -542,12 +596,13 @@ function actionOnPool(addr, fn, label, summary) {
   return init().then(function () {
     var p = poolByAddress(addr);
     if (!p) return Promise.reject(new Error("Pool not found in the current scan — try again in a moment."));
-    return queuedAction(label, function (resolve, reject) {
+    var words = label === "ADD" ? "deposit to this pool" : label === "WITHDRAW" ? "withdrawal of this pool" : label + " on this pool";
+    return refuseWhileUnknown(label + ":" + p.address, words).then(function () { return queuedAction(label, function (resolve, reject) {
       fn(p, {
         ok: caught(reject, label, function (txpowid) { ctx.Store.actRecord(label, summary || (label + " on a pool"), txpowid, lastTip, ""); emitter.emit("update"); resolve({ txpowid: txpowid }); }),
-        fail: function (m) { reject(new Error(m)); },
+        fail: unknownOr(label + ":" + p.address, words, label, (summary || (label + " on a pool")) + " (pool " + p.address + ")", "", resolve, reject),
       });
-    });
+    }); });
   });
 }
 function deposit(addr, addM, addT) { return actionOnPool(addr, function (p, d) { ctx.PoolMgr.deposit(p, addM, addT, d); }, "ADD", "Added liquidity"); }
@@ -595,12 +650,13 @@ async function migrate(addr, newX, newY) {
   await init();
   var p = poolByAddress(addr); if (!p) throw new Error("Pool not found.");
   if (!plainAmount(newX) || !plainAmount(newY)) throw new Error("A pool's amounts are plain numbers above zero. Nothing was sent.");   // before the queue (0.18.229)
+  await refuseWhileUnknown("MIGRATE:" + p.address, "migration of this pool");
   return queuedAction("Migrate", function (resolve, reject) {
     var deadline = execDeadline();
     ensureOwnerKey(p.opk, caught(reject, "Migrate", function (foreign) {
       if (foreign) { reject(new Error(UNAVAILABLE_KEY_MSG)); return; }
       if (Date.now() > deadline) { reject(new Error("timed out before the owner key was ready — nothing was posted. Retry.")); return; }
-      ctx.PoolMgr.migrate(p, newX, newY, { created: caught(reject, "Migrate", function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }), fail: function (m) { reject(new Error(m)); } });
+      ctx.PoolMgr.migrate(p, newX, newY, { created: caught(reject, "Migrate", function (np, txpowid) { ctx.Store.ownRecord(np); ctx.Store.setRetired(p.address, 1, function () {}); ctx.Store.actRecord("MIGRATE", "Migrated a pool", txpowid, lastTip, np.address); emitter.emit("update"); resolve({ txpowid: txpowid, address: np.address }); }), fail: unknownOr("MIGRATE:" + p.address, "migration of this pool", "MIGRATE", "Migrate a pool (pool " + p.address + ")", "", resolve, reject) });
     }));
   });
 }
@@ -765,6 +821,6 @@ module.exports = {
   pools, myPools, activity, feed, statement, syncHistory, quoteSwap: quoteAndStash, pairInfo, aggregateInfo, createPreview,
   market, createAnchor, marketToken,
   swap, createPool, deposit, close: closePool, migrate, collectToWallet, pendingCollect, backup, restore, recoverSaved, retirePool, listRetired, archiveSettings, confirmSigning,
-  onNodeRestarted, activeWork,
+  onNodeRestarted, activeWork, unknownOpen,
   _setRunner, _setDataDir, _ctx: () => ctx, _setPools: (ps) => { POOLS = ps; }, _activityLabels: activityLabels,   // test-only
 };

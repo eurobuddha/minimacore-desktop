@@ -132,7 +132,7 @@
     el("ppFlip").onclick = () => { ppSwapMinToTok = !ppSwapMinToTok; applyPpDir(); };
     el("ppSwapTok").onchange = () => { refreshPpSwapMeta().then(applyPpDir); };
     el("ppSwapAmt").oninput = () => ppUpdateQuote();
-    el("ppSwapGo").onclick = () => doPpSwap();
+    el("ppSwapGo").onclick = () => doPpSwap(); ppMarkHeld();
   }
   // Pool line (count + aggregate depth) + your holdings for both legs — the liquidity/price context the donor shows.
   async function refreshPpSwapMeta() {
@@ -206,6 +206,15 @@
     d.innerHTML = html;
     if (outEl()) outEl().textContent = TOK.tidyAmount(q.totalOut);
   }
+  // 0.18.331: "posted, outcome unknown" is not a failure. The wrappers resolve { unknown:true, message } and refuse the same action while
+  // the chain has not settled it ("… may have gone through …"): both are said in amber, never as "failed".
+  function ppUnknown(r, more) { if (!(r && r.unknown)) return false; toast(r.message + (more || ""), "warn"); return true; }
+  function ppFail(label, e) { const m = String((e && e.message) || e); if (/may have gone through/.test(m)) toast(m, "warn"); else toast(label + " failed: " + m, "err"); }
+  /** The swap button stays disabled while the last swap's outcome is unknown (its inputs are still held). */
+  function ppMarkHeld() {
+    if (!api.ppUnknown) return;
+    api.ppUnknown().then(list => { const b = el("ppSwapGo"); if (b && Array.isArray(list) && list.some(u => u.kind === "Swap")) { b.disabled = true; b.textContent = "LAST SWAP MAY HAVE GONE THROUGH: CHECK ACTIVITY"; } }).catch(() => {});
+  }
   let ppSwapBusy = false;
   async function doPpSwap() {
     if (ppSwapBusy) return;                                         // block a double-submit during the pre-confirm quote await
@@ -229,11 +238,12 @@
       try {
         const r = await api.ppSwap(q.quoteId);                       // posts the EXACT confirmed route (frozen)
         prog.close();
+        if (r && r.unknown) toast(r.message, "warn"); else
         toast("Swapped ✓ — received " + TOK.tidyAmount(r.totalOut) + " " + getLbl, "ok");
         if (el("ppSwapAmt")) el("ppSwapAmt").value = "";
         if (el("ppSwapOut")) el("ppSwapOut").textContent = "0.0";
         ppUpdateQuote(); refreshPpSwapMeta();
-      } catch (e) { prog.close(); toast("Swap failed: " + e.message, "err"); }
+      } catch (e) { prog.close(); ppFail("Swap", e); }
     } finally { ppSwapBusy = false; }
   }
 
@@ -699,8 +709,8 @@
       if (!okc) { busy = false; return; }
       close();
       const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
-      try { await api.ppCreate(t.tokenid, t.dec, String(minima), uStr); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); showPpBackup(); }
-      catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
+      try { const r = await api.ppCreate(t.tokenid, t.dec, String(minima), uStr); prog.close(); if (ppUnknown(r)) renderPandapools(); else { toast("Pool created ✓", "ok"); renderPandapools(); showPpBackup(); } }
+      catch (e) { prog.close(); ppFail("Create", e); }
       finally { busy = false; }
     };
     update();
@@ -743,8 +753,8 @@
       if (!okc) { busy = false; return; }
       close();
       const prog = showProgress("Creating pool…", "Posting to the chain — this can take a few seconds…");
-      try { await api.ppCreate(t.tokenid, t.dec, x0, y0); prog.close(); toast("Pool created ✓", "ok"); renderPandapools(); showPpBackup(); }
-      catch (e) { prog.close(); toast("Create failed: " + e.message, "err"); }
+      try { const r = await api.ppCreate(t.tokenid, t.dec, x0, y0); prog.close(); if (ppUnknown(r)) renderPandapools(); else { toast("Pool created ✓", "ok"); renderPandapools(); showPpBackup(); } }
+      catch (e) { prog.close(); ppFail("Create", e); }
       finally { busy = false; }
     };
     updatePreview();
@@ -770,8 +780,8 @@
         if (!okc) return;
         close();
         const prog = showProgress("Adding liquidity…", "Posting to the chain…");
-        try { await api.ppDeposit(addr, a || "0", b || "0"); prog.close(); toast("Liquidity added ✓", "ok"); renderPandapools(); }
-        catch (e) { prog.close(); toast("Add failed: " + e.message, "err"); }
+        try { const r = await api.ppDeposit(addr, a || "0", b || "0"); prog.close(); if (!ppUnknown(r)) toast("Liquidity added ✓", "ok"); renderPandapools(); }
+        catch (e) { prog.close(); ppFail("Add", e); }
       });
   }
   async function showPpMigrate(addr) {
@@ -783,8 +793,8 @@
         if (!okc) return;
         close();
         const prog = showProgress("Migrating…", "Posting to the chain…");
-        try { await api.ppMigrate(addr, a, b); prog.close(); toast("Migrated ✓", "ok"); renderPandapools(); showPpBackup(); }
-        catch (e) { prog.close(); toast("Migrate failed: " + e.message, "err"); }
+        try { const r = await api.ppMigrate(addr, a, b); prog.close(); if (ppUnknown(r)) renderPandapools(); else { toast("Migrated ✓", "ok"); renderPandapools(); showPpBackup(); } }
+        catch (e) { prog.close(); ppFail("Migrate", e); }
       });
   }
   let ppWithdrawBusy = false;
@@ -797,8 +807,8 @@
         "Sweep the reserves" + (p ? " (" + TOK.tidyAmount(p.reserveM) + " MINIMA · " + TOK.tidyAmount(p.reserveT) + " " + (p.tokName || "") + ")" : "") + " to your owner address (spendable on this node). The pool closes. Then use “Collect to wallet” to move them into your default wallet — do that before restoring your seed on another node.", "Withdraw", true);
       if (!ok) return;
       const prog = showProgress("Withdrawing…", "Posting to the chain…");
-      try { await api.ppClose(addr); prog.close(); toast("Withdrawn ✓ — at your owner address; use “Collect to wallet” to move it to your wallet", "ok"); renderPandapools(); }
-      catch (e) { prog.close(); toast("Withdraw failed: " + e.message, "err"); }
+      try { const r = await api.ppClose(addr); prog.close(); if (!ppUnknown(r, " If it did, the funds are at your owner address: use “Collect to wallet”.")) toast("Withdrawn ✓ — at your owner address; use “Collect to wallet” to move it to your wallet", "ok"); renderPandapools(); }
+      catch (e) { prog.close(); ppFail("Withdraw", e); }
     } finally { ppWithdrawBusy = false; }
   }
   async function renderPpActivity() {
