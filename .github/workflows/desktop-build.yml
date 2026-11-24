@@ -153,6 +153,11 @@ jobs:
       - name: Verify P2P Chance is removed
         run: npm run test:casino-removed
 
+      # 0.18.330: the settle-only mode for a wallet's open offers and bets (cancel, reveal, collect, claim; nothing else), against a
+      # stand-in node that splits on every ";" and judges each posted transaction by the covenant.
+      - name: Verify P2P Chance settle-only mode
+        run: npm run test:casino-settle
+
       - name: Verify terminal autocomplete
         run: npm run test:termcomplete
 

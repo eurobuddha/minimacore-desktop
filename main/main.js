@@ -593,7 +593,7 @@ ipcMain.handle("mcd:axOtcGoLive", (_e, sell, buy) => atomix.otcGoLive(sell, buy)
 ipcMain.handle("mcd:axOtcWithdraw", () => atomix.otcWithdraw());
 ipcMain.handle("mcd:axOtcPropose", (_e, lp, side, amount, price) => atomix.otcPropose(lp, side, amount, price));
 ipcMain.handle("mcd:axOtcDeal", (_e, ref, action, amount, price) => atomix.otcDealAction(ref, action, amount, price));
-ipcMain.handle("mcd:axInvalidate", () => { atomix.invalidate(); return true; });
+ipcMain.handle("mcd:axInvalidate", () => { atomix.invalidate(); try { require("./casino-settle").invalidate(); } catch (e) {} return true; });   // a wallet change: the P2P Chance settle mode forgets the old wallet's keys too (0.18.330)
 atomix.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:atomix"); });
 atomix.emitter.on("notify", (msg) => {   // settlement/OTC milestones — OS notification when the app isn't focused
   try {
@@ -693,28 +693,45 @@ node.on("log", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:
 
 // P2P Chance was removed in 0.18.318 (a stranger's coin state could become a node command; pending an audit and a rebuild).
 // Said once to a wallet that ever switched it on (casinoEnabled / casinoAgeCertified stay in config.json, as do its keychain
-// secrets: nothing of it is deleted). Only what is certain from the covenant: nothing is settled for it any more.
+// secrets: nothing of it is deleted). Since 0.18.330 the notice is a dialog of the window (the text of a native message box
+// cannot be selected or copied): the window asks for it (mcd:casinoNotice), shows the contract and the command as copyable
+// values, and says it was read (mcd:casinoNoticeSeen) only when it is dismissed.
 const CASINO_CONTRACT = "0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F";
 function casinoRemovedNotice(cfg) {
   if (!cfg || cfg.casinoRemovedNoticeShown || !(cfg.casinoEnabled || cfg.casinoAgeCertified)) return null;
   return { title: "minimaCore", message: "P2P Chance has been removed from minimaCore",
     detail: "It was removed to fix a security problem. It may come back after an audit.\n\n" +
       "Nothing was moved or deleted. Any offer or bet you have open stays on chain at the P2P Chance contract, and the secrets and history P2P Chance saved stay on this computer.\n\n" +
-      "This app no longer cancels, renews, reveals, settles or claims P2P Chance offers and bets:\n" +
-      "• An offer nobody has taken has no deadline, and until someone takes it only your key can cancel it. Another player can still take it in another P2P Chance app.\n" +
-      "• Once a bet is taken, each side has a limited number of blocks to do its part (1500 for an offer made in minimaCore). If your side does not, the other side can take the whole pot.\n\n" +
-      "Your coins at the contract are listed by this Terminal command:\ncoins relevant:true address:" + CASINO_CONTRACT };
+      "You can no longer bet, make offers or take them here. This app still closes what you have open, but only while it is open and the node is running:\n" +
+      "• It reveals for an offer of yours that someone took, collects a bet you won, and claims a pot when the other side let the timeout pass. It does this by itself on each new block.\n" +
+      "• It does NOT cancel an open offer by itself, and it no longer renews one. An offer nobody has taken has no deadline, and anyone can still take it in another P2P Chance app. Once it is taken, your side has a limited number of blocks to reveal (1500 for an offer made in minimaCore); if this app is not running then, the other side can take the whole pot.\n\n" +
+      "Cancel your open offers now: Settings, \"P2P Chance was removed: your open offers and bets\".",
+    contract: CASINO_CONTRACT, command: "coins relevant:true address:" + CASINO_CONTRACT };
 }
-function sayCasinoRemoved() {
-  const n = casinoRemovedNotice(config.load());
-  if (!n || !win || win.isDestroyed()) return;
-  dialog.showMessageBox(win, Object.assign({ type: "info", buttons: ["OK"], noLink: true }, n)).then(() => config.setCasinoRemovedNoticeShown()).catch(() => {});
-}
+ipcMain.handle("mcd:casinoNotice", () => casinoRemovedNotice(config.load()));
+ipcMain.handle("mcd:casinoNoticeSeen", () => { config.setCasinoRemovedNoticeShown(); return true; });
+
+// P2P Chance SETTLE-ONLY mode (0.18.330, main/casino-settle.js): no betting, no offers, no takes. It cancels this wallet's open
+// offers on a click, and on each new block reveals, collects and claims what the covenant gives this wallet. The block pass
+// runs only for a wallet that ever switched P2P Chance on; the list and its buttons work for any wallet.
+const casinoSettle = require("./casino-settle");
+ipcMain.handle("mcd:casinoSettleList", () => casinoSettle.list());
+ipcMain.handle("mcd:casinoSettleOne", (_e, coinid) => { requireRunning(); return casinoSettle.settle(coinid); });
+ipcMain.handle("mcd:casinoSettleCancelAll", () => { requireRunning(); return casinoSettle.cancelAll(); });
+casinoSettle.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:casinoSettle"); });
+casinoSettle.emitter.on("notify", (msg) => {   // money moved without a click: always said
+  try { const n = new Notification({ title: "P2P Chance", body: String(msg), silent: false }); n.on("click", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } }); n.show(); } catch (e) { /* best-effort */ }
+});
+let casinoSettleStarted = false;
+node.on("status", (s) => {
+  if (s.state !== "running" || casinoSettleStarted) return;
+  casinoSettleStarted = true;   // asked once: the window cannot change these two flags any more (0.18.318)
+  const c = config.load(); if (c.casinoEnabled || c.casinoAgeCertified) casinoSettle.startLoop();
+});
 
 app.whenReady().then(() => {
   setupPermissions();
   createWindow();
-  win.webContents.once("did-finish-load", sayCasinoRemoved);
   setupTray();
   // Only auto-boot for a FULLY onboarded user. If either the node wizard or the wallet step is unfinished
   // (incl. a stale pre-0.1.1 config with setupDone but no wallet step), the renderer runs onboarding and
