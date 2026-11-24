@@ -16,7 +16,7 @@ Module._load = function (request, ...rest) { return request === "electron" ? fak
 const config = require("../main/config.js");
 config.rpcSecret = () => "test-secret";
 const NM = require("../main/node-manager.js");
-const m = NM, real = { rpc: m.rpc, spawnFn: m.spawnFn, startHealth: m.startHealth, reclaimStaleNode: m.reclaimStaleNode, stopTimes: m.stopTimes };
+const m = NM, real = { rpc: m.rpc, spawnFn: m.spawnFn, startHealth: m.startHealth, reclaimStaleNode: m.reclaimStaleNode, stopTimes: m.stopTimes, sys: m.sys };
 test.after(() => { Module._load = realLoad; });
 
 const PIECE = 1000;
@@ -35,9 +35,9 @@ function fresh(times) {
   m.keyModeAlert = ""; m.proc = null; m.state = "stopped"; m.stopRun = null; m.shutdownNotes = []; m.logs = [];
 }
 /** A start of node-manager whose "java" is the stand-in: argv after the script = the stand-in's own (saveMs, pieces, quiet, hang, forge). */
-async function startStandin(saveMs, pieces, quiet, hang, forge) {
+async function startStandin(saveMs, pieces, quiet, hang, forge, chatter) {
   const seen = { lines: "", quits: 0, statuses: [] };
-  m.spawnFn = (_cmd, _args, opts) => { const c = spawn(process.execPath, [STANDIN, dataDir(), String(saveMs), String(pieces), quiet ? "1" : "0", hang ? "1" : "0", "0", forge || ""], opts); children.push(c); seen.child = c;
+  m.spawnFn = (_cmd, _args, opts) => { const c = spawn(process.execPath, [STANDIN, dataDir(), String(saveMs), String(pieces), quiet ? "1" : "0", hang ? "1" : "0", "0", forge || "", String(chatter || 0)], opts); children.push(c); seen.child = c;
     c.stdout.on("data", (d) => { seen.lines += d; }); c.on("exit", (code, sig) => { seen.exit = { code, sig }; }); return c; };
   m.startHealth = () => {}; m.reclaimStaleNode = async () => "";
   // `quit` over RPC: the node runs its whole shutdown, then answers (the stand-in is told by SIGUSR2)
@@ -52,7 +52,7 @@ async function startStandin(saveMs, pieces, quiet, hang, forge) {
   for (let i = 0; i < 100 && !/Daemon mode started/.test(seen.lines); i++) await wait(20);
   return seen;
 }
-function restore() { Object.assign(m, { rpc: real.rpc, spawnFn: real.spawnFn, startHealth: real.startHealth, reclaimStaleNode: real.reclaimStaleNode, stopTimes: real.stopTimes }); }
+function restore() { Object.assign(m, { rpc: real.rpc, spawnFn: real.spawnFn, startHealth: real.startHealth, reclaimStaleNode: real.reclaimStaleNode, stopTimes: real.stopTimes, sys: real.sys }); }
 
 test("Stop waits while the node writes a 14-second MegaMMR without a word in the log (the old code sent SIGTERM at 12 s and cut it)", { timeout: 60_000 }, async () => {
   fresh({ silenceMs: 3_000 });   // much shorter than the save: only the database file's own writes keep the wait going
@@ -178,13 +178,82 @@ test("a node of an earlier launch still SAVING is waited for at the next start, 
   let exit = null; c.on("exit", (code, sig) => { exit = { code, sig }; });
   for (let i = 0; i < 200 && size() < 0; i++) await wait(20);
   fs.mkdirSync(USERDATA, { recursive: true }); fs.writeFileSync(m.pidfilePath(), JSON.stringify({ pid: c.pid }));
+  const notes = new Set(), onStatus = (x) => { if (x.stopNote) notes.add(x.stopNote); }; m.on("status", onStatus);
   try {
     const t0 = Date.now(), why = await m.reclaimStaleNode(), took = Date.now() - t0;
     assert.equal(why, "", why);
+    assert.deepEqual([...notes], [NM.reclaimNote(c.pid)], "0.19.430: the start screen was told what it waits for, with the pid");
+    assert.equal(m.snapshot().stopNote, "", "and no longer once it is over");
     assert.ok(took >= 12_000, "it waited for the save (" + took + " ms)");
     for (let i = 0; i < 100 && !exit; i++) await wait(20);
     assert.deepEqual(exit, { code: 0, sig: null }, "it finished by itself"); assert.equal(size(), 28 * PIECE, "megammr.mmr is whole");
-  } finally { restore(); }
+  } finally { m.off("status", onStatus); restore(); }
+});
+
+// 0.19.430 (review, MAJOR, RAN): `quit` failing with anything but "nothing listens" was never sent again, and a node that keeps
+// logging never reaches the silence bound: stop() never returned, Quit could not finish, and the note said "The node is saving".
+test("`quit` is refused with 401 by a node that keeps logging: after the bound it gets SIGTERM, its own shutdown hook saves everything, and the stop ends clean", { timeout: 30_000 }, async () => {
+  fresh({ unansweredMs: 1_500, silenceMs: 60_000, noteAfterMs: 100 });
+  const s = await startStandin(1_500, 6, false, false, "", 200);
+  m.rpc = async (c) => { if (c === "quit") { s.quits++; throw new Error("HTTP 401 Unauthorized"); } throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }); };
+  try {
+    const t0 = Date.now(); await m.stop(); const took = Date.now() - t0;
+    assert.equal(s.quits, 1, "`quit` was not sent again");
+    assert.ok(took >= 1_500 && took < 15_000, "ended after the bound and the hook's save (" + took + " ms)");
+    assert.ok(m.logs.some((l) => /has not answered `quit` for 2 seconds and has not said it is shutting down: SIGTERM/.test(l)), m.logs.filter((l) => /^\[app\]/.test(l)).join(" | "));
+    assert.match(s.lines, /\[!\] Shutdown Hook\.\.\n[^\n]*Shut down started\.\./, "the node's own hook ran its shutdown");
+    assert.equal(s.exit.code, 143); assert.equal(size(), 6 * PIECE, "megammr.mmr is whole");
+    assert.equal(record().cut, null, "it said it had saved after the signal: a clean stop");
+    const notes = s.statuses.filter((x) => x.state === "stopping" && x.stopNote).map((x) => x.stopNote);
+    assert.equal(notes[0], NM.ANSWER_NOTE, "first: waiting for the node to answer (never \"saving\" while it is not)");
+    assert.ok(notes.includes(NM.SAVING_NOTE) && notes.indexOf(NM.SAVING_NOTE) > notes.lastIndexOf(NM.ANSWER_NOTE), "then: saving, once it is");
+    assert.equal(m.state, "stopped");
+  } finally { s.off(); restore(); }
+});
+
+test("a node that has begun its shutdown, never ends and keeps logging: the wait is given up at the ceiling, nothing is signalled, and it is said plainly with the pid", { timeout: 30_000 }, async () => {
+  fresh({ unansweredMs: 500, silenceMs: 60_000, ceilingMs: 2_500 });
+  const s = await startStandin(1_000, 4, false, true, "", 200);   // HANG: "Shut down started..", "Saving all db", then only its chatter
+  try {
+    const t0 = Date.now(); await m.stop(); const took = Date.now() - t0;
+    assert.ok(took >= 2_500 && took < 10_000, "stop() returned at the ceiling (" + took + " ms)");
+    assert.equal(s.exit, undefined, "the node was not ended"); assert.ok(!m.logs.some((l) => /: SIG(TERM|KILL)/.test(l)), "nothing signalled: it had said its shutdown began, so it may be saving");
+    assert.equal(m.stillRunning(), s.child.pid);
+    assert.equal(m.state, "stopping"); assert.equal(m.snapshot().stopNote, NM.stillNote(s.child.pid, 0));
+    assert.equal(record(), null, "nothing recorded about a stop that has not ended");
+    const t1 = Date.now(); await m.stop(); assert.ok(Date.now() - t1 < 1_000, "a second stop (the Quit's) does not wait again");
+    s.child.kill("SIGKILL"); for (let i = 0; i < 200 && !s.exit; i++) await wait(20);
+    assert.equal(m.state, "stopped"); assert.equal(m.stillRunning(), 0);
+  } finally { s.off(); restore(); }
+});
+
+test("waitGone, the unanswered bound case by case: a hung node nothing listens on; never on Windows; never a node that cannot be read and took `quit`", async () => {
+  const run = async (times, o, platform) => {
+    fresh(Object.assign({ pollMs: 20, quitRetryMs: 100, unansweredMs: 500, silenceMs: 3_000, ceilingMs: 1_500 }, times));
+    m.sys = Object.assign({}, real.sys, platform ? { platform } : {});
+    const t0 = Date.now(), sigs = []; let gone = false;
+    const r = await m.waitGone(Object.assign({ alive: () => !gone, signal: (sig) => { sigs.push([sig, Date.now() - t0]); gone = true; }, progressAt: () => 0, savedAt: () => 0 }, o));
+    restore(); return { r, sigs };
+  };
+  const refused = () => Promise.reject(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" })), e401 = () => Promise.reject(new Error("HTTP 401"));
+  // silent, and nothing ever listened: the short bound, not the silence bound (it was 10 minutes)
+  let x = await run({}, { quit: refused });
+  assert.equal(x.sigs.length, 1); assert.ok(x.sigs[0][1] >= 480 && x.sigs[0][1] < 1_400, "SIGTERM at the unanswered bound (" + x.sigs[0][1] + " ms)"); assert.equal(x.r.cut, true, "it never said it saved");
+  // nothing listens but the node writes (a node still booting, or saving with its RPC closed): waited for, `quit` asked again
+  let asked = 0; x = await run({}, { quit: () => { asked++; return refused(); }, progressAt: () => Date.now() });
+  assert.deepEqual(x.sigs, []); assert.ok(asked > 5); assert.deepEqual(x.r, { signal: "", cut: false, gaveUp: true });
+  // 401, its output is read, no shutdown seen: SIGTERM at the bound even while it keeps logging
+  x = await run({}, { quit: e401, progressAt: () => Date.now(), shutStartedAt: () => 0 });
+  assert.equal(x.sigs.length, 1); assert.equal(x.sigs[0][0], "SIGTERM"); assert.ok(x.sigs[0][1] >= 480 && x.sigs[0][1] < 1_400);
+  // ...but not once it said its shutdown began
+  x = await run({}, { quit: e401, progressAt: () => Date.now(), shutStartedAt: () => 1 });
+  assert.deepEqual(x.sigs, []); assert.equal(x.r.gaveUp, true);
+  // ...and never on Windows, where "SIGTERM" ends the process at once
+  x = await run({}, { quit: e401, progressAt: () => Date.now(), shutStartedAt: () => 0 }, "win32");
+  assert.deepEqual(x.sigs, []); assert.equal(x.r.gaveUp, true);
+  // a node of an earlier launch (nothing it prints is read) whose RPC took `quit` and failed: it may be saving, so only the old rules
+  x = await run({}, { quit: e401 });
+  assert.equal(x.sigs.length, 0, "not at the unanswered bound; the ceiling (1.5 s here) came before the silence bound (3 s)"); assert.equal(x.r.gaveUp, true);
 });
 
 test("the next start compares the MegaMMR with the last clean stop: its file size before the node starts, its coins once it runs", async () => {

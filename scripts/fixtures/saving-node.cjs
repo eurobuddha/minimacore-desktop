@@ -9,10 +9,11 @@
 //   FORGE=run        right after its start it logs a peer's failing script as core does (TxPoWChecker: "Script FAIL input:0 " + the script, as it
 //                    came, line ends included), and the script carries a whole "Minima @ … : Main Instance Cleared.." line of its own
 //   FORGE=save       the same line, but logged just after "Saving all db", while megammr.mmr is being written
-// argv: <data folder> <SAVE_MS> <PIECES> [QUIET] [HANG] [START_SAVING] [FORGE]   (the words "minima.jar" in argv make it look like a node to reclaim)
+//   CHATTER=<ms>     it logs a line every <ms> for as long as it runs, as a node on the network does (and the Parlons Node's heartbeat)
+// argv: <data folder> <SAVE_MS> <PIECES> [QUIET] [HANG] [START_SAVING] [FORGE] [CHATTER]   (the words "minima.jar" in argv make it look like a node to reclaim)
 "use strict";
 const fs = require("fs"), path = require("path");
-const [dir, saveMs, pieces, quiet, hang, startSaving, forge] = process.argv.slice(2).filter((a) => a !== "-jar" && !a.endsWith("minima.jar"));
+const [dir, saveMs, pieces, quiet, hang, startSaving, forge, chatter] = process.argv.slice(2).filter((a) => a !== "-jar" && !a.endsWith("minima.jar"));
 const db = path.join(dir, "1.1", "databases"), file = path.join(db, "megammr.mmr"), PIECE = Buffer.alloc(1000, 7);
 const line = (s) => { const d = new Date(), two = (n) => String(n).padStart(2, "0"); return "Minima @ " + two(d.getDate()) + "/" + two(d.getMonth() + 1) + "/" + d.getFullYear() + " " + two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds()) + " [123.4 MB] : " + s; };
 const say = (s) => { try { process.stdout.write(line(s) + "\n"); } catch (e) {} };
@@ -35,4 +36,5 @@ process.on("SIGUSR1", () => { if (!shutting) save(() => { say("Main Instance Cle
 process.on("SIGTERM", () => { if (shutting) process.exit(143); say("[!] Shutdown Hook.."); save(() => { say("Shut down completed OK.."); process.exit(143); }); });
 say("Daemon mode started.."); if (forge === "run") forged();
 if (startSaving === "1") process.emit("SIGUSR2");
+if (Number(chatter) > 0) setInterval(() => say("[parlons-node] heartbeat: node block=1 chainlen=1"), Number(chatter));
 setInterval(() => {}, 1 << 30);   // a daemon: it runs until it is stopped

@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.430] — A stop never waits without bound, and says what it is really waiting for
+
+- Independent review of 0.19.428 (MAJOR, the reviewer ran it; MINOR 4 folded in). When `quit` failed with anything but "nothing listens" (a 401, a timeout on a wedged RPC thread, a reset) it was never sent again, and a node that keeps logging or touching its databases never reached the 10-minute silence bound: stop() never returned, Quit could not finish (the window cannot be closed while the node is being stopped), and the note said "The node is saving… Do not force-quit", which was not true. The next launch waited in the same loop with no note at all.
+- main/node-manager.js waitGone, new: 60 s into a stop, when `quit` was never answered: (1) the node's output is read, `quit` failed or is still pending, and the node has not printed `Shut down started..` (core Main.shutdown's first line): SIGTERM. That node is not shutting down, so its own shutdown hook runs the whole save, and the wait goes on under the same rules as after `quit`. (2) nothing ever listened on its RPC port and there was no output and no database write for 60 s (it was 10 minutes): SIGTERM. Never on Windows, where "SIGTERM" ends the process at once. A node of an earlier launch (nothing it prints can be read) whose RPC took `quit` and did not answer may be saving: it gets neither.
+- A ceiling: 30 minutes after a stop began, the wait is given up and nothing more is signalled. The window says "The node (pid N) has not stopped after 30 minutes and is still running. You can close the app: the next launch waits for this node before it starts one."; a Quit shows that and then closes; the next launch waits for that node (and gives up the same way, with "could not stop this app's node left running by an earlier launch (pid N)").
+- The note is true per case: "The node has been told to stop and has not answered yet…" until the node has answered `quit`, said its shutdown began or said it saved; "The node is saving…" from then on; at a start that waits for a node of an earlier launch: "This app's node from an earlier launch is still running (pid N). It is waited for while it saves its data and stops…".
+- Tests: scripts/lifecycle-test.cjs, three new and one extended (on 0.19.429 two never return and are cut at 30 s, two fail). New words in zh, ru and uk.
+
 ## [0.19.429] — A "saved" line from earlier in the run never makes a stop signal the node
 
 - Independent review of 0.19.428 (MAJOR, the reviewer ran it). Core logs a peer's failing script as it came, line ends included (TxPoWChecker "Script FAIL input:…"), so a peer can make the node print a whole `Minima @ … : Main Instance Cleared..` line. The app believed such a line from any point of the run: the NEXT stop then sent SIGTERM 5 s in, while megammr.mmr was being written (probe: 10000 of 40000 bytes), and recorded the stop as clean.

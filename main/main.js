@@ -1141,6 +1141,7 @@ app.on("window-all-closed", () => { /* keep running in tray on mac; quit elsewhe
 let quitting = false, quitAsking = false, quitStopping = false;
 // A Quit that waits for the node to save shows the window, which says so (node-manager SAVING_NOTE): the app must not look hung.
 node.on("status", (s) => { if (quitStopping && s && s.stopNote && win && !win.isDestroyed()) win.show(); });
+const NODE_STILL_QUIT = N_("The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.");
 const IMPORT_QUIT_EARLY = N_("The import has not replaced anything yet. Quitting now stops it; the node keeps its chain.");
 const BUSY_QUIT_WARNING = N_("Quitting now interrupts it. Your funds are safe; if it does not finish, run it again after the next start.");
 const IMPORT_QUIT_RESTART = N_("The import has finished and the node is restarting. Quitting now leaves the imported chain in place: the node catches up at the next start, and AtomiX, PandaPools and the Exchange wait until it has.");
@@ -1184,6 +1185,14 @@ app.on("before-quit", (e) => {
     quitting = true; quitStopping = true;
     try { await node.stop(); } catch (err) {}
     quitStopping = false;
+    // The stop gave up waiting (node-manager ceilingMs) and the node is still there: said plainly, with its pid, then the app closes
+    // (killNow leaves a node that was told to quit; the next launch waits for it). A quit the system asked for is not held behind it.
+    const still = node.stillRunning();
+    if (still && !systemQuit.on()) {
+      if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+      await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, { type: "warning", buttons: [lang.t("OK")], noLink: true, title: flavor.windowTitle, message: lang.t("The node is still running"),
+        detail: lang.t(NODE_STILL_QUIT, { pid: still, min: Math.round(node.stopTimes.ceilingMs / 60000) }) }).catch(() => {});
+    }
     app.quit();
   })();
 });

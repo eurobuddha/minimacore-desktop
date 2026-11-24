@@ -5932,3 +5932,14 @@
   "Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.",
   "Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "The node has been told to stop and has not answered yet. Waiting for it: do not force-quit.": "已通知节点停止，但它尚未应答。正在等待：请勿强制退出。",
+  "This app's node from an earlier launch is still running (pid {pid}). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.": "本应用上次启动的节点仍在运行（pid {pid}）。正在等待它保存数据并停止，然后节点才会启动：如果使用 MegaMMR，这可能需要一两分钟。请勿强制退出。",
+  "The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.": "节点（pid {pid}）在 {min} 分钟后仍未停止，仍在运行。您可以关闭应用：下次启动时会先等待此节点，然后才启动新节点。",
+  "The node is still running": "节点仍在运行"
+}, { review: [
+  "The node has been told to stop and has not answered yet. Waiting for it: do not force-quit.",
+  "This app's node from an earlier launch is still running (pid {pid}). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.",
+  "The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.",
+  "The node is still running"
+] });

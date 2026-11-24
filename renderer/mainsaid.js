@@ -208,6 +208,9 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["NODE_HINT_DB", I18N.N_("another node still holds this data folder's databases. Start again: if it is this app's own earlier node it is stopped first")],
     // ---- Stopping the node while it saves, and what a start says about the last stop (main/node-manager.js, 0.19.420) ----
     ["NODE_SAVING", I18N.N_("The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.")],
+    ["NODE_ANSWER", I18N.N_("The node has been told to stop and has not answered yet. Waiting for it: do not force-quit.")],
+    ["NODE_RECLAIM_WAIT", I18N.N_("This app's node from an earlier launch is still running (pid {pid}). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.")],
+    ["NODE_STILL", I18N.N_("The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.")],
     ["NODE_CUT", I18N.N_("The node's last shutdown was cut short ({signal}) before it had saved everything. If it keeps a MegaMMR, that file may be incomplete.")],
     ["NODE_MEGA_SIZE", I18N.N_("Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.")],
     ["NODE_MEGA_COINS", I18N.N_("Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again.")],

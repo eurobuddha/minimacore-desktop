@@ -61,8 +61,16 @@ const SAVED_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,
 // loads without a word at the next start. So nothing is signalled while the node may still be saving: only after it has said it
 // saved, or after SILENCE with no output and no database file written. On 23 Nov 2026 the old 12 s SIGTERM cut a save and a 1.5 GB
 // MegaMMR came back as 49.1 MB. (Windows has no gentle signal: there, "SIGTERM" ends the process at once.)
-const STOP_TIMES = Object.freeze({ silenceMs: 10 * 60_000, termGraceMs: 2 * 60_000, killGraceMs: 30_000, afterSavedMs: 5_000, pollMs: 500, quitRetryMs: 2_000, noteAfterMs: 2_000 });
+const STOP_TIMES = Object.freeze({ silenceMs: 10 * 60_000, termGraceMs: 2 * 60_000, killGraceMs: 30_000, afterSavedMs: 5_000, pollMs: 500, quitRetryMs: 2_000, noteAfterMs: 2_000,
+  unansweredMs: 60_000, ceilingMs: 30 * 60_000 });
 const SAVING_NOTE = "The node is saving its data: this can take a minute or two with a MegaMMR. Do not force-quit.";
+// What a stop says while it waits, per case (0.19.430): the node has not answered `quit` and has not said it is shutting down; a node of
+// an earlier launch is waited for at a start; the wait was given up (ceilingMs) with the node still running.
+const ANSWER_NOTE = "The node has been told to stop and has not answered yet. Waiting for it: do not force-quit.";
+const reclaimNote = (pid) => "This app's node from an earlier launch is still running (pid " + pid + "). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.";
+const stillNote = (pid, min) => "The node (pid " + pid + ") has not stopped after " + min + " minutes and is still running. You can close the app: the next launch waits for this node before it starts one.";
+// The node says it has BEGUN its shutdown (core Main.shutdown's first line: "Shut down started.." / "Shut down started.. Compacting All Databases").
+const SHUT_STARTED_LINE = /^Minima @ \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2} \[[0-9.,]{1,8} (?:bytes|[ KMGTPE]B)\] : Shut down started\.\.(?: Compacting All Databases)?$/;
 const SHUTDOWN_FILE = "minimacore-shutdown.json";   // in the data folder: how the last stop ended, and the MegaMMR it left (recordStop)
 const CONT_MAX = 64;           // the most lines read as the continuation of one cut line (nodeLine)
 const LINE_MAX = 64 * 1024;   // a "line" the node never ends is cut here (it is then judged as the pieces it arrives in)
@@ -441,9 +449,16 @@ class NodeManager extends EventEmitter {
       // `quit` goes to whoever answers on the RPC port: sent only when that IS the process just identified (asked again while it is not
       // yet). Its output went to the launch that is gone, so what it writes in its databases folder is how it is seen to be saving.
       const notListening = () => Promise.reject(Object.assign(new Error("not listening"), { code: "ECONNREFUSED" }));
-      const r = await this.waitGone({ alive: () => S.alive(mine), quit: () => (S.listeners(this.rpcPort()).includes(mine) ? this.rpc("quit") : notListening()),
-        signal: (sig) => S.killPid(mine, sig), progressAt: () => this.dbTouchedAt(), savedAt: () => 0 });
-      if (r.signal) this.recordStop(r, undefined);
+      // nothing it prints can be read (no shutStartedAt): what it writes in its databases folder is its only sign of life
+      this.reclaiming = true;
+      let r;
+      try {
+        r = await this.waitGone({ alive: () => S.alive(mine), quit: () => (S.listeners(this.rpcPort()).includes(mine) ? this.rpc("quit") : notListening()),
+          signal: (sig) => S.killPid(mine, sig), progressAt: () => this.dbTouchedAt(), savedAt: () => 0,
+          saving: () => { this.stopNote = reclaimNote(mine); this.emit("status", this.snapshot()); } });
+      } finally { this.reclaiming = false; this.stopNote = ""; }
+      if (r.signal && !r.gaveUp) this.recordStop(r, undefined);
+      if (r.gaveUp) this.log("[app] this app's node from an earlier launch (pid " + mine + ") is still running after " + Math.round(this.stopTimes.ceilingMs / 60000) + " minutes: not waited for any longer, and not signalled");
       if (S.alive(mine)) return "could not stop this app's node left running by an earlier launch (pid " + mine + ")";
       this.log("[app] stopped this app's node left running by an earlier launch (pid " + mine + ")" + (r.signal ? ", with " + r.signal : ""));
     }
@@ -535,7 +550,7 @@ class NodeManager extends EventEmitter {
       this.setState("error");
       return;
     }
-    this.proc = p; this.quitSent = false; this.savedAt = 0; this.shutCmdAt = 0; this.lastOutAt = 0; this.megaChecked = false;
+    this.proc = p; this.quitSent = false; this.savedAt = 0; this.shutStartedAt = 0; this.shutCmdAt = 0; this.lastOutAt = 0; this.megaChecked = false; this.stopGaveUp = null;
     if (this.walletCheck) this.walletCheck.final = true;   // megammrsync has ended with the old process: what this node holds is the result
     this.startedTs = Date.now();
     const cfg = config.load();
@@ -585,6 +600,7 @@ class NodeManager extends EventEmitter {
     await portmap.stop();                               // bounded (<~3s); re-mapped on the next start()
     if (this.stopRun) return this.stopRun;
     if (!this.proc) { this.setState("stopped"); return; }
+    if (this.stopGaveUp === this.proc) return;          // already waited ceilingMs for this process: it is still running and said so (stillRunning)
     this.stopRun = this.stopInner().finally(() => { this.stopRun = null; });
     return this.stopRun;
   }
@@ -608,8 +624,17 @@ class NodeManager extends EventEmitter {
     const r = await this.waitGone({ alive: () => this.proc === p, quit: () => { mark(); this.quitSent = true; return this.rpc("quit").catch((e) => { if (refusedErr(e)) this.quitSent = false; throw e; }); },
       signal: (sig) => { mark(); this.quitSent = true; try { p.kill(sig); } catch (e) {} },
       progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => (from && this.savedAt > from ? this.savedAt : 0),
+      // from ANY point of the run, and a command that shuts its insides down counts too: believing it only ever makes this stop wait
+      shutStartedAt: () => this.shutStartedAt || this.shutCmdAt || 0,
       settled: () => Promise.race([closed, sleep(2_000)]),
-      saving: () => { this.stopNote = SAVING_NOTE; this.emit("status", this.snapshot()); } });
+      saving: (what) => { this.stopNote = what === "answer" ? ANSWER_NOTE : SAVING_NOTE; this.emit("status", this.snapshot()); } });
+    if (r.gaveUp && this.proc === p) {
+      // The wait is over, the node is not: nothing was signalled for it (it gives signs of life, so it may be saving). Said plainly, with
+      // its pid; the state stays "stopping" until the process ends; a Quit goes on (main.js), and the next launch waits for it (reclaimStaleNode).
+      this.stopGaveUp = p; this.stopNote = stillNote(p.pid, Math.round(this.stopTimes.ceilingMs / 60000));
+      this.log("[app] " + this.stopNote); this.emit("status", this.snapshot());
+      return;
+    }
     this.stopNote = "";
     this.recordStop(r, coins);
     if (this.proc === p) this.log("[app] the node process (pid " + p.pid + ") did not end even after SIGKILL");
@@ -619,40 +644,61 @@ class NodeManager extends EventEmitter {
   /**
    * Wait for a node process to end after it was told to quit. o = { alive(), quit() → promise, signal(sig), progressAt() → ms of
    * its last output or database write, savedAt() → ms it said it had saved SINCE this stop told it to (0: not said), settled() →
-   * its last output has been read, saving() → the wait is long enough to say so }. `quit` is sent once, and again every quitRetryMs while nothing listens (a node still booting); any other failure,
-   * a timeout above all, may be the node saving before it answers, so it is not sent again. Signals, only:
+   * its last output has been read, saving(what) → the wait is long enough to
+   * say so, with "answer" (`quit` not answered, no shutdown seen) or "saving", shutStartedAt() → ms it said its shutdown began
+   * (at any point of its run; absent: its output cannot be read) }. `quit` is sent once, and again every quitRetryMs while nothing listens
+   * (a node still booting); any other failure, a timeout above all, may be the node saving before it answers, so it is not sent again.
+   * Signals, only:
+   *  - SIGTERM unansweredMs into the stop when `quit` was never answered (0.19.430; never on Windows, where it ends the process at once):
+   *    its output can be read, `quit` failed otherwise than "nothing listens" or is still pending, and the node has not said its shutdown
+   *    began: it is not shutting down, so SIGTERM makes its own shutdown hook run the whole save (a 401, a wedged RPC thread, a reset);
+   *    or nothing ever listened on its RPC port, and there was no output and no database write for unansweredMs (a hung node).
+   *    (A node whose output cannot be read and whose RPC took `quit` without answering may be saving: it gets neither.)
+   *    This one stands in for `quit`: the wait goes on under the rules below;
    *  - SIGTERM once the node has said it has saved AND afterSavedMs have passed with no output and no database write since
    *    (megammrsync and the like save, then sit there; a megammr.mmr still being written keeps its own mtime fresh): nothing is cut;
    *  - SIGTERM after silenceMs with no output and no database write: the node is taken to be hung (this can cut a save);
-   *  - SIGKILL termGraceMs after a SIGTERM with no sign of life since; then killGraceMs more and it is given up.
+   *  - SIGKILL termGraceMs after one of those two SIGTERMs with no sign of life since; then killGraceMs more and it is given up.
+   * ceilingMs after the stop began the wait is given up with the node still running and NOTHING more signalled (gaveUp).
    * → { signal: "" | "SIGTERM" | "SIGKILL", cut: a signal was sent while the node had not both said it had saved and gone quiet, and it
    *   did not say so afterwards either (a node that was not shutting down saves in its own shutdown hook when it gets SIGTERM) }.
    */
   async waitGone(o) {
-    const T = this.stopTimes, S = this.sys, t0 = this.now();
-    let quit = "", lastTry = -Infinity, termAt = 0, killAt = 0, said = false, clean = false;
+    const T = this.stopTimes, S = this.sys, t0 = this.now(), sighted = typeof o.shutStartedAt === "function", gentle = (S.platform || process.platform) !== "win32";
+    let quit = "", lastTry = -Infinity, termAt = 0, killAt = 0, hookAt = 0, said = "", clean = false, gaveUp = false;
     while (o.alive()) {
       const now = this.now();
-      if (!quit && !termAt && o.quit && now - lastTry >= T.quitRetryMs) {
+      if (now - t0 >= T.ceilingMs) { gaveUp = true; break; }
+      if (!quit && !termAt && !hookAt && o.quit && now - lastTry >= T.quitRetryMs) {
         lastTry = now; quit = "sent";
         Promise.resolve().then(o.quit).then(() => { quit = "answered"; }, (e) => { quit = refusedErr(e) ? "" : "unanswered"; });
       }
-      if (!said && now - t0 >= T.noteAfterMs) { said = true; if (o.saving) o.saving(); }
-      const saved = o.savedAt(), progress = o.progressAt() || 0, quiet = now - Math.max(t0, progress, termAt, killAt);
+      const saved = o.savedAt(), started = sighted ? o.shutStartedAt() : 0, progress = o.progressAt() || 0, quiet = now - Math.max(t0, progress, hookAt, termAt, killAt);
+      if (o.saving && now - t0 >= T.noteAfterMs) {
+        const what = !sighted || quit === "answered" || started || saved || hookAt || termAt ? "saving" : "answer";
+        if (what !== said) { said = what; o.saving(what); }
+      }
       if (!termAt && saved && now - Math.max(t0, saved, progress) >= T.afterSavedMs) {
         termAt = now; clean = true; this.log("[app] the node has saved and has not exited by itself: SIGTERM"); o.signal("SIGTERM");
       } else if (!termAt && quiet >= T.silenceMs) {
         termAt = now; this.log("[app] the node has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes since it was told to quit: SIGTERM (it may not have saved everything)"); o.signal("SIGTERM");
+      } else if (!termAt && !hookAt && gentle && quit !== "answered" && !saved && now - t0 >= T.unansweredMs
+          && (quit ? sighted && !started : now - Math.max(t0, progress) >= T.unansweredMs)) {
+        hookAt = now; this.log("[app] the node has not answered `quit` for " + Math.round(T.unansweredMs / 1000) + " seconds and " + (quit ? "has not said it is shutting down" : "has written nothing since")
+          + ": SIGTERM (a node that is not shutting down saves everything in its own shutdown hook); it is waited for as before"); o.signal("SIGTERM");
       } else if (termAt && !killAt && quiet >= T.termGraceMs) {
         killAt = now; this.log("[app] the node did not end after SIGTERM: SIGKILL"); o.signal("SIGKILL");
       } else if (killAt && now - killAt >= T.killGraceMs) break;
       await S.sleep(T.pollMs);
     }
-    const signal = killAt ? "SIGKILL" : termAt ? "SIGTERM" : "";
+    const signal = killAt ? "SIGKILL" : termAt || hookAt ? "SIGTERM" : "";
+    if (gaveUp) return { signal, cut: false, gaveUp: true };
     if (signal && !clean && o.settled) { try { await o.settled(); } catch (e) {} }
-    return { signal, cut: !!signal && !clean && !(o.savedAt() > termAt) };
+    return { signal, cut: !!signal && !clean && !(o.savedAt() > (termAt || hookAt)) };
   }
   now() { return (this.sys.now || Date.now)(); }
+  /** A stop gave up waiting (ceilingMs) and the node process is still there: its pid, else 0. */
+  stillRunning() { return this.proc && this.stopGaveUp === this.proc ? this.proc.pid : 0; }
 
   /** The newest change in the node's databases folders (<data>/<version>/databases), in ms; 0 when there is none to read. A save writes there. */
   dbTouchedAt() {
@@ -946,7 +992,7 @@ class NodeManager extends EventEmitter {
     const kind = this.kind();
     return { state: this.state, health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
              jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || (m ? "importing" : ""))(config.load().megammrImport), megafileBanner: this.megafileBanner || null, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
-             stopNote: this.state === "stopping" ? this.stopNote : "", shutdownNotes: this.shutdownNotes.slice(),
+             stopNote: this.state === "stopping" || this.reclaiming ? this.stopNote : "", shutdownNotes: this.shutdownNotes.slice(),
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
 
@@ -978,6 +1024,9 @@ class NodeManager extends EventEmitter {
     // what follows a call-signal or greeting line that a peer's own line end cut short, up to the line carrying the
     // node's ending (parlonsNotify.unfinished). It is logged, marked, and read by nothing: no flag, no boot line, no
     // notification. (A peer who also imitates the node's ending is not caught here: plan section 11.)
+    // The node says its shutdown has begun. Read in a continuation as well: believing one only ever makes a stop WAIT (waitGone), and
+    // one missed would let a stop take a node that is saving for one that is not.
+    if (this.proc && SHUT_STARTED_LINE.test(l)) this.shutStartedAt = this.now();
     const c = this.cont[stream];
     if (c) {
       if ((c.until && c.until.test(l)) || --c.left <= 0) this.cont[stream] = null;
@@ -1063,5 +1112,5 @@ class NodeManager extends EventEmitter {
 }
 
 module.exports = new NodeManager();
-module.exports.BLOCK_BOOT_LINE = BLOCK_BOOT_LINE; module.exports.SAVED_LINE = SAVED_LINE; module.exports.SAVING_NOTE = SAVING_NOTE; module.exports.SHUTDOWN_FILE = SHUTDOWN_FILE;
+module.exports.BLOCK_BOOT_LINE = BLOCK_BOOT_LINE; module.exports.SAVED_LINE = SAVED_LINE; module.exports.SHUT_STARTED_LINE = SHUT_STARTED_LINE; module.exports.SAVING_NOTE = SAVING_NOTE; module.exports.ANSWER_NOTE = ANSWER_NOTE; module.exports.reclaimNote = reclaimNote; module.exports.stillNote = stillNote; module.exports.SHUTDOWN_FILE = SHUTDOWN_FILE;
 module.exports.MEGAMMR_BROKEN_HINT = MEGAMMR_BROKEN_HINT; module.exports.CASCADE_BROKEN_HINT = CASCADE_BROKEN_HINT;

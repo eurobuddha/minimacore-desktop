@@ -852,7 +852,7 @@ function paintMegaBar(s) {
  *  stop was cut short or the MegaMMR looks incomplete. Each sentence through MainSaid; the second kind can be put away for this node start. */
 let noteBarOff = 0;
 function paintNoteBar(s) {
-  const saving = s && s.state === "stopping" && s.stopNote ? [s.stopNote] : [], after = s && Array.isArray(s.shutdownNotes) && s.bootTs !== noteBarOff ? s.shutdownNotes : [];
+  const saving = s && s.stopNote ? [s.stopNote] : [], after = s && Array.isArray(s.shutdownNotes) && s.bootTs !== noteBarOff ? s.shutdownNotes : [];
   const lines = saving.length ? saving : after, bar = el("noteBar");
   bar.hidden = !lines.length; if (!lines.length) return;
   el("noteBarText").textContent = lines.map((l) => MainSaid.say(l)).join(" ");

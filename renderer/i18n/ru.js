@@ -5945,3 +5945,14 @@
   "Your MegaMMR looks incomplete ({size} bytes, was {was} bytes): import the MegaMMR file again.",
   "Your MegaMMR looks incomplete ({n} coins, was {m}): import the MegaMMR file again."
 ] });
+(typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "The node has been told to stop and has not answered yet. Waiting for it: do not force-quit.": "Узлу отправлена команда остановки, но он ещё не ответил. Идёт ожидание: не завершайте приложение принудительно.",
+  "This app's node from an earlier launch is still running (pid {pid}). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.": "Узел этого приложения от предыдущего запуска всё ещё работает (pid {pid}). Приложение ждёт, пока он сохранит данные и остановится, затем узел запустится: с MegaMMR это может занять минуту-две. Не завершайте приложение принудительно.",
+  "The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.": "Узел (pid {pid}) не остановился за {min} мин. и всё ещё работает. Приложение можно закрыть: при следующем запуске оно дождётся этого узла, прежде чем запускать новый.",
+  "The node is still running": "Узел всё ещё работает"
+}, { review: [
+  "The node has been told to stop and has not answered yet. Waiting for it: do not force-quit.",
+  "This app's node from an earlier launch is still running (pid {pid}). It is waited for while it saves its data and stops, then the node starts: this can take a minute or two with a MegaMMR. Do not force-quit.",
+  "The node (pid {pid}) has not stopped after {min} minutes and is still running. You can close the app: the next launch waits for this node before it starts one.",
+  "The node is still running"
+] });
