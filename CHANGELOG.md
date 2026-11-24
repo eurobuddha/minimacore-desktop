@@ -7,6 +7,11 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.333] — AtomiX tab's Send: the gas warning is built before the confirm (0.18.332 was committed with test:panels red)
+
+- 0.18.332 put the "Network gas looks abnormally high" text inside the confirm's template, which pushed "This cannot be undone" past the window scripts/panels-test.cjs reads ("the irreversible-send confirm is intact"): 0.18.332 was committed with `npm run test:panels` failing (a mistake in how the gate's result was read; every other step passed). The text is now a `gasWarn` constant built before the dialog; what the user sees is the same. Do not build or release 0.18.332.
+- Test: scripts/panels-test.cjs passes again unchanged; scripts/ethwallet-unit.js reads the constant.
+
 ## [0.18.332] — ETH: a send keeps to the fee it was reviewed at, the preview is the price the engine signs, and the AtomiX tab's Send warns of abnormal gas
 
 - Review of 0.18.329 (finding 3 i). `ethSendExecute` quoted the gas again at confirm time with nothing to compare it to: the price shown in the dialog and the price signed could differ by any amount under the 5000 gwei ceiling. The review now hands the price of each tier on (`fees[tier].wei`), the send carries the one confirmed (`mcd:ewSend`, `mcd:axSend`), and when the price at confirm time is more than 10% above it nothing is sent: "The network fee rose since you reviewed this send: … Review it again." A send with no reviewed price is refused. The engine then signs the quote that was just checked (pinned in the gas proxy), not a third one.
