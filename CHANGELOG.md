@@ -7,6 +7,14 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.439] — A "saved" line in the log is never believed by itself: the stop needs the node's own answer too
+
+- Independent review of 0.19.429–0.19.438 (MAJOR 1–3, both reproduced by the reviewer), main/node-manager.js. After `quit` is sent the node is still on the network for seconds (core shuts the network down first, writing nothing), and a peer can make it print a whole "Main Instance Cleared.." line: the stop believed it and sent SIGTERM 5 s later, before the node had saved anything (recorded as clean). A resync the node REFUSED also left its mark set for the rest of the run, so every later such line was believed.
+- "Saved" now also needs what no peer can produce: the `status:true` answer of the command that shut the node's insides down (megammrsync, restore, archive, a MegaMMR import: it answers only after its save), or, when that answer was lost, the answer of `quit`. A plain Stop or Quit uses neither: the node exits by itself. A refused command clears its mark. The record of a stop still reads the log after the app's own signal.
+- A node that said its shutdown began and then closed its RPC port is no longer sent SIGTERM after 60 s of quiet (MINOR 1): the 10-minute silence rule applies.
+- Tests: the stand-in node now has core's silent phase between "Shut down started.." and "Saving all db" and can forge inside it; two new tests, both failing on 0.19.438. Stop-path tests 18 of 18.
+- Not done from that review (minors): `-noshutdownhook` in Startup Params, callers of a stop that gave up at 30 minutes, Future Cash read-gap retries, the Dexicon script list's 5 s age, Windows `wmic`.
+
 ## [0.19.438] — The "older copy" refusal compares within one app only, and names its way back
 
 - Independent review of 0.19.428 (MINOR 12), main/writermark.js. The mark in `<data folder>/minimacore-writer.txt` (0.19.423) carried only a version. Two apps of this family pointed at one custom data folder have unrelated version numbers (0.18.x and 0.19.x): the one with the lower number was refused for good, and nothing said how to get out of a refusal.

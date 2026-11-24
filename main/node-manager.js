@@ -556,7 +556,7 @@ class NodeManager extends EventEmitter {
       this.setState("error");
       return;
     }
-    this.proc = p; this.quitSent = false; this.savedAt = 0; this.shutStartedAt = 0; this.shutCmdAt = 0; this.lastOutAt = 0; this.megaChecked = false; this.stopGaveUp = null;
+    this.proc = p; this.quitSent = false; this.savedAt = 0; this.shutStartedAt = 0; this.shutCmdAt = 0; this.shutCmdOk = false; this.lastOutAt = 0; this.megaChecked = false; this.stopGaveUp = null;
     if (this.walletCheck) this.walletCheck.final = true;   // megammrsync has ended with the old process: what this node holds is the result
     this.startedTs = Date.now();
     const cfg = config.load();
@@ -624,12 +624,20 @@ class NodeManager extends EventEmitter {
     // A "saved" line is THIS stop's only when it came after this stop first sent `quit` or a signal, or after a command that shuts the
     // node's insides down was sent (runResync: megammrsync, restore, archive, a MegaMMR import): never one from earlier in the run
     // (0.19.429: core logs a peer's failing script as it came, line ends included, so a peer can make the node print a whole such line).
-    let from = this.shutCmdAt || 0;
+    // 0.19.439 (review, MAJOR, RAN): the log alone is never believed. After `quit` is sent the node is still on the network for seconds
+    // (core shuts the network down first, in silence), and a peer's line in that window passed as "saved": SIGTERM before anything was saved.
+    // "Saved" now also needs what no peer can produce: the answer of a command that shuts the node's insides down (shutCmdOk: status true
+    // comes only after the save), or, when that answer never came, the answer of `quit` itself. A plain `quit` needs neither rule: the
+    // node exits by itself. (Left: a resync whose answer was lost AND is still saving AND stalls afterSavedMs AND a peer line in between.)
+    let from = this.shutCmdAt || 0, quitOk = false;
+    const believed = () => !!this.shutCmdAt && (this.shutCmdOk || quitOk);
     const mark = () => { if (!from) from = this.now(); };
     const closed = new Promise((res) => { try { p.once("close", res); } catch (e) { res(); } });   // its last lines are read before the stop is judged
-    const r = await this.waitGone({ alive: () => this.proc === p, quit: () => { mark(); this.quitSent = true; return this.rpc("quit").catch((e) => { if (refusedErr(e)) this.quitSent = false; throw e; }); },
+    const r = await this.waitGone({ alive: () => this.proc === p, quit: () => { mark(); this.quitSent = true; return this.rpc("quit").then((j) => { if (j && j.status === true) quitOk = true; return j; }, (e) => { if (refusedErr(e)) this.quitSent = false; throw e; }); },
       signal: (sig) => { mark(); this.quitSent = true; try { p.kill(sig); } catch (e) {} },
-      progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => (from && this.savedAt > from ? this.savedAt : 0),
+      progressAt: () => Math.max(this.lastOutAt || 0, this.dbTouchedAt()), savedAt: () => (from && believed() && this.savedAt > from ? this.savedAt : 0),
+      // for the RECORD of this stop only, never for a signal: what the log said after the app's own SIGTERM (a node saving in its shutdown hook)
+      saidSavedAt: () => (from && this.savedAt > from ? this.savedAt : 0),
       // from ANY point of the run, and a command that shuts its insides down counts too: believing it only ever makes this stop wait
       shutStartedAt: () => this.shutStartedAt || this.shutCmdAt || 0,
       settled: () => Promise.race([closed, sleep(2_000)]),
@@ -689,7 +697,7 @@ class NodeManager extends EventEmitter {
       } else if (!termAt && quiet >= T.silenceMs) {
         termAt = now; this.log("[app] the node has written nothing for " + Math.round(T.silenceMs / 60000) + " minutes since it was told to quit: SIGTERM (it may not have saved everything)"); o.signal("SIGTERM");
       } else if (!termAt && !hookAt && gentle && quit !== "answered" && !saved && now - t0 >= T.unansweredMs
-          && (quit ? sighted && !started : now - Math.max(t0, progress) >= T.unansweredMs)) {
+          && (quit ? sighted && !started : now - Math.max(t0, progress) >= T.unansweredMs && !(sighted && started))) {
         hookAt = now; this.log("[app] the node has not answered `quit` for " + Math.round(T.unansweredMs / 1000) + " seconds and " + (quit ? "has not said it is shutting down" : "has written nothing since")
           + ": SIGTERM (a node that is not shutting down saves everything in its own shutdown hook); it is waited for as before"); o.signal("SIGTERM");
       } else if (termAt && !killAt && quiet >= T.termGraceMs) {
@@ -700,7 +708,7 @@ class NodeManager extends EventEmitter {
     const signal = killAt ? "SIGKILL" : termAt || hookAt ? "SIGTERM" : "";
     if (gaveUp) return { signal, cut: false, gaveUp: true };
     if (signal && !clean && o.settled) { try { await o.settled(); } catch (e) {} }
-    return { signal, cut: !!signal && !clean && !(o.savedAt() > (termAt || hookAt)) };
+    return { signal, cut: !!signal && !clean && !((o.saidSavedAt || o.savedAt)() > (termAt || hookAt)) };
   }
   now() { return (this.sys.now || Date.now)(); }
   /** A stop gave up waiting (ceilingMs) and the node process is still there: its pid, else 0. */
@@ -884,6 +892,8 @@ class NodeManager extends EventEmitter {
         await this.start();                   // w.before known: settled by the health poll before the node is called "running"
         throw new Error("The node stopped before it answered, so the result is not known. It was started again: check the wallet and the chain before going on.");
       }
+      if (j && j.status === true) this.shutCmdOk = true;   // it answered after its save: its "saved" line is its own (stopInner)
+      else this.shutCmdAt = 0;                              // refused: nothing was shut down, and no later "saved" line is this command's (0.19.439)
       if (j && j.status === true) {
         this.acceptMegaNow("a resync, a restore or a MegaMMR import has run");   // before the stop records what the MegaMMR holds
         await this.stop();

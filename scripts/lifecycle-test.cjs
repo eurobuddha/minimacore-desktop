@@ -35,16 +35,16 @@ function fresh(times) {
   m.keyModeAlert = ""; m.proc = null; m.state = "stopped"; m.stopRun = null; m.shutdownNotes = []; m.logs = [];
 }
 /** A start of node-manager whose "java" is the stand-in: argv after the script = the stand-in's own (saveMs, pieces, quiet, hang, forge). */
-async function startStandin(saveMs, pieces, quiet, hang, forge, chatter) {
+async function startStandin(saveMs, pieces, quiet, hang, forge, chatter, gap) {
   const seen = { lines: "", quits: 0, statuses: [] };
-  m.spawnFn = (_cmd, _args, opts) => { const c = spawn(process.execPath, [STANDIN, dataDir(), String(saveMs), String(pieces), quiet ? "1" : "0", hang ? "1" : "0", "0", forge || "", String(chatter || 0)], opts); children.push(c); seen.child = c;
+  m.spawnFn = (_cmd, _args, opts) => { const c = spawn(process.execPath, [STANDIN, dataDir(), String(saveMs), String(pieces), quiet ? "1" : "0", hang ? "1" : "0", "0", forge || "", String(chatter || 0), String(gap || 0)], opts); children.push(c); seen.child = c;
     c.stdout.on("data", (d) => { seen.lines += d; }); c.on("exit", (code, sig) => { seen.exit = { code, sig }; }); return c; };
   m.startHealth = () => {}; m.reclaimStaleNode = async () => "";
   // `quit` over RPC: the node runs its whole shutdown, then answers (the stand-in is told by SIGUSR2)
   m.rpc = async (c) => {
     if (c !== "quit") throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
     seen.quits++; seen.child.kill("SIGUSR2");
-    return new Promise((res) => { const done = () => res({ status: true, response: { message: "Shutdown complete" } }); seen.child.stdout.on("data", (d) => { if (/Shut down completed OK/.test(d)) done(); }); seen.child.on("exit", done); });
+    return new Promise((res) => { const done = () => res({ status: true, response: { message: "Shutdown complete" } }); seen.child.stdout.on("data", (d) => { if (/Shut down completed OK|Shutdown called when already shutting down/.test(d)) done(); }); /* core answers at once when it is already shut down */ seen.child.on("exit", done); });
   };
   const onStatus = (s) => seen.statuses.push(s); m.on("status", onStatus); seen.off = () => m.off("status", onStatus);
   await m.start();
@@ -131,6 +131,37 @@ test("a \"saved\" line printed while megammr.mmr is still being written for 20 s
     assert.deepEqual(s.exit, { code: 0, sig: null });
     assert.ok(!m.logs.some((l) => /SIGTERM|SIGKILL/.test(l) && /^\[app\]/.test(l)), "no signal");
     assert.equal(record().cut, null);
+  } finally { s.off(); restore(); }
+});
+
+// 0.19.439 (review, MAJOR, RAN): the node stays on the network for seconds after `quit` (core shuts the network down first, writing
+// nothing), and a peer's "saved" line in that phase was believed: SIGTERM afterSavedMs later, before "Saving all db" (exit 143, "clean").
+test("a \"saved\" line printed AFTER `quit`, in the silent phase before the save begins, is not believed: no signal, the save is whole", { timeout: 60_000 }, async () => {
+  fresh({ silenceMs: 30_000, afterSavedMs: 300 });
+  const s = await startStandin(1_000, 4, true, false, "gap", 0, 2_000);
+  try {
+    await m.stop();
+    assert.match(s.lines, /Shut down started\.\.\n[^\n]*Script FAIL input:0 RETURN FALSE \/\*\nMinima @ [^\n]* : Main Instance Cleared\.\.\n\*\/\n[^\n]*Saving all db/, "the forged line came after `quit` and before the save");
+    assert.deepEqual(s.exit, { code: 0, sig: null }, "the node exited by itself");
+    assert.equal(size(), 4 * PIECE, "megammr.mmr is whole");
+    assert.ok(!m.logs.some((l) => /SIGTERM|SIGKILL/.test(l) && /^\[app\]/.test(l)), "no signal");
+    assert.equal(record().cut, null);
+  } finally { s.off(); restore(); }
+});
+
+// 0.19.439 (review, MAJOR, RAN): a REFUSED resync left shutCmdAt set for the rest of the run, so every later "saved" line was believed.
+test("a refused megammrsync marks nothing: a peer's \"saved\" line after it does not make the next stop signal", { timeout: 60_000 }, async () => {
+  fresh({ silenceMs: 30_000, afterSavedMs: 300 });
+  const s = await startStandin(3_000, 6, true, false, "");
+  try {
+    const quit = m.rpc; m.rpc = async (c) => (/^megammrsync /.test(c) ? { status: false, error: "Could not connect" } : quit(c));
+    await m.runResync("megammrsync host:127.0.0.1:9").catch(() => {});
+    assert.equal(m.shutCmdAt, 0, "a refused command shut nothing down"); assert.equal(m.shutCmdOk, false);
+    m.nodeLine("Minima @ 01/01/2026 00:00:00 [1.0 MB] : Main Instance Cleared..");   // the peer's line, read as a node line
+    assert.ok(m.savedAt > 0);
+    await m.stop();
+    assert.deepEqual(s.exit, { code: 0, sig: null }, "the node exited by itself"); assert.equal(size(), 6 * PIECE, "megammr.mmr is whole");
+    assert.ok(!m.logs.some((l) => /SIGTERM|SIGKILL/.test(l) && /^\[app\]/.test(l)), "no signal");
   } finally { s.off(); restore(); }
 });
 
