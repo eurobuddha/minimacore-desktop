@@ -7,6 +7,13 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.19.443] — Chat: photos that cannot be fetched no longer hold up every other command ("Send failed: RPC timeout")
+
+- Owner, 24 Nov 2026, on 0.19.442: in a chat thread whose photos could not be fetched (their sender's device was off), sending a message failed with "RPC timeout", and the node's `status` did not answer either. Measured: each such photo holds one node command for 30 s (`keets action:fetch` waiting for a peer), the thread screen asked for every photo again at each redraw, and the Parlons Node answers only two commands at a time (its admin RPC has two worker threads). Two fetches in flight held both, and every other command of the app, the chat send, a balance, a trading engine's read, waited behind them until its own 30 s ran out.
+- main/chat.js `fetchMedia`: one photo is fetched at the node at a time, so one of the two places always stays free; a photo is asked for once however often the screen wants it; and a photo that could not be fetched is not asked for again for 2 minutes, then 4, up to 30.
+- Not a fault of Chat only: the same would have happened in any Keets setting with the sender offline. Not changed: the Parlons Node's two worker threads (the node jar is as in 0.19.441).
+- Test: scripts/chatfiles-test.cjs (fails on 0.19.442: two fetches in flight).
+
 ## [0.19.442] — Keets setting: an old stored flag no longer stops the node, and the three options stay after a save
 
 - Independent review of 0.19.441 (no critical; the jars and the sidecar verified to the byte; two major, in the app).

@@ -334,8 +334,35 @@ function mediaDir() {
   fs.mkdirSync(d, { recursive: true });
   return d;
 }
+// 0.19.443 (owner, 24 Nov 2026: "Send failed: RPC timeout" in a thread whose photos could not be fetched). A photo whose
+// host is offline takes the node 30 s to give up on, the thread screen asked for each of its photos again at every redraw,
+// and the Parlons Node answers only TWO commands at a time: two fetches in flight held both, and every other command of
+// the app (a chat send, the balance, a trading engine's read) waited behind them until its own time ran out.
+// So: ONE fetch at the node at a time (the other place stays free), one request per photo however often it is asked
+// for, and a photo that could not be fetched is not asked for again for a while (2 minutes, doubling to 30).
+const MEDIA_RETRY_MS = 2 * 60 * 1000, MEDIA_RETRY_MAX_MS = 30 * 60 * 1000;
+const mediaInFlight = new Map(), mediaFailed = new Map();
+let mediaQueue = Promise.resolve();
+const mediaNow = () => Date.now();
 /** Fetch a keets:// photo (disk-cached) and return it as a data url for the renderer. */
-async function fetchMedia(ref) {
+function fetchMedia(ref) {
+  if (typeof ref === "string" && mediaInFlight.has(ref)) return mediaInFlight.get(ref);
+  const failed = typeof ref === "string" ? mediaFailed.get(ref) : null;
+  if (failed && module.exports.mediaNow() < failed.until) return Promise.reject(new Error("This photo could not be fetched just now (its sender may be offline). It is tried again later."));
+  const run = mediaQueue.then(() => fetchMediaNow(ref));
+  mediaQueue = run.then(() => {}, () => {});   // the next one starts when this one has ended, whatever its end
+  const p = run.then((v) => { mediaFailed.delete(ref); return v; }, (e) => {
+    if (typeof ref === "string" && !/^bad media ref$/.test(String(e && e.message))) {
+      const wait = Math.min(MEDIA_RETRY_MAX_MS, failed ? failed.wait * 2 : MEDIA_RETRY_MS);
+      mediaFailed.set(ref, { until: module.exports.mediaNow() + wait, wait });
+      if (mediaFailed.size > 2000) mediaFailed.delete(mediaFailed.keys().next().value);
+    }
+    throw e;
+  }).finally(() => { mediaInFlight.delete(ref); });
+  if (typeof ref === "string") mediaInFlight.set(ref, p);
+  return p;
+}
+async function fetchMediaNow(ref) {
   // An inbound ref is attacker-adjacent data: no whitespace (would inject
   // command params) and the extension comes from an ALLOWLIST match, never a
   // raw slice (a crafted "extension" with ../ walked out of mediaDir).
@@ -502,6 +529,6 @@ function status() { return { running: !!pollTimer, pubkey: myinfo ? myinfo.pubke
 
 module.exports = { emitter, init, myIdentity, setName, startLoop, stopLoop, pollOnce, send,
   threads, thread, addContact, renameContact, removeContact, unreadCount, status, _setRunner, _setFileEngine,
-  fetchMedia, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity,
+  fetchMedia, mediaNow, sendImageFile, sendPayment, requestPayAddr, payAddrOf, forgetIdentity,
   sendVoice, clearThread, deleteMessage, contacts,
   fileSend, fileOffer, fileRun, filePause, fileStatus, fileTransfers, fileRemove, fileKeep, fileShareAgain, fileSave };

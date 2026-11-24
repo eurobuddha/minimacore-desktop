@@ -775,3 +775,42 @@ test("0.19.238: Chat payments: the node checks the address first; 0 is refused; 
   mode = "ok"; sent.length = 0;
   await chat.sendPayment(PEER, "2", "minima"); assert.ok(sent.indexOf(sent.find(c => c.startsWith("checkaddress"))) < sent.indexOf(sent.find(c => c.startsWith("send "))), "checked before it is sent");
 });
+
+// 0.19.443 (owner, 24 Nov 2026: "Send failed: RPC timeout" in a thread whose photos could not be fetched). Each such
+// photo holds a node command for 30 s, the thread asked for every photo again at each redraw, and the Parlons Node
+// answers two commands at a time: every other command of the app waited behind the fetches.
+test("0.19.443: photos are fetched ONE at a time, the same photo is asked for once, and a photo that failed is left alone for a while", async () => {
+  const chat = loadChat();
+  const ref = (n) => "keets://" + "ab".repeat(32) + "/chat/img-443-" + n + ".jpg";
+  let inFlight = 0, most = 0, started = 0; const releases = [];
+  chat._setRunner((cmd) => new Promise((res) => {
+    started++; inFlight++; most = Math.max(most, inFlight);
+    releases.push((ok) => { inFlight--; if (ok) fs.writeFileSync(cmd.split(" file:")[1].replace(/^"|"$/g, ""), Buffer.from("jpeg")); res(ok ? { status: true, response: {} } : { status: false, error: "media unavailable — no reachable peer completed the request in time" }); });
+  }));
+  const tick = () => new Promise((r) => setImmediate(r));
+  let now = 1_000_000; const realNow = chat.mediaNow; chat.mediaNow = () => now;
+  try {
+    // five photos of one thread, each asked for twice (a redraw): one command at the node, five in all
+    const asks = [1, 2, 3, 4, 5].flatMap((n) => [chat.fetchMedia(ref(n)), chat.fetchMedia(ref(n))]).map((p) => p.then(() => "ok", (e) => String(e.message)));
+    await tick(); await tick();
+    assert.equal(started, 1, "the second waits for the first");
+    for (let i = 0; i < 5; i++) { await tick(); await tick(); assert.equal(inFlight, 1, "one at the node"); releases[i](i !== 1); await tick(); await tick(); await tick(); }
+    const ends = await Promise.all(asks);
+    assert.equal(most, 1, "never two fetches in flight: the Parlons Node keeps a place for every other command");
+    assert.equal(started, 5, "one request per photo, however often it is asked for");
+    assert.deepEqual(ends.filter((x) => x === "ok").length, 8); assert.match(ends[2], /no reachable peer/); assert.equal(ends[2], ends[3]);
+    // the photo that failed is not asked for again at the next redraw …
+    await assert.rejects(chat.fetchMedia(ref(2)), /could not be fetched just now/);
+    assert.equal(started, 5, "nothing was sent to the node for it");
+    // … but it is after a while, and a second failure waits twice as long
+    now += 2 * 60 * 1000 + 1;
+    const again = chat.fetchMedia(ref(2)).catch((e) => String(e.message)); await tick(); await tick();
+    assert.equal(started, 6); releases[5](false); assert.match(await again, /no reachable peer/);
+    now += 2 * 60 * 1000 + 1; await assert.rejects(chat.fetchMedia(ref(2)), /could not be fetched just now/);
+    now += 2 * 60 * 1000 + 1; const third = chat.fetchMedia(ref(2)); await tick(); await tick(); releases[6](true);
+    assert.match(await third, /^data:image\/jpeg;base64,/, "and it is shown once its sender is back");
+    assert.match(await chat.fetchMedia(ref(1)), /^data:image\/jpeg/, "a fetched photo comes from the disk: no command");
+    assert.equal(started, 7);
+    await assert.rejects(chat.fetchMedia("keets://ab;quit"), /bad media ref/);
+  } finally { chat.mediaNow = realNow; }
+});
