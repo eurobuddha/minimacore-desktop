@@ -153,9 +153,6 @@ async function boot() {
   api.onEthWallet(onEthWalletUpdate);
   api.onShop(onShopUpdate);
   api.onVestr(onVestrUpdate);
-  // P2P Chance settle-only mode (0.18.330): the open dialog follows the chain; the removal notice is asked for once the window is up
-  api.onCasinoSettle(() => { if (el("csOv") && !csBusy) csRender(); });
-  api.casinoNotice().then(n => { if (n) showCasinoNotice(n); }).catch(() => {});
   api.onWebWallet(onWebWalletUpdate);
 
   // KeetChat rides the keets transport, which both node kinds run (0.18.17+).
@@ -2068,12 +2065,7 @@ async function renderSettings() {
     <div class="card"><div class="card__title">Open at login</div>
       <div class="view__desc">Start minimaCore — and so your node — when you log in to this computer. It opens to the tray on Mac. Uses the OS login items on Mac and Windows and the autostart folder on Linux.</div>
       <button class="btn btn--outline btn--full" id="setAutostart">${CFG.openAtLogin ? "Stop opening at login" : "Open at login"}</button>
-    </div>
-    <div class="card"><div class="card__title">P2P Chance was removed: your open offers and bets</div>
-      <div class="view__desc">P2P Chance was removed to fix a security problem. Nothing new can be bet here. Offers and bets you still have on chain can be cancelled and settled from this list.</div>
-      <button class="btn btn--outline btn--full" id="setCasinoSettle">Show my open offers and bets</button>
     </div>`;
-  el("setCasinoSettle").onclick = openCasinoSettle;
   el("setAddr").onclick = () => copy(fullAddr);
   el("faucetMine").onclick = async () => { const a = await tryCmd("getaddress"); if (a) el("faucetAddr").value = a.miniaddress || a.address || ""; };
   el("faucetGo").onclick = async () => {
@@ -3133,84 +3125,6 @@ function shopResizeImage(file) {
   });
 }
 
-
-// ============================ P2P Chance: settle-only (0.18.330) ============================
-// The casino was removed in 0.18.318. What is left is one plain dialog: this wallet's coins at the contract, Cancel offer /
-// Settle now, and "Cancel all my open offers". main/casino-settle.js decides everything; this only shows it. Every id is whole
-// and copies on a click (idHtml); results are written in the dialog itself (a toast sits under an open dialog).
-function showCasinoNotice(n) {
-  if (el("cnOv")) return;
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="cnOv"><div class="modal modal--wide">
-    <div class="modal__title">${esc(n.message)}</div>
-    <div class="view__desc" style="white-space:pre-wrap;user-select:text">${esc(n.detail)}</div>
-    <div class="view__sub">The P2P Chance contract (click to copy)</div><div class="kv__v" style="text-align:left">${idHtml(n.contract)}</div>
-    <div class="view__sub">Terminal command that lists your coins there (click to copy)</div><div class="kv__v" style="text-align:left">${idHtml(n.command)}</div>
-    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="cnOk">OK</button><button class="btn btn--primary btn--full" id="cnOpen">Show my open offers and bets</button></div></div></div>`);
-  const done = (open) => { const o = el("cnOv"); if (o) o.remove(); api.casinoNoticeSeen().catch(() => {}); if (open) openCasinoSettle(); };   // read only when dismissed
-  el("cnOk").onclick = () => done(false); el("cnOpen").onclick = () => done(true);
-}
-const CS_PHASE = ["Open offer (nobody has taken it)", "Taken bet (the house has not revealed yet)", "Revealed bet (not paid out yet)"];
-let csBusy = false;
-function openCasinoSettle() {
-  if (el("csOv")) return;
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="csOv"><div class="modal modal--wide">
-    <div class="modal__title">P2P Chance was removed: your open offers and bets</div>
-    <div class="view__desc">Nothing new can be bet here. While this app is open and the node runs, it reveals for your taken offers, collects bets you won and claims pots the other side let time out, by itself. It does not cancel an open offer by itself: do that here.</div>
-    <div id="csMsg" class="view__desc" style="white-space:pre-wrap;user-select:text;overflow-wrap:anywhere"></div>
-    <div id="csBody"><div class="view__desc">Reading the node…</div></div>
-    <div class="seg" style="margin-top:12px"><button class="btn btn--outline btn--full" id="csRefresh">Refresh</button><button class="btn btn--outline btn--full" id="csClose">Close</button></div></div></div>`);
-  el("csClose").onclick = () => el("csOv").remove();
-  el("csRefresh").onclick = csRender;
-  el("csBody").onclick = csClick;
-  csRender();
-}
-function csSay(text, kind) { const m = el("csMsg"); if (!m) return; m.textContent = text; m.style.color = kind === "err" ? "var(--red)" : kind === "warn" ? "var(--amber)" : kind === "ok" ? "var(--green)" : ""; }
-async function csRender() {
-  if (!el("csBody")) return;
-  let r; try { r = await api.casinoSettleList(); } catch (e) { r = { ok: false, error: ipcMsg(e), rows: [] }; }
-  const body = el("csBody"); if (!body) return;
-  const contract = r.contract ? `<div class="view__sub">The P2P Chance contract</div><div class="kv__v" style="text-align:left">${idHtml(r.contract)}</div>` : "";
-  if (!r.ok) { body.innerHTML = `<div class="card card--amber"><div class="view__desc">${esc(r.error || "The node could not be read.")}</div></div>` + contract; return; }
-  const dis = csBusy ? " disabled" : "";
-  const rowHtml = (x) => {
-    const btn = x.held ? "" : x.action === "cancel" ? `<button class="btn btn--danger btn--full" data-cs="${esc(x.coinid)}"${dis}>Cancel offer</button>`
-      : (x.action || x.manualOk) ? `<button class="btn btn--primary btn--full" data-cs="${esc(x.coinid)}"${dis}>Settle now</button>` : "";
-    return `<div class="card${x.problem ? " card--amber" : ""}">
-      <div class="card__title">${esc(x.phase == null ? "A coin this app cannot read" : CS_PHASE[x.phase])}</div>
-      <div class="kv"><span class="kv__k">Your side</span><span class="kv__v">${esc(x.role)}</span></div>
-      ${x.amount ? `<div class="kv"><span class="kv__k">Amount</span><span class="kv__v">${esc(x.amount)}</span></div>
-      <div class="kv"><span class="kv__k">Token</span><span class="kv__v">${x.token === x.tokenid ? idHtml(x.tokenid) : esc(x.token)}</span></div>` : ""}
-      ${x.blocksLeft != null ? `<div class="kv"><span class="kv__k">Blocks left ${esc(x.leftFor)}</span><span class="kv__v${x.blocksLeft < 200 ? " kv__v--amber" : ""}">${esc(x.blocksLeft)}</span></div>` : ""}
-      <div class="kv"><span class="kv__k">Coin id</span><span class="kv__v">${idHtml(x.coinid)}</span></div>
-      ${x.problem ? `<div class="view__desc">Not settled automatically: ${esc(x.problem)}.</div>` : ""}${x.note ? `<div class="view__desc">${esc(x.note)}</div>` : ""}${btn}</div>`;
-  };
-  const offers = r.offers, good = r.rows.filter(x => !x.problem), odd = r.rows.filter(x => x.problem);
-  body.innerHTML =
-    (offers ? `<div class="card card--amber"><div class="card__title">You have ${offers} open offer${offers === 1 ? "" : "s"}</div>
-      <div class="view__desc">Anyone can take an open offer at any time, and nothing renews or watches it while this app is closed. Cancelling returns the stake to this wallet.</div>
-      <button class="btn btn--danger btn--full" id="csCancelAll"${dis}>Cancel all my open offers</button></div>` : "") +
-    (r.auto && r.auto.reached ? `<div class="card card--amber"><div class="card__title">The automatic limit is reached</div>
-      <div class="view__desc">This app signed ${esc(r.auto.usedToday)} P2P Chance transactions by itself in the last 24 hours (the limit is ${esc(r.auto.perDay)}). It signs no more by itself until that number falls. Each signature uses up a little of a wallet key, so the number is limited. The buttons below still work.</div></div>` : "") +
-    (r.coins ? "" : `<div class="card"><div class="view__desc">This wallet has no coin at the P2P Chance contract (block ${esc(r.tip)}). Nothing to cancel or settle.</div></div>`) +
-    good.map(rowHtml).join("") +
-    (odd.length ? `<div class="view__sub">Not settled automatically (${odd.length})</div>` + odd.map(rowHtml).join("") : "") +
-    (r.more ? `<div class="card card--amber"><div class="view__desc">${esc(r.more)} more coin${r.more === 1 ? "" : "s"} at the contract that name a key of this wallet ${r.more === 1 ? "is" : "are"} not shown (${esc(r.coins)} in all; the ${esc(r.rows.length)} shown are the ones that can be acted on first, the largest first). Anyone can send a coin there with this wallet's public key in it.</div></div>` : "") + contract;
-}
-async function csClick(e) {
-  const one = e.target.closest && e.target.closest("[data-cs]"), all = e.target.id === "csCancelAll";
-  if ((!one && !all) || csBusy) return;
-  csBusy = true; el("csBody").querySelectorAll("button").forEach(b => { b.disabled = true; });
-  csSay("Sending to the node. Keep the app open…", "");
-  try {
-    if (one) { const r = await api.casinoSettleOne(one.dataset.cs); csSay(r.message, r.unknown ? "warn" : "ok"); }
-    else {
-      const r = await api.casinoSettleCancelAll();
-      const lines = r.done.map(d => d.message).concat(r.failed.map(f => "Not cancelled: coin " + f.coinid + ": " + f.error));
-      csSay(lines.length ? lines.join("\n") : "There was no open offer to cancel.", r.failed.length ? "err" : r.done.some(d => d.unknown) ? "warn" : "ok");
-    }
-  } catch (err) { csSay(ipcMsg(err), "err"); }
-  csBusy = false; csRender();
-}
 
 // ============================ Vestr (token vesting — shared covenant 0x3C432D5099AB27EA901079EF54D9A97AB4DB3BD1CFFF670296C31B7C83C1C8BE) ============================
 // Reproduces the MDS 1.8.1 / native Vestr: lock a token amount to a beneficiary, released linearly start→end,

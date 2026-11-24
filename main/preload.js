@@ -230,14 +230,6 @@ contextBridge.exposeInMainWorld("mcd", {
   onEthWallet: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:ethwallet", h); return () => ipcRenderer.removeListener("mcd:ethwallet", h); },
 
 
-  // P2P Chance settle-only mode (0.18.330): list, cancel, settle. No bet, offer or take channel exists.
-  casinoNotice: () => ipcRenderer.invoke("mcd:casinoNotice"),
-  casinoNoticeSeen: () => ipcRenderer.invoke("mcd:casinoNoticeSeen"),
-  casinoSettleList: () => ipcRenderer.invoke("mcd:casinoSettleList"),
-  casinoSettleOne: (coinid) => ipcRenderer.invoke("mcd:casinoSettleOne", coinid),
-  casinoSettleCancelAll: () => ipcRenderer.invoke("mcd:casinoSettleCancelAll"),
-  onCasinoSettle: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:casinoSettle", h); return () => ipcRenderer.removeListener("mcd:casinoSettle", h); },
-
   // Vestr (token vesting)
   vestrStatus: () => ipcRenderer.invoke("mcd:vestrStatus"),
   vestrList: () => ipcRenderer.invoke("mcd:vestrList"),

@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.341] — P2P Chance: the settle-only mode is taken out again; the casino is simply removed
+
+- Owner, 24 Nov 2026: "remove casino from minimaCore Desktop". 0.18.330–0.18.340 had added a settle-only mode (a dialog that cancelled, revealed, settled and claimed a wallet's open offers and bets at the removed casino's contract, signing by itself). Its review found it not safe to ship, and its hardening was never finished. It is removed: main/casino-settle.js, its tests, its window and its IPC channels are gone, and the app is back to the plain removal of 0.18.318 with its one-time notice.
+- What that means for a wallet with something open at the contract 0xD65ADBBB7AB5032D794B02CF5E8814C720BE3C9562CC6C07081DE41CCA665A6F: this app does nothing with it. An untaken offer has no deadline and only its owner's key can cancel it; cancel open offers BEFORE updating, in the version that still has P2P Chance. On 23 Nov 2026 the contract held three untaken offers (65 MINIMA in all) and no live bet.
+- Every other change of 0.18.331–0.18.335 stays.
+
 ## [0.18.340] — P2P Chance settle mode: the scan sees old coins, and a flood of forged coins costs a bounded amount of work
 
 - Review of 0.18.330 (MINORS 7 and 8).
