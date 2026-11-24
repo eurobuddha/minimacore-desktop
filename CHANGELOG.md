@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## [0.18.339] — P2P Chance settle mode: the house secret is not revealed for a take that is less than 5 blocks deep
+
+- Review of 0.18.330 (MAJOR 5). The reveal was posted in the block pass that first saw the take (coin age 0). A taker with mining weight could publish a take, read the house secret from the reveal, and replace that block with a take carrying the pick the secret makes win.
+- The reveal now waits until the taken coin is **5 blocks old** (`REVEAL_MIN_AGE`; the timeout of this app's offers is 1500, so it costs nothing). For a bet with a timeout under 10 it waits half the timeout, so a bet is never lost by waiting. Until then the row says "Taken N blocks ago. The house secret is revealed when the take is 5 blocks deep: a block this new can still be replaced by one with another pick.", and no button reveals it. Order and limits are unchanged.
+- Test: nothing is signed at ages 0 to 4, the click is refused, the reveal is sent at age 5; timeouts 7, 3 and 1 reveal at ages 3, 1 and 0. Fails on 0.18.338 (revealed at age 0).
+
 ## [0.18.338] — P2P Chance settle mode: a take the contract lets the house reveal is revealed, whatever the taker wrote in states 8-11
 
 - Review of 0.18.330 (MAJOR 4). The contract's take does not check states 8, 9 and 10, and the reveal must copy states 7-11 so that `SAMESTATE` finds them equal. The module copied only hex up to 64 bytes and plain numbers up to 30 digits: a taker who wrote 65-byte hex, `-1`, `TRUE` or `[x]` in state 9 or 10 was never revealed, and took the pot at the timeout.

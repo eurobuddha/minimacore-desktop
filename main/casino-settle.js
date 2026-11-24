@@ -80,6 +80,7 @@ const AUTO_PER_DAY = 24;      // automatic signatures in any 24 hours
 const CLAIMS_PER_DAY = 12;    // of those, timeout claims stop here: the rest is kept for reveals and payouts, which have a deadline
 const DAY_MS = 86400000;
 const MANUAL_SWEEP = 50;      // "Cancel all": offers cancelled by one click
+const REVEAL_MIN_AGE = 5;         // blocks a take must be deep before its secret is revealed (the timeout of this app's offers is 1500)
 const HOLD_AGE = 1200;            // a bet whose reveal waits for an open offer to be cancelled is revealed anyway at this age
 const REVEAL_ANYWAY_LEFT = 300;   // … or, when the offer has the bet's own terms, when this many blocks are left
 
@@ -377,6 +378,11 @@ async function judge(coin, ctx, manual) {
       row.warn = "An open offer of this wallet with the same secret was not cancelled (coin " + open.coinid + "). This bet is revealed anyway: not revealing loses its pot for certain. Revealing shows that offer's secret: cancel that offer now.";
     }
     if (stake === "0" && !manual) return bad("this wallet has no stake in it (the pot is the player's own bet): it is not revealed automatically", true);
+    // NOT AT ONCE (0.18.339): the reveal shows the secret. A take that is only a block or two deep can still be replaced, by a
+    // taker with mining weight, with a take that carries the pick the secret makes win. The reveal waits until the take is
+    // REVEAL_MIN_AGE blocks deep (half the timeout when that is less: a bet with a very short timeout must not be lost by waiting).
+    { const half = BigInt(to.split(".")[0]) / 2n, deep = half < BigInt(REVEAL_MIN_AGE) ? Number(half) : REVEAL_MIN_AGE;
+      if (row.age < deep) { row.note = "Taken " + row.age + " block" + (row.age === 1 ? "" : "s") + " ago. The house secret is revealed when the take is " + deep + " blocks deep: a block this new can still be replaced by one with another pick."; return row; } }
     row.action = "reveal"; row.auto = true;
     row.plan = Object.assign({ kind: "reveal", key: k0, secret, states: [0, 1, 2, 3, 4, 5].map(n => [n, st.get(n)]).concat([[6, "2"]], [7, 8, 9, 10, 11].map(n => [n, st.get(n)])) }, base);
     if (!row.held) row.note = row.warn || "Taken: the house secret is to be revealed so the bet can be settled.";
@@ -561,6 +567,6 @@ function stopLoop() { if (pollTimer) { clearInterval(pollTimer); pollTimer = nul
 function invalidate() { known = new Set(); strangers = new Set(); secretCache.clear(); lastTip = null; }
 
 module.exports = {
-  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY, HOLD_AGE, REVEAL_ANYWAY_LEFT,
+  emitter, list, settle, cancelAll, pass, startLoop, stopLoop, invalidate, CONTRACT, SCRIPT, MXUSD_TOKENID, REPOST_AFTER, AUTO_TRIES, AUTO_PER_PASS, AUTO_PER_DAY, CLAIMS_PER_DAY, HOLD_AGE, REVEAL_ANYWAY_LEFT, REVEAL_MIN_AGE,
   _setClock: (fn) => { now = fn; }, _setRunner: (fn) => { runner0 = fn; }, _setSecrets: (fn) => { readSecret = fn; secretCache.clear(); }, _setStore: (s) => { store = s; }, _judge: judge, _run: run, _takerValue: takerValue
 };

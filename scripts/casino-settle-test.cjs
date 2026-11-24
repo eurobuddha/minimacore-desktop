@@ -517,14 +517,14 @@ test("600 forged coins that ARE claimable: at most 4 signatures a pass, 12 claim
   assert.ok(n.verdicts.every(Boolean), "everything signed was valid"); assert.equal(real.spent, true);
   const l = await S.list(); assert.deepEqual([l.auto.perCoin, l.auto.perPass, l.auto.perDay, l.auto.usedToday, l.auto.reached], [TRIES, PER_PASS, PER_DAY, CLAIMS_DAY, false]);
   // a taken offer that turns up later the same day still gets its signature
-  const late = coin(n, 2, "0.14", taken(), { created: n.tip - 3 });
+  const late = coin(n, 2, "0.14", taken(), { created: n.tip - 6 });
   assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", late.coinid]]);
   n.clock += 86400000; await S.pass(); assert.equal(signs(n), CLAIMS_DAY + 1 + PER_PASS, "a day later the claims go on");
   clean(n);
 });
 
 test("the day's limit: 24 automatic signatures in 24 hours, then none until the oldest is a day old; the list says the limit is reached", async () => {
-  const n = standin(); for (let i = 0; i < 40; i++) coin(n, 100 + i, "0.000002", taken({ 5: "0.000001" }), { created: 5000 - 3 });   // 40 forged, VALID reveals of one old commit
+  const n = standin(); for (let i = 0; i < 40; i++) coin(n, 100 + i, "0.000002", taken({ 5: "0.000001" }), { created: 5000 - 6 });   // 40 forged, VALID reveals of one old commit
   use(n, houseSecret);
   for (let b = 0; b < 12; b++) { await S.pass(); n.mine(); }
   assert.equal(signs(n), PER_DAY); assert.ok(n.verdicts.every(Boolean));
@@ -648,6 +648,26 @@ test("what cannot be copied is not signed for, and the row says exactly why: sta
   // the stand-in's contract agrees about state 8: revealed, such a bet is paid to nobody (so a reveal would only spend a signature and show the secret)
   const dead = { coinid: cid(1), tokenid: "0x00", value: "0.14", st: revealed({ 8: "-1" }) };
   for (const key of [K1, XK]) assert.equal(covenant(dead, { outputs: [{ amount: "0.14", address: ADDR1, tokenid: "0x00", storestate: false }], state: { 13: PS }, signed: [up(key)] }, 99999), false);
+});
+
+// 0.18.339 (review of 0.18.330, MAJOR 5): the reveal was posted at coin age 0. A taker with mining weight publishes a take, reads the
+// secret from the reveal, and replaces that block with a take that carries the winning pick.
+test("the reveal waits until the take is 5 blocks deep (half the timeout when that is less); no click reveals earlier", async () => {
+  const n = standin(), c = coin(n, 1, "0.14", taken(), { created: 5000 }); use(n, houseSecret);
+  for (let age = 0; age < 5; age++) {
+    assert.deepEqual(await S.pass(), { done: [], failed: [] }, "age " + age); assert.equal(leaked(n), false);
+    const row = (await S.list()).rows[0]; assert.deepEqual([row.action, row.problem, row.blocksLeft], [null, "", 1501 - age]);
+    assert.equal(row.note, "Taken " + age + " block" + (age === 1 ? "" : "s") + " ago. The house secret is revealed when the take is 5 blocks deep: a block this new can still be replaced by one with another pick.");
+    await assert.rejects(S.settle(c.coinid), /is revealed when the take is 5 blocks deep.* Nothing was sent\./); n.tip += 1;
+  }
+  assert.equal(signs(n), 0);
+  assert.deepEqual((await S.pass()).done.map(d => [d.action, d.coinid]), [["reveal", c.coinid]], "at age 5"); n.mine(); assert.deepEqual(n.verdicts, [true]);
+  assert.equal(S.REVEAL_MIN_AGE, 5);
+  for (const [to, deep] of [["7", 3], ["3", 1], ["1", 0], ["10", 5], ["1500", 5]]) {   // a short timeout: half of it, so the bet is not lost by waiting
+    const m = standin(), x = coin(m, 1, "0.14", taken({ 7: to }), { created: 5000 }); use(m, houseSecret);
+    for (let age = 0; age < deep; age++) { assert.deepEqual(await S.pass(), { done: [], failed: [] }, "timeout " + to + " age " + age); m.tip += 1; }
+    assert.deepEqual((await S.pass()).done.map(d => d.coinid), [x.coinid], "timeout " + to + ": revealed at age " + deep); m.mine(); assert.deepEqual(m.verdicts, [true]);
+  }
 });
 
 test("the window: one dialog from the notice and from Settings, ids copyable, Cancel offer / Settle now / Cancel all; no bet, offer or take channel", () => {
