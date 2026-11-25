@@ -1017,10 +1017,8 @@ class NodeManager extends EventEmitter {
             // inbound peer. Counting it would let us claim "reachable" on the strength of talking to
             // ourselves. Verified live: nio_inbound 3 was really 2 external + 1 self.
             const selfIp = String(p2p.address || "").split(":")[0];
-            const inbound = conns.filter(c => c && c.incoming);
-            this.health.incoming = conns.length
-              ? (selfIp ? inbound.filter(c => String(c.host || "") !== selfIp).length : inbound.length)
-              : (typeof p2p.nio_inbound === "number" ? p2p.nio_inbound : 0);
+            this.health.incoming = conns.filter(c => c?.incoming === true && !c.keets && c.valid !== false &&
+              c.host && String(c.host) !== selfIp && !/^(?:127\.|::1$|::ffff:127\.)/i.test(c.host)).length;
             this.health.acceptingInLinks = typeof p2p.isAcceptingInLinks === "boolean" ? p2p.isAcceptingInLinks : null;
             this.health.p2pAddress = p2p.address || "";
           } catch (e) { /* keep the carried values */ }

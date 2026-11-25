@@ -5,6 +5,7 @@ let companionPage = 0;
 let minimaProfile = null;
 let minimaIndex = 0;
 let minimaTab = "Balance";
+let guideOpenSweep = false;
 
 function leaveCompanionWallet() {
   companionPage++;
@@ -74,6 +75,7 @@ async function renderMinimaWallet(){
         el("mwStyle").onclick=()=>{host.dataset.design=host.dataset.design==="current"?"originalLight":"current";localStorage.setItem("minimawallet.design",host.dataset.design);};
         el("mwSweep").onclick=()=>wallet.owned?goNative():minimaPayment(wallet,content,true,goNative);
         el("mwReset").onclick=()=>minimaReset(wallet,content);
+        if(guideOpenSweep){guideOpenSweep=false;if(wallet.source==="node" && wallet.mode==="classic" && !wallet.owned)el("mwSweep").click();}
       }
     }
     tab(minimaSections.includes(minimaTab)?minimaTab:"Balances");

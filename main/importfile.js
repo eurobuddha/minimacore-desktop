@@ -150,7 +150,10 @@ function create(deps) {
       const r = await deps.showOpen({ properties: ["openFile"], defaultPath: deps.defaultPath ? deps.defaultPath() : undefined,
         filters: [{ name: deps.t ? deps.t(K.filter) : K.filter, extensions: K.exts.map(e => e.slice(1)) }] });
       if (!r || r.canceled || !r.filePaths || !r.filePaths.length) return null;
-      const f = check(kind, r.filePaths[0], fs, deps.platform, deps.dataDir && deps.dataDir());
+      return this.remember(kind, r.filePaths[0]);
+    },
+    remember(kind, candidate) {
+      const f = check(kind, candidate, fs, deps.platform, deps.dataDir && deps.dataDir());
       picked[kind] = f.path;
       return f;
     },

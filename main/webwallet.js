@@ -333,7 +333,20 @@ async function send(opts, account = null) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = { reserveWalletRanges, setOnchain, paymentFloor, checkedCommand, nodeHasPubkey,
+// Import a source node's recorded next use without lowering any address's local counter.
+function importClassicFloor(addresses, floor) {
+  if (!Number.isSafeInteger(floor) || floor < 0 || floor >= KEY_USES || addresses.length !== 64 ||
+      addresses.some(address => !/^0x[0-9a-f]{64}$/i.test(address))) throw Error("Invalid classic key-use record.");
+  const store = loadStore();
+  for (const address of addresses) {
+    const e = entryFor(store,address);
+    if (e.damaged) throw Error(STORE_BAD);
+    if (floor < e.keyuses) throw Error(BELOW_SAVED(e.keyuses));
+    if (floor > e.keyuses) store[address] = {keyuses:floor, ack:false};
+  }
+  writeStore(store);
+}
+module.exports = { importClassicFloor, reserveWalletRanges, setOnchain, paymentFloor, checkedCommand, nodeHasPubkey,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status, KEY_USES, LAST_USE,
   _setRunner: (fn) => { runner0 = fn; },

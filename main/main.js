@@ -229,6 +229,7 @@ ipcMain.handle("mcd:revealSeed", (_e, typed) => { requireRunning(); return seedg
 // First run: the seed of the wallet the node has just made is shown once, before the wallet opens. Only in that step: a
 // launch that began with the wallet already made never answers it (a window that set walletDone back does not reopen it).
 let firstRunOpen = null;
+let setupMayBegin = false;
 // Once a wallet-replacing megammrsync (phrase: or file:) has been sent in this launch, the first-run seed step is closed for
 // good (0.19.201): flipping walletMode from restore back to new would otherwise show the RESTORED wallet's seed, ungated.
 // A Resync node that ended well also ends what an unfinished MegaMMR file import owed (main/megammrfile.js resynced: its marker, the held engines).
@@ -308,6 +309,10 @@ function saveConfigPatch(patch) {
   if (patch && Object.keys(patch).some(k => NODE_START_KEYS.includes(k))) notBusy();   // how the node starts: never while an import or a resync runs
   if (patch) delete patch.casinoEnabled;   // P2P Chance is removed (0.19.419): its old flag stays on disk as it is, never written from a screen
   if (patch) delete patch.frozenApps;      // only mcd:freezeSet writes it: it refuses while money is in flight
+  if (patch?.guideStage==="download" && setupMayBegin && !config.load().setupDone) {
+    config.setSetupSnapshotAllowed(true);
+    setupMayBegin=false;
+  }
   const c = config.save(patch || {});
   if (patch && "theme" in patch) nativeTheme.themeSource = config.themeSource(c.theme);   // the whole app, at once, no restart
   reserveMode(c);
@@ -381,6 +386,38 @@ ipcMain.handle("mcd:restoreBackup", (_e, o) => megafile.exclusive("restore", asy
   if (r && r.status === true) imports.forget("backup");   // restored: a later restore chooses its file again (a refused one, a wrong password, keeps it for the retry)
   return r;
 }));
+let setupSnapshotJob = null;
+let setupProgress = null;
+ipcMain.handle("mcd:setupSnapshotProgress", () => setupProgress);
+ipcMain.handle("mcd:setupSnapshot", async () => {
+  if (setupSnapshotJob) return setupSnapshotJob;
+  requireRunning();
+  const cfg = config.load();
+  if (flavor.id !== "pandamonium" || !cfg.setupSnapshotAllowed || !cfg.walletDone || cfg.guideStage !== "download" || megafile.marker())
+    throw Error("Review the snapshot state in Backup & Recovery before continuing.");
+  const dir = path.join(app.getPath("userData"), "setup-snapshot");
+  const ram = require("os").totalmem();
+  setupSnapshotJob = (async () => {
+    if (cfg.guideWallet !== "new") {
+      const keys = await webwallet.checkedCommand("keys action:list");
+      if (!cfg.guidePublicKey || !Array.isArray(keys?.keys) || !keys.keys.some(k=>k.publickey===cfg.guidePublicKey))
+        throw Error("The running wallet does not match the recovery words you checked. Review the restore in Backup & Recovery.");
+    }
+    const target = await require("./setup-snapshot").download(cfg.guideSource, dir, size => {
+      const reason = importfile.roomProblem({kind:node.kind(), size, ramBytes:ram, heapMb:importfile.importHeapMb(node.kind(), cfg.heapMb, ram)});
+      if (reason) throw Error(reason);
+    }, (bytes,total) => { setupProgress = {bytes,total}; });
+    try {
+      const file = imports.remember("megammr", target);
+      config.save({guideStage:"importing"});
+      const result = await megafile.importMegammr(file.path);
+      if (!result?.status || result.broken) throw Error("The node could not verify this snapshot.");
+      config.save({guideStage:"network"});
+      config.setSetupSnapshotAllowed(false);
+    } finally { await fs.promises.rm(target,{force:true}).catch(()=>{}); }
+  })();
+  try { await setupSnapshotJob; } finally { setupSnapshotJob = null; setupProgress = null; }
+});
 ipcMain.handle("mcd:importMegammr", (_e, shown) => megafile.importMegammr(shown));
 node.on("status", (s) => { if (s && s.state === "running") megafile.verify().catch(() => {}); });   // after an import: its own blocks found on the new chain, at the network's tip (M4)
 ipcMain.handle("mcd:megammrOff", () => megafile.megammrOff());
@@ -530,6 +567,24 @@ ipcMain.handle("mcd:secureScreen", (_e, on) => secureScreen.set(win, on));
 ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return explorer.ask(kind, arg, (c) => rpc.rpcCall(node.rpcPort(), config.rpcSecret(), c)); });
 
 // Opening Web Wallet Send checks one public key. The signer repeats this pinned lookup before reserving a use.
+let setupAudit = null;
+ipcMain.handle("mcd:setupAudit", async (_e, seed, mode, address, migrate) => {
+  if (flavor.id !== "pandamonium" || config.load().walletDone) throw Error("First-run wallet setup is closed.");
+  setupAudit = null;
+  const result = await require("./setup-keys").inspect(seed, mode, address, migrate === true);
+  const ticket = require("node:crypto").randomUUID();
+  setupAudit = {...result,ticket,mode};
+  return {ticket,minimum:result.minimum,reused:result.reused};
+});
+ipcMain.handle("mcd:setupFloor", (_e,ticket,number) => {
+  if (!setupAudit || setupAudit.ticket !== ticket || config.load().walletDone) throw Error("Check the wallet again.");
+  const floor = Number(number), a = setupAudit;
+  if (!/^\d+$/.test(String(number)) || !Number.isSafeInteger(floor) || floor < a.minimum ||
+      floor >= keyuses.SHAPES[a.mode].maxuses) throw Error("Enter a valid next key use above the checked minimum.");
+  if (a.mode === "classic") webwallet.importClassicFloor(a.addresses,floor);
+  config.save({guidePublicKey:a.mainPublicKey});
+  setupAudit = null;
+});
 ipcMain.handle("mcd:keyAudit", (_e, publicKey) => keyuses.onchainUses(publicKey, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));
 // The KeyUses app (main/keyuses.js): the node's keys are read here through rpcCall, the lookups go to the one pinned
 // host one at a time with no redirect followed and a reply of at most 512 KB, and the renderer is handed the joined
@@ -1163,6 +1218,8 @@ node.on("status", pushStatus);
 node.on("log", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:log", node.logs.slice(-1)[0]); });
 
 app.whenReady().then(() => {
+  const initial = config.load();
+  setupMayBegin = flavor.id === "pandamonium" && !initial.setupDone && !initial.walletDone && !initial.keyMode;
   setupPermissions();
   createWindow();
   setupTray();

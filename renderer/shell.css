@@ -457,6 +457,19 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .fr-bar .bar__back[hidden] { display: none; }
 .fr-title { margin: 0 0 0 12px; font: 700 18px/24px var(--sans); letter-spacing: -.01em; color: var(--text); }
 .fr-bar .bar__back[hidden] + .fr-title { margin-left: 16px; }
+.guide-page { width: min(100%, 34rem); margin: clamp(12px, 5vh, 60px) auto; }
+.guide-page h2 { margin: 0 0 12px; line-height: 1.16; text-wrap: balance; }
+.guide-page .ps-intro { line-height: 1.5; margin-bottom: 22px; }
+.guide-page p:empty { display: none; }
+.guide-content { display: grid; gap: 12px; }
+.guide-content .ps-btn { margin: 0; white-space: normal; }
+.guide-option { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.guide-option input { margin-top: 4px; }
+.guide-option small { display: block; margin-top: 4px; line-height: 1.4; }
+.guide-content label:not(.guide-option) { display: grid; gap: 6px; }
+.guide-content summary { cursor: pointer; padding-block: 8px; }
+.guide-warning { color: var(--amber); }
+
 .fr-body { flex: 1 1 0; min-height: 0; overflow-y: auto; }
 .fr-body.pscreen { padding: 24px 24px 40px; }
 .fr-launch { display: flex; flex-direction: column; }

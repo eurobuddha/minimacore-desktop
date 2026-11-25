@@ -53,6 +53,7 @@ async function home(profile,book,native) {
   const {balances} = await helper.run({action:"summary",coins});
   if (!balances.some(b=>b.tokenid==="0x00")) balances.unshift({tokenid:"0x00",amount:"0",count:0,token:null});
   const root=book.get(0), ledger=receipts(root.address);
+  await require("./nftcoins").reconcile({payments:ledger.rows,collections:[]},ledger.save);
   const dest=await cmd("getaddress");
   return {id:profile.id,mode:profile.mode,source:profile.source,balances,owned:native.nativeKeys.has(root.publickey.toUpperCase()),
     addresses:[...book.values()].map(k=>k.miniaddress), destination:dest.miniaddress,
@@ -163,7 +164,9 @@ async function execute(profile,book,native,request) {
       try {
         if((await cmd("txncheck id:"+id)).validtransaction!==true)throw Error("The node could not validate this transaction.");
         await assertNode(plan,root);
-        const row={id,kind:plan.kind,to:plan.to,tokenid:job.tokenid,amount:job.amount,coinids:job.coinids,time:Date.now(),status:"unknown"};
+        const draft=(await cmd("txnlist id:"+id)).transaction;
+        if(!HEX.test(draft?.transactionid))throw Error("Could not verify the signed transaction ID.");
+        const row={id,transactionid:draft.transactionid,kind:plan.kind,to:plan.to,tokenid:job.tokenid,amount:job.amount,coinids:job.coinids,time:Date.now(),status:"unknown"};
         ledger.rows.push(row);ledger.save();
         unknown=true;
         const tx=await cmd("txnpost id:"+id+" mine:false");

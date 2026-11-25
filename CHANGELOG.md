@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.451 · Guided Pandamonium setup
+
+First-run setup checks restored addresses and signing counters, guides classic wallets into minimaWallet for a reviewed sweep, and imports a checked MegaMMR snapshot. New setups offer classic P2P server mode with Keets Chat, router guidance and Keets transport fallback.
+
 ## 0.19.450 · Wallet balances, sweep and NFT Wallet navigation
 
 minimaWallet opens on combined Minima and token balances across its derived addresses. Payments can use coins held under multiple keys. Settings can sweep spendable assets to a verified main-node address. Each independent signing key requires a typed next-use count.

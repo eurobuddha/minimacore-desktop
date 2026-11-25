@@ -51,6 +51,7 @@ const DEFAULTS = {
                              //             minima until it opts in (see load()).
   heapMb: 0,                 // -Xmx for the Parlons Node (0 = automatic: 3072 with MegaMMR, else 1536)
   updateFeed: "",            // the one-app store feed the app checks for updates ("" = the eurobuddha.com feed)
+  guideStage: "", guidePublicKey: "", guideSource: "spartacus", guideWallet: "", guideFallback: false,
   setupDone: false,          // node wizard completed
   walletDone: false,         // seed onboarding (new/restore) completed
   walletMode: "new",         // "new" (boot+connect) | "restore" (post-boot megammrsync). Seed is NEVER persisted.
@@ -258,6 +259,12 @@ function setAtomixStoreMoveOwed(v) {
 /** A MegaMMR file import that has not finished (main/megammrfile.js): written right before the node is given the import and cleared only
  *  when it is known to have ended well (or to have stopped before the node reset anything). While it is there the trading engines stay
  *  held and the window offers Resync node. Never from a patch (save() drops a key DEFAULTS does not name), only here. null clears it. */
+function setSetupSnapshotAllowed(allowed) {
+  const cur=load();
+  if (allowed) cur.setupSnapshotAllowed=true; else delete cur.setupSnapshotAllowed;
+  fs.mkdirSync(app.getPath("userData"),{recursive:true});
+  fs.writeFileSync(configPath(),JSON.stringify(cur,null,2));
+}
 function setMegammrImport(v) {
   const cur = load(); if (v && typeof v === "object") cur.megammrImport = JSON.parse(JSON.stringify(v)); else delete cur.megammrImport;
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
@@ -328,4 +335,4 @@ function deleteSecret(account) { keychainDelete(account); try { fs.unlinkSync(se
  *  and the window's own colours follow it. */
 function themeSource(v) { return v === "light" || v === "dark" ? v : "system"; }
 
-module.exports = { keetsChatOnlySupported, themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, setMegammrImport, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };
+module.exports = { keetsChatOnlySupported, themeSource, load, save, recordKeyMode, setFcGrant, fcGranted, setAtomixStoreMoveOwed, setMegammrImport, setSetupSnapshotAllowed, DEFAULTS, defaultDataFolder, rpcSecret, effectiveParams, getSecret, setSecret, deleteSecret };

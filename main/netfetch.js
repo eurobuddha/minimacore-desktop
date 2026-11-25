@@ -277,4 +277,4 @@ async function postText(url, body, opts) {
   } finally { if (shared) release(); }
 }
 
-module.exports = { tokenIcon, fetchJson, postText, isBlockedHost, READ_TIMEOUT_MS };
+module.exports = { vetHost, connectPin, tokenIcon, fetchJson, postText, isBlockedHost, READ_TIMEOUT_MS };

@@ -135,6 +135,7 @@ async function boot() {
   CFG = await api.getConfig();
   try { KEYMODE = (await api.keyMode()) || KEYMODE; } catch (e) {}
   const walletFlavor = await api.flavor().catch(() => null);
+  guideEnabled = walletFlavor?.id === "pandamonium";
   if (walletFlavor?.id === "pandamonium") {
     TRAY_APPS.splice(TRAY_APPS.findIndex(a => a.id === "parlons"), 0,
       { id: "minimawallet", name: "minimaWallet", icon: "icons/minimawallet.png" },
@@ -221,7 +222,7 @@ function onStatus(s) {
     entropyNode();   // the node is back: an open Entropy screen proves it again before a roll may use it
     startRefresh();
     refreshMailBadge();
-    if (CFG.walletDone) { hideSetup(); renderActive(); }
+    if (CFG.walletDone) { if (!CFG.guideStage || guidePaused) hideSetup(); renderActive(); }
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
@@ -241,6 +242,7 @@ function onStatus(s) {
     const sig = (s.parlons.ready ? "1" : "0") + "|" + (s.parlons.error || "") + "|" + s.state;
     if (sig !== parlonsLastSig) { parlonsLastSig = sig; renderParlons(); }
   }
+  guideTick(s);
   wwLastStatus = s;
   wwLiveRender();   // flip the megammr gate live after enable+restart — but NEVER rebuild the form on a routine block tick
 }
@@ -257,7 +259,8 @@ function frScreen(title, back, bodyClass) {
   const body = el("setupBody"); body.className = "fr-body " + (bodyClass || "pscreen"); body.scrollTop = 0;
   return body;
 }
-function showSetup() {
+function showSetup(advanced=false) {
+  if (advanced!==true && guideEnabled && (CFG.guideWallet || !CFG.setupDone)) return guideWelcome();
   frScreen("", null, "fr-launch").innerHTML = `
     <div class="fr-top"><button class="fr-lang" id="frLang">${th("Language")}</button></div>
     <div class="fr-hero">${CORE_MARK.replace("tray__ic", "fr-logo")}
@@ -979,7 +982,12 @@ async function postBootNewSeed() {
   if (!el("frSeed")) return;
   if (!phrase) {
     el("frSeed").textContent = t("The node did not return a seed phrase.");
-    el("frSaved").disabled = false; el("frSaved").textContent = t("Try again"); el("frSaved").onclick = postBootNewSeed;
+    el("frSaved").disabled = false; el("frSaved").textContent = t("Try again"); el("frSaved").onclick = CFG.guideWallet === "new" ? () => secretAsk("seed",t("Show seed phrase"),async typed=>{
+      const r=await api.revealSeed(typed);
+      secretReveal(t("Seed phrase"),r.phrase,r.system);
+      el("frSaved").textContent=t("I've saved it. Proceed");
+      el("frSaved").onclick=()=>confirmNewSeed(r.phrase);
+    }) : postBootNewSeed;
     return;
   }
   el("frSeed").textContent = phrase;
@@ -1024,6 +1032,7 @@ async function postBootRestore() {
   try {
     const built = resyncCommand({ host, phrase: seed, anyphrase: true, keyuses, needPhrase: true });
     if (built.error) throw new Error(built.error);
+    if (CFG.guideWallet) built.cmd += RESTORE.mode === "classic" ? " keys:64" : " keys:32";
     try { await cmd(built.cmd); } catch (e) { if (!await offerWithoutDexicon(e)) throw e; await cmd(built.cmd); }
     RESTORE = null;   // clear the seed from memory
     await walletReplaced();   // seed changed: every identity derived from the old one is dropped
@@ -3550,7 +3559,7 @@ async function refreshNodeDash() {
     const det = net.details || {}, self = String((det.p2p && det.p2p.address) || "").split(":")[0];
     if (det.connected != null) d.connected = det.connected;
     // incoming peers, minus a hairpinned dial back to this node's own address (same rule as the phone and main/node-manager.js)
-    if (Array.isArray(net.connections)) d.incoming = net.connections.filter(c => c && c.incoming === true && String(c.host || "") !== self).length;
+    if (Array.isArray(net.connections)) d.incoming = net.connections.filter(c => c && c.incoming === true && !c.keets && c.valid !== false && c.host && !/^(?:127\.|::1$|::ffff:127\.)/i.test(c.host) && String(c.host) !== self).length;
   }
   NODE_DASH = Object.assign({}, NODE_DASH, d);
   if (activeView === "node" && running) api.nodeStatus().then(renderNode);
@@ -3610,6 +3619,11 @@ function renderNode(s) {
       <button class="btn btn--outline" id="nReconfig">${th("Reconfigure node")}</button>
     </div>
     </div>`;
+  if (guideEnabled && CFG.walletDone && CFG.guideStage && guidePaused) {
+    guideAction(c,t("Continue setup"),async()=>{CFG=await api.getConfig();guidePaused=false;guideScreenId="";guideTick(await api.nodeStatus());},true);
+  }
+  if (guideEnabled && CFG.guideWallet && CFG.walletDone && !CFG.guideStage && contributing && MINIMA_PARAMS.keetsMode(CFG.params)==="chat")
+    guideAction(c,"I can’t forward this port · use Keets",guideSwitch);
   if (up) refreshNodeDash();
   const nContrib = el("nContrib");
   if (nContrib) nContrib.onclick = async () => {
