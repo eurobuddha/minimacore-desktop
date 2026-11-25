@@ -232,3 +232,36 @@ test('an incoming Keets bridge counts only until either end disconnects', () => 
   diag.trackIncomingBridge(Object.assign(new EventEmitter(),{destroyed:true}),new EventEmitter());
   assert.equal(count(),0);
 });
+
+test('the incoming Keets bridge preserves a fragmented greeting while the local socket opens', async (t) => {
+  const { EventEmitter } = require('node:events');
+  const { Duplex } = require('node:stream');
+  const { setImmediate: nextTurn } = require('node:timers/promises');
+  const { createRequire } = require('node:module');
+  const entry = path.join(ROOT, 'resources/keets-sidecar/index.js');
+  const { Duplex: PeerStream } = createRequire(entry)('streamx');
+  const source = fs.readFileSync(entry, 'utf8');
+  // Exercise the shipped connection handler with control over when the TCP connect event fires.
+  const handler = source.slice(source.indexOf('let conns ='), source.indexOf('const topic = sha256'));
+  const swarm = new EventEmitter();
+  const received = [];
+  const tcp = new Duplex({ read() {}, write(chunk, _, done) { received.push(Buffer.from(chunk)); done(); } });
+  const conn = new PeerStream({ write(_, done) { done(null); } });
+  const header = Buffer.from('local preamble');
+  const diagSnapshot = { trackIncomingBridge() {}, bridgeClosed() {} };
+  require('node:vm').runInNewContext(handler, { swarm, Buffer, setTimeout, clearTimeout, PORT: 9001,
+    MAXCONNS: 6, CHAT_ONLY: false, net: { connect: () => tcp }, preamble: () => header,
+    diagSnapshot, console: { log() {} } });
+  t.after(() => { conn.destroy(); tcp.destroy(); });
+  const chunks = Array.from({length: 4}, (_, i) => Buffer.alloc(10000, i));
+  swarm.emit('connection', conn, {publicKey: Buffer.alloc(32)});
+  conn.push(chunks[0]);
+  await nextTurn();
+  conn.push(chunks[1]);
+  conn.push(chunks[2]);
+  await nextTurn();
+  tcp.emit('connect');
+  conn.push(chunks[3]);
+  await nextTurn();
+  assert.deepEqual(Buffer.concat(received), Buffer.concat([header, ...chunks]));
+});

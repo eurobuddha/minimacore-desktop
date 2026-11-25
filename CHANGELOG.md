@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.456 · Incoming Keets greetings
+
+The Keets bridge now keeps every part of an incoming greeting while it opens the connection to the local node. This lets Minima validate peers whose greeting arrives in several chunks.
+
 ## 0.19.455 · Live incoming connections
 
 The Node tab shows open incoming classic P2P peers and Keets Minima tunnels separately. The Keets counter drops when either end of the tunnel closes. Router guidance is labeled Classic P2P.

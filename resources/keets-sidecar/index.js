@@ -226,6 +226,9 @@ function bridge (conn, publicKey, initiator, replay) {
   const via = raw && raw.remoteHost ? raw.remoteHost + ':' + raw.remotePort : 'unknown'
   console.log('peer connected pubkey:' + pk + ' initiator:' + initiator + ' path:' + via + ' conns:' + conns)
 
+  // Peeking at an incoming stream puts it in flowing mode. Keep the rest of the
+  // greeting buffered until pipe() can forward it to the node.
+  if (!initiator) conn.pause()
   const tcp = net.connect(PORT, '127.0.0.1')
   tcp.on('connect', () => {
     tcp.write(preamble(publicKey, initiator))
