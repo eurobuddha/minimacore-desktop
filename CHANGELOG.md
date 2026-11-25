@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.452 · Restore with recovery words alone
+
+Onboarding derives and checks all 64 classic and 32 block-based addresses for key reuse. The results show the number checked in each family. Users can start the audit with their recovery words alone.
+
 ## 0.19.451 · Guided Pandamonium setup
 
 First-run setup checks restored addresses and signing counters, guides classic wallets into minimaWallet for a reviewed sweep, and imports a checked MegaMMR snapshot. New setups offer classic P2P server mode with Keets Chat, router guidance and Keets transport fallback.

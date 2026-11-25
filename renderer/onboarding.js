@@ -74,24 +74,26 @@ function guideSource() {
 function guideWords() {
   const mode=guideRoute==="block"?"block":"classic";
   const host=guidePage("words","Check your old wallet",CFG.setupDone?null:guideSource,
-    "Stop sending from the old wallet. Enter its recovery words and one of its receive addresses. Only public keys and addresses go to the Eurobuddha key-use checker.");
+    "Enter your recovery words to check all 64 classic and 32 block-based addresses. Only public keys and addresses go to the Eurobuddha checker. Keep your old wallet offline during migration.");
   const wordLabel=document.createElement("label");wordLabel.textContent=t("Seed phrase");host.append(wordLabel);
   const entry=document.createElement("div");host.append(entry);
   const words=WordEntry.create(entry,{anyPhrase:true,clearClipboard:()=>api.clip("")});
-  const label=document.createElement("label");label.textContent=t("Receive address from your old wallet");
-  const address=document.createElement("input");address.className="field__input ps-field";address.autocomplete="off";label.append(address);host.append(label);
   guideAction(host,"Check wallet and key uses",async()=>{
     const seed=await resolveSeed(words);if(!seed)return;
     const valid=resyncCommand({host:CFG.megammrHost,phrase:seed,anyphrase:true,keyuses:"0",needPhrase:true});
     if(valid.error)throw Error(valid.error);
     el("guideNote").textContent=t("Checking the wallet…");
-    const report=await api.setupAudit(seed,mode,address.value.trim(),guideRoute==="migrate");
+    const report=await api.setupAudit(seed,mode,guideRoute==="migrate");
+    if(!host.isConnected)return;
     words.clear();guideCounter(seed,mode,report);
   },true);
 }
 function guideCounter(seed,mode,report) {
   const host=guidePage("counter","Confirm the next key use",guideWords,
     "A signing position can only be used once. Find the highest next use recorded on every device that used these words. The chain can miss signatures. If you cannot check the old record, pause here.");
+  const coverage=document.createElement("p");coverage.textContent=t("Checked {classic} classic and {block} block-based addresses for key reuse.",report);
+  if(!report.reused)coverage.textContent+=" "+t("The archive found no repeated signatures.");
+  host.append(coverage);
   const info=document.createElement("p");info.textContent=t("Minimum from the archive: {n}.", {n:report.minimum});host.append(info);
   if(report.reused){const warning=document.createElement("p");warning.className="guide-warning";warning.textContent=t("Repeated signatures found on {n} keys. Keep the old wallet offline. Moving funds cannot undo earlier reuse.",{n:report.reused});host.append(warning);}
   const label=document.createElement("label");label.textContent=t("Enter the higher of the old record and the archive minimum");

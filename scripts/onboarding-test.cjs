@@ -10,6 +10,7 @@ function fixture(){
   Object.assign(m,{getConfig:async()=>({...config}),saveConfig:async p=>({...Object.assign(config,p)}),flavor:async()=>({id:"pandamonium"}),
     keyMode:async()=>({supported:true,mode:""}),recordKeyMode:async m=>m,nodeStart:async()=>true,
     nodeRestart:async(_,p)=>{Object.assign(config,p);return true;},setupSnapshot:async()=>{config.guideStage="network";},
+    setupAudit:async(...args)=>{if(args.length!==3 || args[1]!=="classic" || args[2]!==true || args[0]!==Array(24).fill("ABANDON").join(" "))throw Error("unexpected audit arguments");return {ticket:"test",classic:64,block:32,minimum:256,reused:0};},
     setupSnapshotProgress:async()=>null});
 }
 async function exercise(){
@@ -20,6 +21,10 @@ async function exercise(){
     await click("I have a wallet");await click("I’m not sure");if(!el("guideNote").textContent.includes("KeyUses"))throw Error("missing help");
     await click("Minima Classic · 64 keys");await click("Move to block-based keys");await click("Continue");await click("Restore Wallet");
     if(!el("setupBody").querySelector(".we-box") || guideRoute!=="migrate")throw Error("migration restore");
+    if(document.querySelector("#setupBody .guide-content > label input"))throw Error("restore requested another input");
+    for(const box of document.querySelectorAll("#setupBody .we-box")){box.value="abandon";box.dispatchEvent(new Event("input"));}
+    await click("Check wallet and key uses");
+    if(!el("setupBody").textContent.includes("Checked 64 classic and 32 block-based addresses"))throw Error("seed-only audit failed");
     guideWelcome();await click("I have a wallet");await click("Minima Classic · 64 keys");await click("Keep my classic addresses");
     if(guideRoute!=="classic")throw Error("classic retention");
     guideWelcome();await click("I have a wallet");await click("Block key uses · 32 keys");

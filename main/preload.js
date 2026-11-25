@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld("mcd", {
   restoreBackup: (o) => ipcRenderer.invoke("mcd:restoreBackup", o),
   // a backup (.bak) or a MegaMMR file chosen in the system's open dialog: { path, size } or null; the path is only shown and given back
   pickImport: (kind) => ipcRenderer.invoke("mcd:pickImport", kind),
-  setupAudit: (seed, mode, address, migrate) => ipcRenderer.invoke("mcd:setupAudit",seed,mode,address,migrate),
+  setupAudit: (seed, mode, migrate) => ipcRenderer.invoke("mcd:setupAudit",seed,mode,migrate),
   setupFloor: (ticket, number) => ipcRenderer.invoke("mcd:setupFloor",ticket,number),
   setupSnapshot: () => ipcRenderer.invoke("mcd:setupSnapshot"),
   setupSnapshotProgress: () => ipcRenderer.invoke("mcd:setupSnapshotProgress"),

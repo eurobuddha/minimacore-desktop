@@ -568,13 +568,13 @@ ipcMain.handle("mcd:explorer", (_e, kind, arg) => { requireRunning(); return exp
 
 // Opening Web Wallet Send checks one public key. The signer repeats this pinned lookup before reserving a use.
 let setupAudit = null;
-ipcMain.handle("mcd:setupAudit", async (_e, seed, mode, address, migrate) => {
+ipcMain.handle("mcd:setupAudit", async (_e, seed, mode, migrate) => {
   if (flavor.id !== "pandamonium" || config.load().walletDone) throw Error("First-run wallet setup is closed.");
   setupAudit = null;
-  const result = await require("./setup-keys").inspect(seed, mode, address, migrate === true);
+  const result = await require("./setup-keys").inspect(seed, mode, migrate === true);
   const ticket = require("node:crypto").randomUUID();
   setupAudit = {...result,ticket,mode};
-  return {ticket,minimum:result.minimum,reused:result.reused};
+  return {ticket,minimum:result.minimum,reused:result.reused,classic:result.classic,block:result.block};
 });
 ipcMain.handle("mcd:setupFloor", (_e,ticket,number) => {
   if (!setupAudit || setupAudit.ticket !== ticket || config.load().walletDone) throw Error("Check the wallet again.");

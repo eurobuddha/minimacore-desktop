@@ -139,7 +139,14 @@ test("only recordKeyMode writes the mode, and every renderer save goes through c
     if (f !== "config.js") assert.ok(!/config\.json/.test(src) || f === "node-manager.js" || !/writeFileSync\([^)]*config\.json/.test(src), f + " does not write config.json itself");
   }
   const cfg = fs.readFileSync(path.join(dir, "config.js"), "utf8");
-  assert.equal((cfg.match(/writeFileSync\(configPath\(\)/g) || []).length, 5, "config.json is written by save(), recordKeyMode(), setFcGrant(), setAtomixStoreMoveOwed() and setMegammrImport() only (Future Cash Next's grant, AtomiX's owed store move since 0.19.267, an unfinished MegaMMR import since 0.19.392; each writes the loaded config back with the mode as it was)");
+  assert.equal((cfg.match(/writeFileSync\(configPath\(\)/g) || []).length, 6, "only the six reviewed config writers can persist node settings");
+  freshInstall();
+  config.recordKeyMode("block");
+  for (const allowed of [true,false]) {
+    config.setSetupSnapshotAllowed(allowed);
+    assert.equal(config.load().keyMode,"block","changing the first-run snapshot grant preserves the recorded key mode");
+    assert.equal(!!config.load().setupSnapshotAllowed,allowed);
+  }
   assert.ok(cfg.includes('if (k === "keyMode") continue;'), "save() drops the key from every patch");
   const main = fs.readFileSync(path.join(dir, "main.js"), "utf8");
   assert.ok(/"mcd:recordKeyMode", \(_e, mode\) => \{\s*if \(mode === "block" && !node\.blockKeysSupported\(\)\) throw/.test(main), "block is refused on a jar that cannot run it, before anything is recorded");
