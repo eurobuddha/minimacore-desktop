@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.448 · Web Wallet key-use verification
+
+Opening Send checks the archive estimate and shows the next use saved on this computer. Each payment requires a typed count at least as high as both figures. The local signer checks again before reserving that use. If the archive is unavailable or the key is exhausted, sending stays disabled.
+
 ## 0.19.447 · Pandamonium Desktop Web Wallet
 
 The Web Wallet derives the classic address and signs payments locally in both key modes. The MegaMMR node supplies public coin proofs, validates the signed transaction and broadcasts it. If the native wallet already owns the classic key, the Web Wallet shows its address and balance and opens the Wallet tab for spending.

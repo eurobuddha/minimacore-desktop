@@ -222,7 +222,7 @@
     nodeLogs: async () => ["[parlons-node] message from 0x" + "FA4E".repeat(81) + ": (text not logged)", "Minima @ 19/11/2026 13:54:04 [88.7 MB] : Connected to the blockchain", "Minima @ 19/11/2026 13:54:31 [76.1 MB] : Block 2428089 received"],
     appVersion: async () => "0.0.0-preview",
     updateStatus: async () => ({ available: Q.get("update") === "1", version: "9.9.9", running: "0.0.0-preview" }),
-    tokenIcon: async () => null, keyAudit: async () => null, keyReuse: async () => null,
+    tokenIcon: async () => null, keyAudit: async () => Q.get("ww") === "ack" ? 5 : null, keyReuse: async () => null,
     histGet: async () => histRows, histTokens: async () => [{ tokenid: "0x00", name: "Minima" }, { tokenid: MXUSD, name: "MxUSD" }],
     histQuery: async (f) => histRows.filter(r => (!f.search || JSON.stringify([r.counterparty, r.tokenName, r.txpowid, r.amount]).toLowerCase().includes(String(f.search).toLowerCase()))
       && (!f.direction || r.direction === f.direction || r.kind === f.direction) && (!f.token || r.tokenid === f.token)),

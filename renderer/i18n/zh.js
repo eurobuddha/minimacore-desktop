@@ -2,6 +2,14 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Check the next key use before signing again.": "再次签名前，请核对下次密钥使用序号。",
+  "Opening Send looks up your public key at eurobuddha.com.": "打开发送页面时，应用会在 eurobuddha.com 查询你的公钥。",
+  "Confirm key uses for this payment": "确认本次付款的密钥使用计数",
+  "Reusing a signing position puts funds at risk. The archive can miss skipped uses and signatures made elsewhere. If another wallet records a higher next use for this key, enter that number.": "重复使用同一个签名序号会危及资金安全。归档可能未记录跳过的序号和在其他地方生成的签名。如果其他钱包为此密钥记录了更高的下次使用序号，请输入那个数字。",
+  "Could not verify key uses. Check your connection and try again.": "无法验证密钥使用计数。请检查网络连接后重试。",
+  "The archive estimate or saved count exceeds the signing limit. Sending is disabled.": "归档估算值或已保存的计数超过签名上限，无法发送。",
+  "Archive estimate: {chain}. Saved next use: {local}. Enter a number from {minimum} to 262143.": "归档估算值：{chain}。已保存的下次使用序号：{local}。请输入 {minimum} 至 262143 之间的数字。",
+  "The saved next key use is {count}. Enter at least that number.": "已保存的下次密钥使用序号为 {count}。输入值不能低于此数。",
   "{b}Runs entirely on this computer.{_b} The app derives your classic address and signs payments locally. Only the signed transaction goes to your node for publication.": "{b}所有操作均在本机完成。{_b}应用在本地派生经典地址并签署付款交易，仅将已签名的交易发送到节点进行广播。",
   "This node owns the signing key. Use the Wallet tab to send.": "此节点持有签名密钥。请在“钱包”选项卡中发送。",
   "Open Wallet": "打开钱包",

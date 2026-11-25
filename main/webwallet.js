@@ -80,6 +80,7 @@ function overCount(n, saving) {
   return saving ? "This wallet's saved key-use count (" + n + ") is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved."
     : "This wallet's saved key-use count (" + n + ") is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was sent.";
 }
+const BELOW_SAVED = (n) => "The saved next key use is " + n + ". Enter at least that number.";
 const DAMAGED_BELOW = (n) => "This key's saved count read " + n + " before it was damaged. Confirm at least that many. Nothing was saved.";
 // What a damaged entry's old value still says (0.19.324): a count written as a number or as digits, a fraction rounded UP (57.5 and
 // "57.5" read 58), is a floor too; anything else reads 0 (unknown: the chain's figure is the floor then)
@@ -103,11 +104,9 @@ function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
 const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
 const FIRST_UNREAD = "The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.";
 
-/** Record the user's attested prior-use count for an address (monotonic floor) and mark it acknowledged. An entry not yet
- *  acknowledged (a first confirmation, one whose file went missing, a damaged one) is unknown: its figure must be at least
- *  what the chain shows, checked HERE, in main (0.19.255 for a damaged entry, 0.19.270 for every unacknowledged one: the
- *  window's floor alone took any count), and it is refused while that figure cannot be read. */
-async function ackKeyuses(address, count) {
+/** A payment checks the current archive figure, then reserves the typed position durably before signing.
+ * Ordinary acknowledgements update the saved floor without reserving a signing position. */
+async function ackKeyuses(address, count, reserve = false) {
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   // a whole number of 0 or more, as a number or as plain digits only (0.19.341, as released 0.18.265: " 5 " is refused too)
   const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count) ? Number(count) : NaN);
@@ -116,7 +115,7 @@ async function ackKeyuses(address, count) {
   // an entry not yet confirmed: the chain is read FIRST (0.19.340, as released 0.18.274), so a chain figure at the limit is explained as such
   // rather than the bare ceiling the window's max(typed, chain) ran into; a figure above the ceiling is refused for that whether the chain
   // answered or not (as released 0.18.279)
-  if (!was.ack || was.damaged) {
+  if (reserve || !was.ack || was.damaged) {
     const pk = derivedKeys.get(String(address).toLowerCase());
     let chain = null; if (pk) { try { chain = await onchainOf(pk); } catch (e) { chain = null; } }
     if (!Number.isSafeInteger(chain) || chain < 0) throw new Error(n > LAST_USE ? OVER_MAX : was.damaged ? DAMAGED_UNREAD : FIRST_UNREAD);
@@ -130,6 +129,14 @@ async function ackKeyuses(address, count) {
   if (was.damaged && n < was.keyuses) throw new Error(DAMAGED_BELOW(was.keyuses));
   const store = loadStore();   // read again after the wait: written once, from what is on disk now
   const e = entryFor(store, address);
+  if (reserve) {
+    if (e.keyuses >= KEY_USES) throw new Error(overCount(e.keyuses));
+    const floor = Math.max(was.keyuses, e.keyuses);
+    if (n < floor) throw new Error(BELOW_SAVED(floor));
+    store[address] = { keyuses: n + 1, ack: true };
+    try { writeStore(store); } catch { throw new Error(STORE_BAD); }
+    return n;
+  }
   e.keyuses = e.damaged ? Math.max(n, e.keyuses || 0) : Math.max(e.keyuses || 0, n);   // never lower a counter (over-skip is safe; under is fund loss); a damaged one is unknown
   delete e.damaged; e.ack = true;
   store[address] = e;
@@ -193,20 +200,6 @@ async function checkedCommand(cmd) {
   return r.response;
 }
 
-function nextLeaf(fromaddress, reserve) {
-  const store = loadStore();
-  const e0 = entryFor(store, fromaddress);
-  if (e0.damaged) throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent.");
-  if (!e0.ack) throw new Error("Confirm this wallet's key-uses count before sending");
-  const n = e0.keyuses || 0;
-  if (!Number.isSafeInteger(n) || n < 0) throw new Error(STORE_BAD);
-  if (n > LAST_USE) throw new Error(overCount(n));
-  if (!reserve) return n;
-  store[fromaddress] = Object.assign({}, e0, { keyuses: n + 1 });
-  try { writeStore(store); } catch { throw new Error(STORE_BAD); }
-  return n;
-}
-
 // Select by exact displayed units, largest first, then export only those inputs.
 // The signer rechecks the actual serialized coins and computes change in raw chain units.
 async function coinProofs(address, token, amount) {
@@ -251,9 +244,16 @@ async function send(opts) {
   try {
     if (!resp(await runner("checkaddress address:" + to))?.["0x"]) throw new Error("Recipient address failed validation");
     const id = randomUUID();
-    nextLeaf(address, false);
+    const saved = entryFor(loadStore(), address);
+    if (saved.keyuses >= KEY_USES) throw new Error(overCount(saved.keyuses));
+    if (typeof opts.keyuses !== "string" || !/^\d{1,15}$/.test(opts.keyuses)) {
+      if (saved.damaged) throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent.");
+      throw new Error("Confirm this wallet's key-uses count before sending");
+    }
+    if (Number(opts.keyuses) > LAST_USE) throw new Error(OVER_MAX);
+    if (Number(opts.keyuses) < saved.keyuses) throw new Error(saved.damaged ? DAMAGED_BELOW(saved.keyuses) : BELOW_SAVED(saved.keyuses));
     const proofs = await coinProofs(address, tokenid, amount);
-    const leaf = nextLeaf(address, true);
+    const leaf = await ackKeyuses(address, opts.keyuses, true);
     const signed = await helper.run({ action: "sign", seed, to, amount, tokenid, proofs, leaf: String(leaf), id });
     if (!/^0x(?:[0-9a-f]{2})+$/i.test(signed.data)) throw new Error("Invalid signed Web Wallet transaction");
     await checkedCommand("txnimport id:" + id + " data:" + signed.data);

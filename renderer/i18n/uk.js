@@ -2,6 +2,14 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "Check the next key use before signing again.": "Перевірте номер наступного використання ключа перед новим підписом.",
+  "Opening Send looks up your public key at eurobuddha.com.": "Коли ви відкриєте вкладку надсилання, застосунок перевірить ваш відкритий ключ на eurobuddha.com.",
+  "Confirm key uses for this payment": "Підтвердьте лічильник використань ключа для цього платежу",
+  "Reusing a signing position puts funds at risk. The archive can miss skipped uses and signatures made elsewhere. If another wallet records a higher next use for this key, enter that number.": "Повторне використання однієї позиції для підпису ставить кошти під загрозу. Архів може не враховувати пропущені позиції та підписи, створені деінде. Якщо в іншому гаманці записано більший номер наступного використання цього ключа, введіть його.",
+  "Could not verify key uses. Check your connection and try again.": "Не вдалося перевірити лічильник ключа. Перевірте з’єднання та спробуйте ще раз.",
+  "The archive estimate or saved count exceeds the signing limit. Sending is disabled.": "Оцінка архіву або збережений лічильник перевищує ліміт підписів. Надсилання вимкнено.",
+  "Archive estimate: {chain}. Saved next use: {local}. Enter a number from {minimum} to 262143.": "Оцінка архіву: {chain}. Збережений номер наступного використання: {local}. Введіть число від {minimum} до 262143.",
+  "The saved next key use is {count}. Enter at least that number.": "Збережений номер наступного використання ключа — {count}. Введіть число не менше за це.",
   "{b}Runs entirely on this computer.{_b} The app derives your classic address and signs payments locally. Only the signed transaction goes to your node for publication.": "{b}Усе виконується на цьому комп’ютері.{_b} Застосунок обчислює класичну адресу й підписує платежі локально. На вузол для публікації надходить лише підписана транзакція.",
   "This node owns the signing key. Use the Wallet tab to send.": "Ключ підпису належить цьому вузлу. Для надсилання відкрийте вкладку «Гаманець».",
   "Open Wallet": "Відкрити гаманець",

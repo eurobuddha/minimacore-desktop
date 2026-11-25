@@ -196,24 +196,15 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   };
 
   // ---- Web Wallet (main/webwallet.js) ----
-  /** A typed count is digits only (or empty: 0); a fraction, a sign or a word is refused, never floored (0.19.324). */
-  function wholeCount(typed) { return /^\s*\d{0,15}\s*$/.test(String(typed == null ? "" : typed)); }
   var ww = {
     problem: function (f) { if (!text(f.to)) return I18N.t("Enter a recipient address"); if (!(Number(text(f.amount)) > 0)) return I18N.t("Enter a valid amount"); return ""; },
-    /**
-     * The figure to record when the user confirms the secret key uses: what they typed, never below what the chain
-     * shows. → null (REFUSE) when the chain's figure was not read: an unread figure is never taken as 0, because a
-     * count that is too low signs with a one-time key a second time.
-     */
-    wholeCount: wholeCount,
-    confirmUses: function (typed, onchain) {
-      if (typeof onchain !== "number" || !Number.isSafeInteger(onchain) || onchain < 0) return null;
-      if (!wholeCount(typed)) return NaN;
-      var n = Number(String(typed == null ? "" : typed).trim() || "0");
-      return Math.max(n, onchain);
+    validUses: function (typed, minimum) {
+      return typeof typed === "string" && /^\d{1,15}$/.test(typed) &&
+        Number.isSafeInteger(minimum) && minimum >= 0 &&
+        Number(typed) >= minimum && Number(typed) <= 262143;
     },
     /** → the main process's answer ({ ok, txnid } | { ambiguous, message } | { message }), or { err } when it threw. */
-    send: function (api, f) { return api.wwSend({ seed: f.seed, to: text(f.to), amount: text(f.amount), tokenid: f.tokenid }).catch(function (e) { return { message: String((e && e.message) || I18N.t("Send failed")) }; }); }
+    send: function (api, f) { return api.wwSend({ seed: f.seed, to: text(f.to), amount: text(f.amount), tokenid: f.tokenid, keyuses: f.keyuses }).catch(function (e) { return { message: String((e && e.message) || I18N.t("Send failed")) }; }); }
   };
 
   // ---- KeyUses (main/keyuses.js): what the audit's answer is SHOWN as. Pandamonium's KeyUses 0.1.4, MainActivity. ----

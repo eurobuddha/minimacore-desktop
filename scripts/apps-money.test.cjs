@@ -470,25 +470,18 @@ test("miniMall: a product picture is an inline picture or nothing, in the file a
 });
 
 // ---- Web Wallet ----
-const OLD_WW = {   // renderer/app.js 0.19.107: wwDoSend (its two checks, then the one call; the two-click arming is the screen's)
-  send: async (api, seed, toField, amtField, tokenid) => {
-    const to = String(toField || "").trim(), amount = String(amtField || "").trim();
-    if (!to) return; if (!(Number(amount) > 0)) return;
-    await api.wwSend({ seed, to, amount, tokenid }).catch(() => {});
-  }
-};
-test("Web Wallet send: the same call with the same arguments as the old screen; nothing is sent for an empty address or amount", async () => {
-  for (const [to, amt, tok] of [[" MxG0ABC ", " 12.5 ", "0x00"], ["0xAB", "0.00000001", MXUSD], ["", "1", "0x00"], ["MxG0ABC", "0", "0x00"], ["MxG0ABC", "abc", "0x00"]]) {
-    await both({ wwSend: { ok: true, txnid: "0xT" } }, (api) => OLD_WW.send(api, "my Phrase - Exactly", to, amt, tok),
-      async (api) => { const f = { seed: "my Phrase - Exactly", to, amount: amt, tokenid: tok }; if (!Act.ww.problem(f)) await Act.ww.send(api, f); });
-  }
-  const r = recorder({ wwSend: { ok: true } }); await Act.ww.send(r.api, { seed: " Keep  My Spaces ", to: "MxA", amount: "1", tokenid: "0x00" });
-  assert.equal(r.log[0][1][0].seed, " Keep  My Spaces ", "the phrase goes to the main process exactly as it is held");
-  assert.deepEqual(await Act.ww.send(recorder({ wwSend: () => Promise.reject(new Error("Confirm this wallet's key-uses count before sending")) }).api, { seed: "s", to: "MxA", amount: "1", tokenid: "0x00" }), { message: "Confirm this wallet's key-uses count before sending" });
+test("Web Wallet forwards the exact seed and typed key use with the payment", async () => {
+  const f = { seed: " Keep  My Spaces ", to: " MxA ", amount: " 12.5 ", tokenid: MXUSD, keyuses: "47" };
+  const r = recorder({ wwSend: { ok: true } });
+  assert.equal(Act.ww.problem(f), "");
+  await Act.ww.send(r.api, f);
+  assert.deepEqual(r.log, [["wwSend", [{ ...f, to: "MxA", amount: "12.5" }]]]);
+  for (const bad of [{ to: "" }, { amount: "0" }, { amount: "abc" }]) assert.ok(Act.ww.problem({ ...f, ...bad }));
+  assert.deepEqual(await Act.ww.send(recorder({ wwSend: () => Promise.reject(new Error("unavailable")) }).api, f), { message: "unavailable" });
 });
 test("Web Wallet screen: the original's look with every desktop safeguard, and nothing that keeps a seed", () => {
   const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {"));
-  for (const must of ["Never type your secret key into a website Web Wallet", "A -megammr node is required to use this Wallet.", "Confirm the secret key uses before sending.", "Check on-chain", "wwArmed = true", "The last send's status is UNKNOWN", "I've checked",
+  for (const must of ["Never type your secret key into a website Web Wallet", "A -megammr node is required to use this Wallet.", "Confirm key uses for this payment", "Check on-chain", "wwArmed = true", "The last send's status is UNKNOWN", "I've checked",
     "Search tokens", "No results found", "Log out of this session", "Enter recipient address (Mx or 0x)", ">Balance<" , "Secret key uses"]) assert.ok(ww.includes(must) || ww.includes(must.replace(/[<>]/g, "")), "kept or added: " + must);
   assert.ok(!/Remember me|rememberme|Generate secret key/i.test(ww.replace(/\/\/[^\n]*/g, "")), "no Remember me, no key generation");
   assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
@@ -498,7 +491,7 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
 });
 // 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
 // redirects, and an unread figure counted as 0.
-test("Web Wallet: the public key leaves only on a click, with no redirect; Confirm refuses while the on-chain uses are unread, never taking them as 0", async () => {
+test("Web Wallet: the archive lookup checks one public key and distinguishes zero uses from an unread result", async () => {
   const K = require("../main/keyuses.js"), PK = "0x3A985DA74FE225B2045C172D6BD390BD855F086E3E9D525B46BFE24511431532", asked = [];
   const get = (reply) => async (url) => { asked.push(url); if (reply instanceof Error) throw reply; return reply; };
   const row = (o) => ({ status: true, keys: [Object.assign({ publickey: PK, address: "0x39EE", spend_blocks: 4, spent_coins: 9 }, o)] });
@@ -512,24 +505,47 @@ test("Web Wallet: the public key leaves only on a click, with no redirect; Confi
   const before = asked.length;
   for (const bad of ["", null, undefined, [PK], "0x12", PK + ",0x" + "11".repeat(32), PK + "&x=1", "https://evil.example/"]) assert.equal(await K.onchainUses(bad, get(row())), null, "not one public key: " + String(bad));
   assert.equal(asked.length, before, "and nothing was asked for those");
-  // the figure recorded at Confirm
-  const C = Act.ww.confirmUses;
-  assert.equal(C("0", 9), 9, "never below the chain's figure"); assert.equal(C("20", 9), 20, "a higher typed figure stands (main refuses one past the last use, 262143)"); assert.equal(C("", 0), 0); for (const bad of ["abc", "-5", "7.9"]) assert.ok(Number.isNaN(C(bad, 3)), bad + ": refused, never floored (0.19.324, changed on purpose: it was read as 3, 3 and 7)");
-  for (const unread of [null, undefined, NaN, -1, 1.5, "9", {}]) assert.equal(C("50", unread), null, "unread (" + String(unread) + "): refused, whatever was typed");
   const ww = app.slice(app.indexOf("// ===================== Web Wallet"), app.indexOf("function renderActive() {")), mainJs = fs.readFileSync(path.join(__dirname, "..", "main", "main.js"), "utf8");
-  assert.equal((ww.match(/api\.keyAudit\(/g) || []).length, 1, "one place asks");
-  assert.ok(/const readOnchain = async \(\) => \{ let n = null; try \{ n = await api\.keyAudit\(a\.publickey\); \}/.test(ww) && /el\("wwKuConfirm"\)\.addEventListener\("click"/.test(ww) && /el\("wwKuCheck"\)\.addEventListener\("click"/.test(ww));
   const login = ww.slice(ww.indexOf("function renderWwUnlock"), ww.indexOf("function wwAmount"));
-  assert.ok(login.includes("api.wwDerive(seed)") && !/keyAudit|readOnchain/.test(login), "logging in asks the audit service nothing");
-  assert.ok(/const n = AppsAct\.ww\.confirmUses\(typed, wwKuSuggest != null \? wwKuSuggest : await readOnchain\(\)\);\s*if \(wwAddr !== a\) return;[^\n]*\n\s*if \(n == null\) \{[^\n]*\n\s*(?:\/\/[^\n]*\n\s*)?toast\("This key's on-chain uses could not be read from the key-use service \(eurobuddha\.com\)\. Nothing can be sent from this wallet until they can/.test(ww), "Confirm reads the chain itself when it was not read, and stops there when it cannot, saying why plainly (CHANGED on purpose, 0.19.254)");
-  assert.ok(ww.indexOf("only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer.") < ww.indexOf('id="wwKuCheck"') && ww.indexOf("only this wallet's public key is sent to eurobuddha.com") > 0, "the privacy line is on the screen before either button");
+  assert.ok(login.includes("api.wwDerive(seed)") && !login.includes("api.keyAudit"));
   assert.ok(/ipcMain\.handle\("mcd:keyAudit", \(_e, publicKey\) => keyuses\.onchainUses\(publicKey, \(url\) => netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\)\)\);/.test(mainJs), "main: no redirect is followed, and a reply of at most 512 KB is read");
   assert.ok(!/KEYUSES_BASE|the ONLY user-initiated external call/.test(mainJs), "the second copy of the host and the stale comment are gone");
-  assert.ok(/if \(!e0\.ack\) throw new Error\("Confirm this wallet's key-uses count before sending"\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"), "utf8")), "and the main process still refuses a send before that confirmation (main/webwallet.js; the gate reads the one store read since 0.19.230)");
+
+});
+test("Opening Send checks both floors, requires fresh input, and handles retries and wallet switches", async () => {
+  const source = app.slice(app.indexOf("function wwVerifyPayment(a)"), app.indexOf("// The original's logout dialog"));
+  const addr = { address: "test-address", publickey: "test-pubkey" }, elements = {}, calls = [];
+  const el = id => elements[id] ||= { isConnected: true, value: "" };
+  let chain = 18, local = 14, payments = 0, unresolved = false;
+  const api = {
+    keyAudit: async pk => { calls.push(pk); return chain; },
+    wwKeyuses: async address => { assert.equal(address, addr.address); return { keyuses: local }; }
+  };
+  const t = (key, args) => key.replace(/\{(\w+)\}/g, (_, k) => args[k]);
+  const open = new Function("api", "el", "AppsAct", "wwAddr", "wwUnknown", "wwDoSend", "t",
+    "let wwArmed, wwForm = {}; const wwPayments = new Set(); " + source + "; return wwVerifyPayment;")(api, el, Act, addr, () => unresolved, () => payments++, t);
+  const field = el("wwKuIn"), send = el("wwSendBtn"), retry = el("wwKuCheck"), status = el("wwKuFloor");
+  await open(addr);
+  assert.deepEqual(calls, [addr.publickey]); assert.match(status.textContent, /from 18 to 262143/);
+  assert.equal(field.value, ""); assert.equal(send.disabled, true);
+  for (const input of ["", "17", "18.5", " 18", "1e2", "262144"]) {
+    field.value = input; field.oninput(); send.onclick(); assert.equal(send.disabled, true);
+  }
+  assert.equal(payments, 0);
+  field.value = "23"; field.oninput(); assert.equal(send.disabled, false); send.onclick(); assert.equal(payments, 1);
+  unresolved = true; field.oninput(); send.onclick(); assert.equal(send.disabled, true); assert.equal(payments, 1);
+  unresolved = false; chain = null; await open(addr);
+  assert.equal(field.value, ""); assert.equal(field.disabled, true); assert.equal(retry.hidden, false);
+  chain = 0; local = 25; await retry.onclick(); assert.match(status.textContent, /from 25 to 262143/);
+  assert.equal(send.disabled, true); assert.equal(field.disabled, false);
+  local = 262144; await open(addr); assert.equal(field.disabled, true); assert.match(status.textContent, /signing limit/);
+  local = 0; chain = 0; await open(addr); field.oninput(); assert.equal(send.disabled, true);
+  field.value = "0"; field.oninput(); assert.equal(send.disabled, false);
+  const pending = open(addr); field.isConnected = false; await pending; assert.equal(field.disabled, true);
 });
 test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and outlives Logout and leaving the screen; only \"I've checked\" clears it", () => {
   const line = (re) => app.match(re)[0];
-  const W = new Function("let wwSeed = 's', wwAddr = { address: 'MxA' }, wwBal = [1], wwKu = {}, wwArmed = true, wwKuSuggest = 3, wwTab = 'send', wwSearch = 'x', wwForm = {};\nconst WW_UNKNOWN = new Set();\n"
+  const W = new Function("let wwSeed = 's', wwAddr = { address: 'MxA' }, wwBal = [1], wwArmed = true, wwTab = 'send', wwSearch = 'x', wwForm = {};\nconst WW_UNKNOWN = new Set();\n"
     + app.slice(app.indexOf("function wwUnknown("), app.indexOf("\n}", app.indexOf("function wwUnknown(")) + 2) + "\n" + line(/function wwLock\(\) \{[^\n]*\}/) + "\nreturn { wwUnknown, wwLock, seed: () => wwSeed };")();
   const A = "MxG0" + "A".repeat(56), B = "MxG0" + "B".repeat(56);
   assert.equal(W.wwUnknown(A), false);
@@ -543,8 +559,8 @@ test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and 
   assert.ok(!/wwAmbiguous/.test(ww), "the per-session flag that Logout reset is gone");
   assert.equal((ww.match(/wwUnknown\([^)]*, false\)/g) || []).length, 1, "cleared in exactly one place");
   assert.ok(/id="wwAmbigClear"/.test(ww) && /ambigBtn\.addEventListener\("click", \(\) => \{ wwUnknown\(wwAddr && wwAddr\.address, false\);/.test(ww), "and that place is the \"I've checked\" button");
-  assert.ok(/const from = wwAddr\.address;[^\n]*\n\s*const r = await AppsAct\.ww\.send\(api, f\);/.test(ww) && /wwUnknown\(from, true\);/.test(ww), "recorded for the wallet the send left, even if the screen was logged out before the answer");
-  assert.ok(/if \(wwUnknown\(wwAddr && wwAddr\.address\)\) \{ toast\("The last send's status is UNKNOWN\./.test(ww) && /const off = \(ku\.ack && !unknown\) \? "" : "disabled";/.test(ww), "Send is off, and refuses, while it stands");
+  assert.ok(ww.includes("from = wallet.address") && ww.includes("wwUnknown(from, true)"), "the uncertain payment stays with its sending address");
+  assert.ok(ww.includes("if (wwUnknown(wwAddr && wwAddr.address))") && ww.includes("&& !wwUnknown(a.address)"), "an unresolved payment blocks sending");
 });
 
 // ---- 0.19.124: small things from the review ----

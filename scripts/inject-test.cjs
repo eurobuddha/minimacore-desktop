@@ -120,8 +120,8 @@ test("Web Wallet: a sent payment is logged with its whole token id and addresses
     : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
     : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
     : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("txnpost") ? { status: true, response: { txpowid: "0x" + "01".repeat(32) } } : { status: true, response: {} });
-  ww.setOnchain(async () => 0); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, 0); ww.setOnchain(async () => null);   // a first confirmation is checked against the chain (0.19.270)
-  const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
+  ww.setOnchain(async () => 0); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, 0);   // a first confirmation is checked against the chain (0.19.270)
+  const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD, keyuses: "0" });
   assert.equal(r.ok, true);
   const line = ww.status().log.slice(-1)[0];
   assert.ok(line.includes("token " + MXUSD) && line.includes("from " + FROM) && line.includes("to " + TO), line);
@@ -147,8 +147,8 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
   }
   fs.rmSync(file);
   for (const c of ["abc", -1, 1.5, "", null]) await assert.rejects(ww.ackKeyuses(FROM, c), /whole number of at least 0/, String(c));
-  ww.setOnchain(async () => 7); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, "7"); ww.setOnchain(async () => null);   // checked against the chain's figure (0.19.270)
-  sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true);
+  ww.setOnchain(async () => 7); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, "7");   // checked against the chain's figure (0.19.270)
+  sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00", keyuses: "7" })).ok, true);
   assert.match(sends()[0], /^txnpost id:.* mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
   keysOk = false; sent.length = 0;
   await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /node's keys could not be read/);
@@ -258,7 +258,7 @@ test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 an
   assert.ok(!fs.existsSync(file));
   // the boundary: 262143 is accepted, its one send signs at 262143, the next is refused
   chain = 262143; assert.deepEqual(await ww.ackKeyuses(FROM, 262143), { address: FROM, keyuses: 262143, ack: true });
-  const go = () => ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" });
+  const go = () => ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00", keyuses: "262143" });
   assert.equal((await go()).ok, true); assert.deepEqual(sent, ["262143"]);
   await assert.rejects(go(), /This wallet's count for this key has reached the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. This app will not sign from this address: signing past the last use \(262143\) would reuse a one-time key, which can lose funds\. Nothing was sent\./); assert.deepEqual(sent, ["262143"], "nothing more reached the node");
   // a count an older version stored past the last use refuses every send, and is never lowered
@@ -266,7 +266,7 @@ test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 an
   await assert.rejects(go(), /This wallet's saved key-use count \(1000000\) is above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered\. This app will not sign from this address: signing past the last use \(262143\) would reuse a one-time key, which can lose funds\. Nothing was sent\./);
   await ww.ackKeyuses(FROM, 7); assert.equal(ww.keyusesInfo(FROM).keyuses, 1000000, "never lowered"); assert.deepEqual(sent, ["262143"]);
   const app = rd("renderer/app.js");
-  assert.ok(app.includes('id="wwKuIn" type="number" min="0" max="262143" step="1"') && !/too high is safe/.test(app) && app.includes("A key has 262144 one-time uses, so this is a whole number from 0 to 262143."), "the window says the limit and no longer that too high is safe");
+  assert.ok(app.includes("Enter a number from {minimum} to 262143."));
   ww.setOnchain(async () => null);
 });
 
@@ -291,11 +291,9 @@ test("Web Wallet: a damaged entry's old count (57, \"57\", 57.5, \"57.5\") is a 
     await assert.rejects(ww.ackKeyuses(FROM, 262143), /saved key-use count \(\d+\) is above the limit of a key of this wallet \(262144 one-time uses, numbered 0 to 262143\)\. It was probably confirmed too high before this version checked it, .* Nothing was saved\./, "never 'confirm at least " + old + "'");
   }
   ww.setOnchain(async () => null);
-  const Act = require("../renderer/apps-act.js"), app = rd("renderer/app.js");
-  for (const bad of ["7.9", "-5", "abc", "1e3", "3 4"]) { assert.equal(Act.ww.wholeCount(bad), false, bad); assert.ok(Number.isNaN(Act.ww.confirmUses(bad, 3)), bad + ": refused, not floored"); }
-  for (const ok of ["", " 12 ", "0", 7]) assert.equal(Act.ww.wholeCount(ok), true, String(ok));
-  assert.ok(app.includes('if (!AppsAct.ww.wholeCount(typed)) { toast(t("The key uses must be a whole number of at least 0."), "err"); return; }'), "Confirm refuses a typed fraction before anything is read or saved");
-  assert.ok(app.includes('toast(t("Secret key uses confirmed: {n}", { n: wwKu.keyuses }), "ok")'), "the toast says the figure main kept");
+  const Act = require("../renderer/apps-act.js");
+  for (const bad of ["7.9", "-5", "abc", "1e3", "3 4", "", " 12 ", 7]) assert.equal(Act.ww.validUses(bad, 3), false);
+  assert.equal(Act.ww.validUses("3", 3), true);
   assert.ok(/\.toast--copy \{[^}]*overflow-wrap: anywhere/.test(rd("renderer/app.css")), "a whole id in a toast wraps instead of running off the window");
 });
 
@@ -321,19 +319,31 @@ test("A concurrent send cannot reserve another leaf and an unanswered publicatio
     return { status: true, response: {} };
   });
   await ww.derive(seed);
-  ww.setOnchain(async () => 10);
-  await ww.ackKeyuses(FROM, 10);
-  const send = () => ww.send({ seed, to: FROM, amount: "1" });
-  const first = send();
+  let chain = 7, checkAgain;
+  ww.setOnchain(async pk => { assert.equal(pk, PK); if (checkAgain) checkAgain(); return chain; });
+  await ww.ackKeyuses(FROM, 9);
+  const send = keyuses => ww.send({ seed, to: FROM, amount: "1", keyuses });
+  for (const omitted of [undefined, "", " 9 ", "9.5", 9]) await assert.rejects(send(omitted), /Confirm this wallet/);
+  await assert.rejects(send("8"), /saved next key use is 9/);
+  chain = 10; await assert.rejects(send("9"), /chain shows 10/);
+  chain = null; await assert.rejects(send("10"), /could not be read/);
+  chain = 262144; await assert.rejects(send("262143"), /at or above the limit/);
+  chain = 0;
+  checkAgain = () => fs.writeFileSync(path.join(DIR, "webwallet-keyuses.json"), JSON.stringify({ [FROM]: { keyuses: 10, ack: true } }));
+  await assert.rejects(send("9"), /saved next key use is 10/);
+  checkAgain = null;
+  assert.deepEqual(leaves, []);
+  const first = send("17");
   await waiting;
-  await assert.rejects(send(), /already in progress/);
-  assert.deepEqual(leaves, ["10"]);
-  assert.equal(ww.keyusesInfo(FROM).keyuses, 11);
+  await assert.rejects(send("17"), /already in progress/);
+  assert.deepEqual(leaves, ["17"]);
+  assert.equal(ww.keyusesInfo(FROM).keyuses, 18);
   release({ status: true, response: {} });
   assert.equal((await first).ambiguous, true);
   valid = false;
-  await assert.rejects(send(), /could not validate/);
-  assert.deepEqual(leaves, ["10", "11"]);
+  await assert.rejects(send("17"), /saved next key use is 18/);
+  await assert.rejects(send("18"), /could not validate/);
+  assert.deepEqual(leaves, ["17", "18"]);
   assert.equal(commands.filter(c => c === "txnpost").length, 1);
 });
 test("The classic node's own signing key only reads its classic address and directs spending to Wallet", async () => {

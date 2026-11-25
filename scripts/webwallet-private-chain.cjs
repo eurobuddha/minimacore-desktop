@@ -53,11 +53,11 @@ async function run(mode, port, classic) {
       assert.deepEqual(wallet, classic);
     }
     ww.setOnchain(async () => 0);
-    await ww.ackKeyuses(wallet.address, ww.keyusesInfo(wallet.address).keyuses);
+    const recordedUse = () => String(ww.keyusesInfo(wallet.address).keyuses);
     const to = (await ok("getaddress")).address;
     await until(async () => (await cmd("send amount:7 address:" + wallet.address + " mine:true")).status, "genesis funding");
     await until(async () => (await ok("coins megammr:true coinage:3 address:" + wallet.address)).length, "confirmed funding");
-    const res = await ww.send({ seed: phrase, to, amount: "2.5" });
+    const res = await ww.send({ seed: phrase, keyuses: recordedUse(), to, amount: "2.5" });
     assert.equal(res.ok, true, res.message);
     await until(async () => (await ww.read(wallet.address)).some(row => row.tokenid === "0x00" && row.confirmed === "4.5"), "confirmed change");
     assert.ok((await ok("coins megammr:true address:" + to)).some(c => c.amount === "2.5"));
@@ -69,7 +69,7 @@ async function run(mode, port, classic) {
       }, "issued test token");
       await until(async () => (await cmd("send tokenid:" + token + " amount:5.75 address:" + wallet.address + " mine:true")).status, "token funding");
       await until(async () => (await ok("coins megammr:true coinage:3 tokenid:" + token + " address:" + wallet.address)).length, "confirmed token funding");
-      const tokenSend = await ww.send({ seed: phrase, to, amount: "1.25", tokenid: token });
+      const tokenSend = await ww.send({ seed: phrase, keyuses: recordedUse(), to, amount: "1.25", tokenid: token });
       assert.equal(tokenSend.ok, true, tokenSend.message);
       await until(async () => (await ww.read(wallet.address)).some(r => r.tokenid === token && Number(r.confirmed) === 4.5), "confirmed token change");
       assert.ok((await ok("coins megammr:true tokenid:" + token + " address:" + to)).some(c => c.tokenamount === "1.25"));

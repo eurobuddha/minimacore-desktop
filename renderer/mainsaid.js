@@ -416,6 +416,7 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
     ["WW_DAMAGED_SEND", I18N.N_("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent.")],
     ["WW_DAMAGED_UNREAD", I18N.N_("This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.")],
     ["WW_FIRST_UNREAD", I18N.N_("The chain's figure for this key could not be read (the key-use service may be unreachable), so the count you confirm cannot be checked against it. Nothing was saved; confirm again when it can be read.")],
+    ["WW_SAVED_MIN", I18N.N_("The saved next key use is {count}. Enter at least that number.")],
     ["WW_BELOW_CHAIN", I18N.N_("The chain shows {chain} uses of this key. Confirm at least that many. Nothing was saved.")],
     ["WW_ABOVE_LAST", I18N.N_("The key-use count can be at most 262143 (a key of this wallet has 262144 one-time uses, numbered 0 to 262143). Nothing was saved.")],
     ["WW_USED_UP", I18N.N_("The chain's figure for this key ({chain}) is at or above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). The figure can count more uses than the key signed, but this app will not sign from this address: signing past the last use would reuse a one-time key, which can lose funds. Nothing was saved.")],
