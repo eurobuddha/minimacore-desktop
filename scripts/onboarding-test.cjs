@@ -55,7 +55,7 @@ async function exercise(){
   }catch(e){document.documentElement.dataset.setupTest=e.message;}
 }
 const chrome=[process.env.CHROME_BIN,"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome","/usr/bin/google-chrome","/usr/bin/chromium"].find(f=>f&&fs.existsSync(f));
-test("Guided wallet routes, server defaults, port help and NAT fallback",{skip:chrome?false:"Chrome unavailable"},()=>{
+function browserExercise(run) {
   const renderer=path.resolve(__dirname,"../renderer"),tmp=fs.mkdtempSync(path.join(os.tmpdir(),"pandamonium-setup-ui-"));
   try{
     const stub=pathToFileURL(path.join(__dirname,"dev-preview","stub.js"));
@@ -63,9 +63,34 @@ test("Guided wallet routes, server defaults, port help and NAT fallback",{skip:c
       .replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/,"")
       .replace("<head>",`<head><base href="${pathToFileURL(renderer+path.sep)}">`)
       .replace('<script src="i18n.js">',`<script src="${stub}"></script><script>(${fixture})();</script><script src="i18n.js">`)
-      .replace("</body>",`<script>(${exercise})();</script></body>`);
+      .replace("</body>",`<script>(${run})();</script></body>`);
     const file=path.join(tmp,"wallet.html");fs.writeFileSync(file,page);
     const html=execFileSync(chrome,["--headless","--disable-gpu","--no-first-run","--user-data-dir="+path.join(tmp,"profile"),"--allow-file-access-from-files","--window-size=680,690","--virtual-time-budget=8500","--dump-dom",pathToFileURL(file).href],{encoding:"utf8",stdio:["ignore","pipe","pipe"],maxBuffer:5e6,timeout:45000});
     assert.match(html.slice(0,1800),/data-setup-test="passed"/,html.slice(0,500));
   }finally{fs.rmSync(tmp,{recursive:true,force:true});}
-});
+}
+
+test("Guided wallet routes, server defaults, port help and NAT fallback",{skip:chrome?false:"Chrome unavailable"},()=>browserExercise(exercise));
+
+async function checkRecoveryScreen() {
+  try {
+    await new Promise(r=>setTimeout(r,50));
+    CFG=await api.saveConfig({walletDone:true,setupDone:true});
+    running=true;
+    const progress={host:"example.test:9001",active:true,connected:true,proofs:16,result:"",lines:["Import CoinProofs.. 16"]};
+    LAST_STATUS={state:"running",hostResync:progress};
+    bkOpen("resync");
+    if(el("bkProg").hidden || !el("bkGo").disabled || !el("bkStage").textContent.includes("Connected to example.test:9001") || !el("bkStage").textContent.includes("Coin proofs received: 16"))throw Error("missing live evidence");
+    running=false;LAST_STATUS.state="stopped";bkOpen("");bkOpen("resync");
+    if(!el("bkLog").textContent.includes("Import CoinProofs.. 16"))throw Error("restart lost proof log");
+    progress.result="complete";progress.active=false;LAST_STATUS.state="running";paintHostProgress(LAST_STATUS);
+    if(!el("bkStage").textContent.includes("Resync complete") || el("bkGo").disabled)throw Error("completion missing");
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="7" height="9"><rect width="7" height="9" fill="red"/></svg>';
+    const coin={collection:true,edition:"1",token:{name:{mode:"embed"}},state:[{port:1,data:"["+btoa(svg)+"]"}]};
+    const tile=document.createElement("div");tile.innerHTML=nftPicture(coin);
+    const img=tile.querySelector("img");await img.decode();
+    if(img.naturalWidth!==7 || img.naturalHeight!==9 || !img.src.startsWith("data:image/svg+xml;base64,"))throw Error("SVG failed to display");
+    document.documentElement.dataset.setupTest="passed";
+  }catch(e){document.documentElement.dataset.setupTest=e.message;}
+}
+test("Host resync log survives navigation and restart, and the gallery decodes sealed SVG artwork",{skip:chrome?false:"Chrome unavailable"},()=>browserExercise(checkRecoveryScreen));

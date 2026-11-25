@@ -1031,3 +1031,35 @@ test("saved settings: an mds* param never reaches the node, and -rescuenode take
   config.save({ params: { rescuenode: "megammr.example:9001" } }); assert.equal(config.effectiveParams().rescuenode, "megammr.example:9001");
   assert.throws(() => config.save({ extraArgs: '-test "-rescuenode" h:1' }), /-rescuenode is set in Startup Params/);
 });
+
+
+test("host resync keeps connection and proof evidence across log rotation, restart and refusal", async () => {
+  const {EventEmitter} = require("node:events");
+  const manager = new EventEmitter();
+  manager.runResync = node.runResync;
+  manager.snapshot = () => ({});
+  const command = "megammrsync action:resync host:example.test:9001";
+  manager.performResync = async () => {
+    assert.equal(manager.hostResync.active, true);
+    const line = text => manager.emit("line", "Minima @ 25/11/2026 12:00:00 [1 GB] : " + text);
+    line("Check Connection passed!");
+    line("Import CoinProofs.. 0");
+    for(let i=0;i<20;i++)line("Restart log " + i);
+    return {status:true};
+  };
+  await manager.runResync(command);
+  assert.equal(manager.hostResync.proofs,0);
+  assert.equal(manager.hostResync.connected,true);
+  assert.equal(manager.hostResync.result,"complete");
+  assert.equal(manager.hostResync.lines.length,8);
+  assert.equal(manager.listenerCount("line"),0);
+  manager.performResync = async () => ({status:false,error:"Host unavailable"});
+  await manager.runResync(command);
+  assert.equal(manager.hostResync.proofs,null);
+  assert.equal(manager.hostResync.connected,false);
+  assert.equal(manager.hostResync.result,"failed");
+  manager.performResync = async () => {throw Error("No response");};
+  await assert.rejects(manager.runResync(command), /No response/);
+  assert.equal(manager.hostResync.result,"unconfirmed");
+  assert.equal(manager.hostResync.active,false);
+});

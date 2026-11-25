@@ -58,7 +58,15 @@
     if (/^<svg/i.test(t) && /<\/svg>\s*$/i.test(t)) {
       try { return { data: "data:image/svg+xml;base64," + b64encode(t), remote: null }; } catch (e) { return { data: null, remote: null }; }
     }
-    if (t.length >= 100 && B64.test(t)) return { data: "data:image/png;base64," + t, remote: null };
+    if (t.length >= 100 && B64.test(t)) {
+      const head = atob(t.slice(0, 32));
+      let type = "png";
+      if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") type = "webp";
+      else if (head.startsWith("\xff\xd8")) type = "jpeg";
+      else if (head.startsWith("GIF8")) type = "gif";
+      else if (/^\s*(?:<svg\b|<\?xml\b)/i.test(head.replace(/^\xef\xbb\xbf/, ""))) type = "svg+xml";
+      return { data: "data:image/" + type + ";base64," + t, remote: null };
+    }
     return { data: null, remote: null };
   }
 

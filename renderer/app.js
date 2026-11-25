@@ -236,6 +236,7 @@ function onStatus(s) {
   if (s.megammrBroken && s.bootTs && megaBrokenSaid !== s.bootTs && megaBrokenSeen() !== String(s.bootTs)) { megaBrokenSaid = s.bootTs; megaBrokenSeen(String(s.bootTs)); megammrBrokenNotice(); }   // once per node start, whichever window
   paintMegaBar(s);
   paintNoteBar(s);
+  if (activeView === "backup" && BK_PAGE === "resync") paintHostProgress(s);
   if (activeView === "backup" && BK_PAGE === "megafile") paintImportProgress(s);   // every step of a MegaMMR file import, on its own screen
   // The Parlons tab follows the account, not the chain: re-render on a readiness/error change only.
   if (s.parlons) {
@@ -640,6 +641,9 @@ function backupPasswordProblem(pw, again) {
   if (pw !== again) return t("The two passwords do not match");
   return "";
 }
+function recoveryLogPane() {
+  return `<div id="bkProg" hidden><div class="bk-stage" id="bkStage" role="status" aria-live="polite"></div><div class="eyebrow ps-label">${th("Node log")}</div><div class="bk-mono bk-log" id="bkLog"></div></div>`;
+}
 function renderBackup() {
   const host = el("backupBody"), $ = (id) => host.querySelector("#" + id);
   el("barPage").textContent = t(BK_TITLE[BK_PAGE]);
@@ -647,7 +651,9 @@ function renderBackup() {
   const field = (id, label, attrs) => `<div class="eyebrow ps-label">${esc(label)}</div><input class="field__input ps-field" id="${id}" autocomplete="off" spellcheck="false" ${attrs || ""}/>`;
   const stopped = `<div class="ps-tile ps-tile--strong" role="status">${th("The node is not running. Start the node before backing up or restoring.")}</div>`;
   const importing = !!(LAST_STATUS && LAST_STATUS.megafileBusy === "import");   // its screen stays reachable while it runs (the node restarts during it)
-  if (BK_PAGE && !running && BK_PAGE !== "megaoff" && !(BK_PAGE === "megafile" && importing)) { host.innerHTML = head(t(BK_TITLE[BK_PAGE]), "") + stopped; return; }   // Turn MegaMMR off works stopped
+  const hostProgress = LAST_STATUS?.hostResync;
+  const canReadProgress = page => (page === "megafile" && importing) || (page === "resync" && !!hostProgress);
+  if (BK_PAGE && !running && BK_PAGE !== "megaoff" && !canReadProgress(BK_PAGE)) { host.innerHTML = head(t(BK_TITLE[BK_PAGE]), "") + stopped; return; }   // Turn MegaMMR off works stopped
 
   if (BK_PAGE === "") {
     const rows = [["create", t("Create backup"), t("Write an encrypted .bak of this node into its data folder.")],
@@ -659,7 +665,7 @@ function renderBackup() {
       ["keys", t("Private keys"), t("Seed phrase, or rebuild this wallet from a phrase.")]];
     if ((CFG.params || {}).megammr) rows.splice(rows.findIndex(r => r[0] === "megafile") + 1, 0, ["megaoff", t("Turn MegaMMR off"), t("Go back to a light node. The node's MegaMMR file is deleted.")]);
     host.innerHTML = head(t("Backup & Recovery"), t("Save a copy of this node, put it back, or rebuild it from another node.")) + (running ? "" : stopped) +
-      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${nodeBusyNow() && !/^(chat|mail|create)$/.test(r[0]) && !(r[0] === "megafile" && importing) ? busyAttr() : running || r[0] === "megaoff" || (r[0] === "megafile" && importing) ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
+      `<div class="bk-rows">` + rows.map(r => `<button class="bk-row" data-bk="${r[0]}"${nodeBusyNow() && !/^(chat|mail|create)$/.test(r[0]) && !canReadProgress(r[0]) ? busyAttr() : running || r[0] === "megaoff" || canReadProgress(r[0]) ? "" : " disabled"}><span class="bk-row__t">${esc(r[1])}</span><span class="bk-row__s">${esc(r[2])}</span></button>`).join("") + `</div>`;
     host.querySelectorAll(".bk-row").forEach(b => b.onclick = () => {
       const k = b.dataset.bk;
       if (k === "chat") showActionSheet(t("Chat backup"), [{ label: t("Back up chats"), onclick: () => ChatPanel.backup() }, { label: t("Restore chats"), onclick: () => ChatPanel.restore() }]);
@@ -707,6 +713,10 @@ function renderBackup() {
       // The node shut itself down at the end and the main process started it again, through every start check.
       const after = await api.nodeStatus();
       if (after.state === "error") { st.textContent = t("{label} finished, but the node was not started again. {lastError}", { label: label, lastError: MainSaid.say(after.lastError || "") }); btn.disabled = false; btn.textContent = btn.dataset.label; return; }
+      if (built.hostOnly) {
+        if (BK_PAGE === "resync") paintHostProgress(after);
+        return;
+      }
       toast(t("{label} complete ✓ The node is restarting.", { label: label }), "ok"); bkOpen("");
     } catch (e) { st.textContent = t("{label} not completed. {e}", { label: label, e: ipcError(e) }); btn.disabled = false; btn.textContent = btn.dataset.label; }
   };
@@ -723,8 +733,9 @@ function renderBackup() {
 
   if (BK_PAGE === "resync") {
     host.innerHTML = head(t("Resync node"), t("Choose a Minima MegaMMR node to resync from. Use the format host:port.")) + hostField +
-      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Resync")}">${th("Resync")}</button><div class="bk-status" id="bkStatus" role="status"></div>`;
-    $("bkGo").onclick = () => { const h = $("bkHost").value.trim(); run("bkGo", t("Resync"), built({ host: h }), t("Resync this node?"),
+      `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Resync")}">${th("Resync")}</button><div class="bk-status" id="bkStatus" role="status"></div>` + recoveryLogPane();
+    paintHostProgress(LAST_STATUS);
+    $("bkGo").onclick = () => { const h = $("bkHost").value.trim(); run("bkGo", t("Resync"), {...built({ host: h }), hostOnly:true}, t("Resync this node?"),
       t("Minima will rebuild its chain data from {h}.\n\n• Your wallet and seed phrase are not touched.\n• Any transaction still waiting to be mined is dropped.\n\nThis can take a while on a slow connection.", { h: h }), t("Resync")); };
     return;
   }
@@ -747,7 +758,7 @@ function renderBackup() {
   if (BK_PAGE === "megafile") {
     host.innerHTML = head(t("Resync from a MegaMMR file"), t("Import a MegaMMR file from this computer. A light node is switched to MegaMMR mode for it and keeps the whole MegaMMR afterwards. Your wallet and seed phrase are not touched.")) + filePick(t("MegaMMR file")) +
       `<button class="btn btn--primary ps-btn ps-btn--main ps-btn--go" id="bkGo" data-label="${th("Import")}"${busyAttr()}>${th("Import")}</button><div class="bk-status" id="bkStatus" role="status"></div>
-      <div id="bkProg" hidden><div class="bk-stage" id="bkStage" role="status" aria-live="polite"></div><div class="eyebrow ps-label">${th("Node log")}</div><div class="bk-mono bk-log" id="bkLog"></div></div>`;
+      ` + recoveryLogPane();
     wirePick("megammr"); paintImportProgress(LAST_STATUS);
     $("bkGo").onclick = async () => { const f = chosen; if (!f) { $("bkStatus").textContent = t("Choose the file first."); return; }
       // a file whose MegaMMR ends more than 30 days behind this node: said in the question, never refused (main/megammrfile.js fileAge)
@@ -827,13 +838,37 @@ function importStage(step) {
   return s;
 }
 /** The import's screen while it runs: the step, and the node's last lines (redacted as the Logs are), whole. */
+function paintHostProgress(s) {
+  const box = el("bkProg");
+  if (!box || BK_PAGE !== "resync") return;
+  const p = s?.hostResync;
+  const stages = [];
+  if (p) {
+    stages.push(p.connected ? t("Connected to {host}", p) : p.active ? t("Connecting to {host}…", p) : p.host);
+    if (p.proofs != null) stages.push(t("Coin proofs received: {n}", {n:p.proofs}));
+    if (p.result === "complete") stages.push(t("Resync complete"));
+    if (p.result === "failed") stages.push(t("{label} not completed. {e}", {label:t("Resync"), e:p.error || ""}));
+    if (p.result === "unconfirmed") stages.push(t("Resync result unconfirmed") + (p.error ? " · " + p.error : ""));
+    if (s.state === "error" && s.lastError) stages.push(MainSaid.say(s.lastError));
+    if (p.active && p.proofs != null && s.state === "starting") stages.push(t("Restarting the node…"));
+  }
+  box.hidden = false;
+  el("bkGo").disabled = !!p?.active || s?.state !== "running" || !!s?.resyncing || !!s?.megafileBusy;
+  if (p && !p.active) el("bkGo").textContent = t("Resync");
+  el("bkHost").disabled = !!p?.active;
+  if (p?.active) el("bkHost").value = p.host;
+  drawRecoveryLog(stages.join(" · "), p ? p.lines : logLines.slice(-8));
+}
+function drawRecoveryLog(stage, lines) {
+  el("bkStage").textContent = stage;
+  const log = el("bkLog"), text = lines.join("\n");
+  if (log.textContent !== text) { log.textContent = text; log.scrollTop = log.scrollHeight; }
+}
 function paintImportProgress(s) {
   const host = el("backupBody"), box = host && host.querySelector("#bkProg"); if (!box) return;
   const on = !!(s && s.megafileBusy === "import");
   box.hidden = !on; if (!on) return;
-  host.querySelector("#bkStage").textContent = importStage(s.megafileStep) || t("Starting…");
-  const log = host.querySelector("#bkLog"), lines = Array.isArray(s.megafileLog) ? s.megafileLog : [];
-  log.textContent = lines.join("\n"); log.scrollTop = log.scrollHeight;
+  drawRecoveryLog(importStage(s.megafileStep) || t("Starting…"), s.megafileLog || []);
 }
 /** What a MegaMMR file import still owes (main/megammrfile.js marker; its verify() sets the banner in the node's status): said on every
  *  screen, never acted on by itself, and always with an exit that destroys nothing. Not while the import itself or a resync runs. */

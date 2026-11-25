@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.454 · Host resync progress and StateNFT artwork
+
+Resync node shows the remote connection check, coin-proof count, live node log and final result. NFTwallet recognizes embedded SVG edition artwork.
+
 ## 0.19.453 · Snapshot import on first run
 
 The automatic MegaMMR memory setting is 7168 MB. Setup distinguishes the wallet sync host from the selected snapshot provider, displays the downloaded filename, and gives the key-use field a visible border.

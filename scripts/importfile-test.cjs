@@ -316,7 +316,7 @@ test("a broken MegaMMR or Cascade at boot: noticed during the boot only, its way
   const off = app.slice(app.indexOf("async function megammrOffNow()"), app.indexOf("async function megammrOffNow()") + 400);
   assert.ok(off.indexOf("await showConfirm(") < off.indexOf("api.megammrOff()"), "asks first");
   assert.ok(/if \(s\.megammrBroken && s\.bootTs && megaBrokenSaid !== s\.bootTs && megaBrokenSeen\(\) !== String\(s\.bootTs\)\) \{ megaBrokenSaid = s\.bootTs; megaBrokenSeen\(String\(s\.bootTs\)\); megammrBrokenNotice\(\); \}/.test(app), "said from the status, once per node start (0.19.395: not once per window)");
-  assert.ok(/if \(BK_PAGE && !running && BK_PAGE !== "megaoff" && !\(BK_PAGE === "megafile" && importing\)\)/.test(app) && /running \|\| r\[0\] === "megaoff" \|\| \(r\[0\] === "megafile" && importing\) \? "" : " disabled"/.test(app), "Backup & Recovery's Turn MegaMMR off works with the node stopped");
+  assert.ok(app.includes('if (BK_PAGE && !running && BK_PAGE !== "megaoff" && !canReadProgress(BK_PAGE))') && app.includes('running || r[0] === "megaoff" || canReadProgress(r[0])') && app.includes('(page === "megafile" && importing)'), "recovery progress remains accessible during a node restart");
   assert.ok(!app.includes("The node started, but says its MegaMMR"), "the old wording is gone");
 });
 

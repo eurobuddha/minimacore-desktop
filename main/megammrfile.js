@@ -87,6 +87,27 @@ const TIP_REFUSED_BACK = "This file was not imported: {why}. Nothing was importe
 const KEEP_UNSAVED = "Cleared for now, but the app's settings could not be saved ({error}): the import's check comes back at the next start.";
 const FAILED_BACK = "The import failed part-way ({why}). The node was restarted as a light node, as it was before. Your wallet and funds were not touched: your keys are in the wallet and your coins are on the chain. Until the node has resynced, its balance can show less than you hold: use Resync node to rebuild the chain from a MegaMMR node.";
 
+// Both recovery pages follow the same bounded stream of redacted node lines.
+function watchNodeLog(node, record, publish, every = 400) {
+  const lines = [];
+  let last = 0, timer = null;
+  const tell = () => { clearTimeout(timer); timer = null; last = Date.now(); publish(); };
+  const onLine = raw => {
+    const line = String(raw);
+    lines.push(line);
+    if (lines.length > SHOWN_LINES) lines.shift();
+    const prefix = LOGGER.exec(line);
+    record(lines.slice(), prefix ? line.slice(prefix[0].length) : "");
+    const delay = every - (Date.now() - last);
+    if (delay <= 0) tell();
+    else if (!timer) timer = setTimeout(tell, delay);
+  };
+  if (typeof node.on === "function") node.on("line", onLine);
+  return () => {
+    clearTimeout(timer);
+    if (typeof node.removeListener === "function") node.removeListener("line", onLine);
+  };
+}
 function create(d) {
   const node = d.node;
   let busy = "", gen = 0, releasing = false, unwritten = null;   // gen: counts the flows started (a verify that awaited across one gives up)
@@ -104,16 +125,10 @@ function create(d) {
    *  node's last lines as the Logs show them (redacted by node-manager), and its last STEP line, or the flow's own stage ("app:<stage>",
    *  said in the window's language by renderer/app.js importStage). Said to the window at most every 400 ms, and at every stage. → stop(). */
   function show() {
-    const ring = [], every = d.showMs == null ? 400 : d.showMs; let last = 0, timer = null;
-    const tell = () => { timer = null; last = Date.now(); if (busy) said(); };
-    const on = (raw) => {
-      const l = String(raw); ring.push(l); if (ring.length > SHOWN_LINES) ring.shift(); node.megafileLog = ring.slice();
-      const m = LOGGER.exec(l), text = m ? l.slice(m[0].length) : "";
-      if (text && STEP.test(text)) node.megafileStep = text;
-      if (Date.now() - last >= every) tell(); else if (!timer) timer = setTimeout(tell, every - (Date.now() - last));   // the last line of a burst is said too
-    };
-    if (typeof node.on === "function") node.on("line", on);
-    return () => { clearTimeout(timer); if (typeof node.removeListener === "function") node.removeListener("line", on); };
+    return watchNodeLog(node, (lines, text) => {
+      node.megafileLog = lines;
+      if (STEP.test(text)) node.megafileStep = text;
+    }, said, d.showMs);
   }
   const stage = (k) => { node.megafileStep = "app:" + k; said(); };
   /** The marker, read so that anything odd (not an object, no or an unknown stage, another version's) is "importing": verify first, clearable. */
@@ -418,5 +433,5 @@ function create(d) {
   return { importMegammr, megammrOff, resynced, verify, keep, fileAge, marker, exclusive, holdsEngines, busy: () => !!busy, busyWhat: () => busy };
 }
 
-module.exports = { create, BUSY, STATUS_UNKNOWN, ENGINES, IMPORT_OPEN, CHECK_FAILED, CHECK_FAILED_BACK, FAILED, FAILED_BACK, NOT_STARTED, NOT_STARTED_BACK, STEP, LOGGER, STALL_MS,
+module.exports = { create, watchNodeLog, BUSY, STATUS_UNKNOWN, ENGINES, IMPORT_OPEN, CHECK_FAILED, CHECK_FAILED_BACK, FAILED, FAILED_BACK, NOT_STARTED, NOT_STARTED_BACK, STEP, LOGGER, STALL_MS,
   CHECK_UNANSWERED, CHECK_UNANSWERED_BACK, CHANGED_WHY, OOM_SAID, OOM_BACK, KEEP_UNSAVED, TIP_REFUSED, TIP_REFUSED_BACK, DEEP, NEAR, BEHIND, FRESH_MS, OFFER_MS, holds };

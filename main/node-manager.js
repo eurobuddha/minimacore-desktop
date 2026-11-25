@@ -876,6 +876,32 @@ class NodeManager extends EventEmitter {
    * set aside as before 0.18.116 (after a success, and when the result is not known). Never deleted either way.
    */
   async runResync(cmd) {
+    const match = /^megammrsync action:resync host:([\w.-]+:\d+)$/i.exec(cmd);
+    if (!match) return this.performResync(cmd);
+    const progress = {host:match[1], active:true, connected:false, proofs:null, result:"", lines:[]};
+    this.hostResync = progress;
+    const stopWatching = require("./megammrfile").watchNodeLog(this, (lines, text) => {
+      progress.lines = lines;
+      if (text === "Check Connection passed!") progress.connected = true;
+      const count = /^Import CoinProofs\.\. (\d+)$/.exec(text);
+      if (count) progress.proofs = Number(count[1]);
+    }, () => this.emit("status", this.snapshot()));
+    try {
+      const reply = await this.performResync(cmd);
+      progress.result = reply?.status === true ? "complete" : "failed";
+      if (reply?.error) progress.error = scrub(String(reply.error), this.secret);
+      return reply;
+    } catch (error) {
+      progress.result = "unconfirmed";
+      progress.error = scrub(String(error.message || error), this.secret);
+      throw error;
+    } finally {
+      stopWatching();
+      progress.active = false;
+      this.emit("status", this.snapshot());
+    }
+  }
+  async performResync(cmd) {
     const restore = require("./restore"), replaces = restore.replacesWalletFromPhrase(cmd) || restore.loadsBackupFile(cmd);
     this.resyncing = true; this.emit("status", this.snapshot());
     try {
@@ -1048,7 +1074,7 @@ class NodeManager extends EventEmitter {
   snapshot() {
     const kind = this.kind();
     return { state: this.state, keetsEnabled: this.keetsEnabled(), health: this.health, lastError: this.lastError, portOwner: this.portOwner || null,
-             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || (m ? "importing" : ""))(config.load().megammrImport), megafileBanner: this.megafileBanner || null, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
+             jar: this.jarPath(), rpcPort: this.rpcPort(), kind, keyMode: config.load().keyMode, keyModeAlert: this.keyModeAlert, resyncing: !!this.resyncing, hostResync: this.hostResync || null, megafileBusy: this.megafileBusy || "", megafileStep: this.megafileStep || "", megafileLog: this.megafileBusy && Array.isArray(this.megafileLog) ? this.megafileLog.slice() : [], megammrImport: ((m) => (m && typeof m === "object" && String(m.stage || "")) || (m ? "importing" : ""))(config.load().megammrImport), megafileBanner: this.megafileBanner || null, megammrBroken: !!this.megammrBroken, cascadeBroken: !!this.cascadeBroken,
              stopNote: this.state === "stopping" || this.reclaiming ? this.stopNote : "", shutdownNotes: this.shutdownNotes.slice(),
              parlons: Object.assign({ panelPort: this.panelPort(), capePort: this.capePort() }, this.parlons),
              contribute: !!config.load().contribute, portmap: portmap.status(),
