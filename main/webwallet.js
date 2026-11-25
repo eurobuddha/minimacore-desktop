@@ -1,39 +1,13 @@
-/*
- * webwallet.js — a LOCAL, in-app "Web Wallet" for minimaCore Desktop. A NATIVE reproduction of Minima's official
- * Web Wallet v2.5.2 (access a wallet straight from a SEED PHRASE via a -megammr node) — faithful to the original's
- * exact command flow, but auditable, integral to the wrapper, and hardened. Everything runs against the LOCAL node
- * over loopback RPC, so the seed NEVER leaves this machine. It is NOT a server and binds no socket.
- *
- * The public wallet.minima.global drained users because a REMOTE host saw the seed (it signed server-side). Here
- * the "server" is the user's own node on 127.0.0.1 — the seed reaches only the local node, which derives the key
- * with `keys action:genkey` (a pure derivation — NOT written to the wallet DB) and signs node-side.
- *
- * Command flow (VERBATIM from the real webWallet bundle + minima-core source):
- *   derive:  keys action:genkey phrase:"<seed>"            -> { address, miniaddress, publickey, script, privatekey }
- *   read:    balance megammr:true address:<addr>           -> the MegaMMR coin set for the (untracked) address
- *   send:    sendfrom fromaddress:<addr> address:<to> amount:<a> tokenid:<t> script:"<s>" privatekey:<p>
- *            keyuses:<n> mine:false                         -> sendfrom pulls untracked coins from the MegaMMR,
- *                                                             signs node-side (txnsign publickey:custom), broadcasts.
- *
- * SEED = ANY PHRASE (anyphrase). `keys genkey` runs BIP39.convertStringToSeed on the phrase VERBATIM — there is NO
- * dictionary or word-count validation, and the seed is CASE- and SPACING-SENSITIVE. So a seed is NOT "12–24 words":
- * it is whatever string the wallet was created with. It MUST be passed faithfully (never lowercased/collapsed — that
- * derives a different wallet). This mirrors the desktop's own restore flow (renderer/app.js:286-294).
- * (Note: the node parser normalises a `:` inside the quoted phrase and routes `{`/`[` via a different path; we're
- * internally consistent — derive & send use the IDENTICAL string — so the address shown is exactly where a send pulls
- * from. Only matters when importing an external wallet whose passphrase contains those chars.)
- *
- * FUND-CRITICAL — keyuses: the node does NOT track uses for a genkey-derived key, so WE must. keyuses is the WOTS
- * one-time-leaf index; signing twice at the same value leaks the private key = fund loss. We persist a per-address
- * monotonic counter, RESERVE-BEFORE-SIGN (write n+1 durably BEFORE the send that uses n), require an explicit user
- * acknowledgement of the seed's prior-use count, and never reuse a value (over-skip is safe). Per-install: do NOT
- * drive the SAME seed from two installs / a cloud-synced userData at once — they'd hand out the same leaf twice.
- */
+/* Classic Web Wallet key zero, independent of the node wallet mode. The helper takes
+ * secrets on stdin. RPC only reads public chain data and relays signed transactions.
+ * The saved per-address count reserves each one-time leaf before signing. */
 const { EventEmitter } = require("events");
 const fs = require("fs");
 const path = require("path");
 const { rpcCall } = require("./rpc"), { oneCommand } = require("./cmdverb");
-const { pinMinimaSend } = require("./sendpin");
+const { toUnits } = require("./sendpin");
+const { randomUUID } = require("crypto");
+const helper = require("./classic-webwallet");
 let app = null; try { app = require("electron").app; } catch (e) {}
 
 const emitter = new EventEmitter();
@@ -69,7 +43,6 @@ function isPhrase(s) {
 function isAmount(a) { return typeof a === "string" && /^\d{1,30}(\.\d{1,30})?$/.test(a) && Number(a) > 0; }
 function isTokenid(t) { return t === "0x00" || (typeof t === "string" && /^0x[0-9A-Fa-f]{64}$/.test(t)); }
 function isScript(s) { return typeof s === "string" && /^RETURN SIGNEDBY\(0x[0-9A-Fa-f]{2,140}\)$/.test(s); }
-function isPrivKey(p) { return typeof p === "string" && /^0x[0-9A-Fa-f]{2,200}$/.test(p); }
 
 // ---------------------------------------------------------------------------
 // keyuses store — durable, monotonic, reserve-before-sign. { "<0xaddr>": { keyuses, ack } }
@@ -94,15 +67,7 @@ function writeStore(obj) {
   // between rename and the dir flush could revert to a LOWER counter → reuse a WOTS leaf next boot = fund loss.
   try { const dfd = fs.openSync(path.dirname(p), "r"); fs.fsyncSync(dfd); fs.closeSync(dfd); } catch (e) {}
 }
-// The last one-time key a custom key has (0.19.323). sendfrom and txnsign publickey:custom build TreeKey.createDefault(privatekey):
-// 64 keys x 3 levels = 262144 uses on the classic node line this app ships (resources/minima.jar: core/minima-core e64600285be,
-// objects/keys/TreeKey.java), setUses(keyuses.getAsInt()) keeps only the low 32 bits (MiniNumber.getAsInt is intValue: 4294967299
-// becomes 3), and TreeKey.sign starts again at use 0 once mUses >= mMaxUses ("SERIOUS ERROR : MAX TREEKEYS USED"). So a count of
-// 262144 or more signs with a one-time key that was already used, and the counter only goes up: every later send too. On a
-// block-capable node started with -blockaskeyuses (security/txn-write-gate-android 49d667d6eb4) createDefault is 128 x 4 =
-// 268435456 uses and the node takes the use from the block number (keyuses can only raise it). A count is the uses already made: the next send
-// signs at that use, so 0 to LAST_USE leaves at least one. (Correction, 0.19.333: the bound is the classic one; on a block key wallet the
-// Web Wallet does not run at all: blockOff below.)
+// The official classic tree has 64 keys per level and three levels.
 const KEY_USES = 262144, LAST_USE = KEY_USES - 1;
 // The released tree's sentences, word for word (0.19.341, as 0.18.265 / 0.18.270 / 0.18.271 / 0.18.275).
 const OVER_MAX = "The key-use count can be at most 262143 (a key of this wallet has 262144 one-time uses, numbered 0 to 262143). Nothing was saved.";
@@ -133,14 +98,6 @@ function entryFor(store, addr) {
 // The chain's figure for a key (main.js: main/keyuses.js onchainUses over the pinned, no-redirect fetch): a whole number, or
 // null when it was not read. The public key of each address this session derived, so main asks for the right key.
 let onchainOf = async () => null;
-// A block key wallet (0.19.333): there `keys action:genkey` builds a 128 x 4 key (TreeKey.createDefault follows -blockaskeyuses), so a seed
-// gives a DIFFERENT address than on every classic wallet and the official Web Wallet (funds at the classic address are not seen; funds
-// sent to the block-mode address are out of reach of any classic wallet), "a key has 262144 one-time uses" is not true there and the
-// chain's figure protects nothing. Off, in main, on the recorded key mode, until it is designed for that mode.
-let keyModeOf = () => "";
-function setKeyMode(fn) { if (typeof fn === "function") keyModeOf = fn; }
-const BLOCK_OFF = "The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it. Nothing was done.";
-function blockOff() { let m = ""; try { m = keyModeOf(); } catch (e) { m = ""; } if (m === "block") throw new Error(BLOCK_OFF); }
 const derivedKeys = new Map();
 function setOnchain(fn) { if (typeof fn === "function") onchainOf = fn; }
 const DAMAGED_UNREAD = "This wallet's saved key-use count is damaged, and the chain's figure for this key could not be read (the key-use service may be unreachable). Nothing was saved; confirm again when it can be read.";
@@ -151,7 +108,6 @@ const FIRST_UNREAD = "The chain's figure for this key could not be read (the key
  *  what the chain shows, checked HERE, in main (0.19.255 for a damaged entry, 0.19.270 for every unacknowledged one: the
  *  window's floor alone took any count), and it is refused while that figure cannot be read. */
 async function ackKeyuses(address, count) {
-  blockOff();
   if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address))) throw new Error("bad address");
   // a whole number of 0 or more, as a number or as plain digits only (0.19.341, as released 0.18.265: " 5 " is refused too)
   const n = typeof count === "number" ? count : (typeof count === "string" && /^\d{1,15}$/.test(count) ? Number(count) : NaN);
@@ -181,7 +137,7 @@ async function ackKeyuses(address, count) {
   return { address, keyuses: e.keyuses, ack: true };
 }
 /** Current stored keyuses info for an address (does not mutate). */
-function keyusesInfo(address) { blockOff(); const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
+function keyusesInfo(address) { const e = entryFor(loadStore(), address); return Object.assign({ address, keyuses: e.keyuses || 0, ack: !!e.ack }, e.damaged ? { damaged: true } : {}); }
 // ---------------------------------------------------------------------------
 // node interaction
 // ---------------------------------------------------------------------------
@@ -197,46 +153,30 @@ async function isMegammr() {
 /** Does the running node's OWN wallet contain this public key? If so, the entered seed IS the node's own seed
  *  (keys genkey uses modifier 0 = the wallet's first key; the node derives 0,1,2,… from the same base seed). */
 async function nodeHasPubkey(pubkey) {
-  if (!pubkey) return false;
-  const r = resp(await runner("keys action:list").catch(() => null));
-  // 0.19.230: a failed read is never "not the node's key" (that sent the node's own wallet down the foreign-seed path)
-  if (!r || !Array.isArray(r.keys)) throw new Error("The node's keys could not be read, so the app cannot tell whether this is the node's own wallet. Nothing was sent.");
-  const keys = r.keys;
-  const pk = String(pubkey).toLowerCase();
-  return keys.some(k => k && k.publickey && String(k.publickey).toLowerCase() === pk);
+  const r = await checkedCommand("keys action:list").catch(() => null);
+  const keys = r && r.keys;
+  // A new or restoring wallet can briefly have no keys. It has not established ownership yet.
+  if (!Array.isArray(keys) || !keys.length || !keys.every(k => /^0x[0-9a-f]{64}$/i.test(k?.publickey || "")))
+    throw new Error("The node's keys could not be read, so the app cannot tell whether this is the node's own wallet. Nothing was sent.");
+  return keys.some(k => k.publickey.toLowerCase() === pubkey.toLowerCase());
 }
 
-/** Is the entered seed the running node's OWN wallet? True if the derived key-0 pubkey is in the node's key set,
- *  OR the phrase equals the node's own seed. The second check is a belt-and-suspenders fallback so a momentary
- *  `keys action:list` failure can never mis-classify the node's own wallet as a foreign seed (→ empty balance). */
-async function isNodeOwnSeed(pubkey, seed) {
-  // the node's full key list decides (0.19.230): it holds key 0 of the node's own seed, so a readable list without this key
-  // is a foreign seed; an unreadable list throws (nodeHasPubkey). The vault is no longer asked: a locked vault said "foreign".
-  void seed;
-  return nodeHasPubkey(pubkey);
-}
-
-/** Derive the wallet's key-0 address from the seed. Also reports whether this is the node's OWN wallet, so the
- *  balance can be the node's FULL total (a real wallet spreads coins over many keys). PUBLIC material only. */
+/** Derive the same single receive address in either node mode. */
 async function derive(seed) {
-  blockOff();
   if (!isPhrase(seed)) throw new Error('Enter your seed phrase (a " or \\ or line break can\'t be carried safely)');
   if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
-  const r = await runner('keys action:genkey phrase:"' + seed + '"');   // VERBATIM — anyphrase, case-sensitive
-  const d = resp(r);
-  if (!d || !d.address) throw new Error("Could not derive wallet from seed");
-  const isNodeSeed = await isNodeOwnSeed(d.publickey, seed);
-  if (/^0x[0-9A-Fa-f]{1,64}$/.test(String(d.address)) && d.publickey) derivedKeys.set(String(d.address).toLowerCase(), String(d.publickey));   // public material only
+  const d = await helper.run({ action: "derive", seed });
+  if (!/^0x[0-9a-f]{64}$/i.test(d.address) || !/^0x[0-9a-f]{64}$/i.test(d.publickey)
+      || !isScript(d.script) || !looksLikeMinimaAddress(d.miniaddress)) throw new Error("Could not derive wallet from seed");
+  const isNodeSeed = await nodeHasPubkey(d.publickey);
+  derivedKeys.set(d.address.toLowerCase(), d.publickey);
   return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script, isNodeSeed };
 }
 
-/** Balances. For the node's OWN seed use `balance` — the FULL wallet total across ALL its addresses (coins are
- *  spread over many keys, so a single genkey address reads ~0). For a foreign seed, the single megammr address. */
-async function read(address, nodeSeed) {
-  blockOff();
-  if (!/^0x[0-9A-Fa-f]{1,64}$/.test(String(address)) && !looksLikeMinimaAddress(address)) throw new Error("bad address");
-  const r = await runner(nodeSeed ? "balance" : ("balance megammr:true address:" + address)).catch(() => null);
-  const rows = (r && Array.isArray(r.response)) ? r.response : [];
+async function read(address) {
+  if (!looksLikeMinimaAddress(address)) throw new Error("bad address");
+  const rows = await checkedCommand("balance megammr:true address:" + address);
+  if (!Array.isArray(rows)) throw new Error("Could not read the Web Wallet balance");
   return rows.map(b => ({
     tokenid: b.tokenid,
     name: b.tokenid === "0x00" ? "MINIMA" : ((b.token && (b.token.name || b.token)) || String(b.tokenid)),   // the whole id, never cut (0.19.230)
@@ -247,100 +187,97 @@ async function read(address, nodeSeed) {
   }));
 }
 
-/**
- * FUND-CRITICAL send. Re-derives the private key from the seed IN-MEMORY (never persisted, wiped after use),
- * validates every argument, RESERVES the keyuses leaf durably before signing, then runs the single `sendfrom`.
- * Requires the user to have acknowledged the address's prior-use count (ackKeyuses) first.
- */
+async function checkedCommand(cmd) {
+  const r = await runner(cmd);
+  if (!r || r.status !== true) throw new Error((r && r.error) || "Could not read the node reply");
+  return r.response;
+}
+
+function nextLeaf(fromaddress, reserve) {
+  const store = loadStore();
+  const e0 = entryFor(store, fromaddress);
+  if (e0.damaged) throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent.");
+  if (!e0.ack) throw new Error("Confirm this wallet's key-uses count before sending");
+  const n = e0.keyuses || 0;
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error(STORE_BAD);
+  if (n > LAST_USE) throw new Error(overCount(n));
+  if (!reserve) return n;
+  store[fromaddress] = Object.assign({}, e0, { keyuses: n + 1 });
+  try { writeStore(store); } catch { throw new Error(STORE_BAD); }
+  return n;
+}
+
+// Select by exact displayed units, largest first, then export only those inputs.
+// The signer rechecks the actual serialized coins and computes change in raw chain units.
+async function coinProofs(address, token, amount) {
+  const coins = await checkedCommand("coins megammr:true checkmempool:true coinage:3 address:" + address + " tokenid:" + token);
+  if (!Array.isArray(coins)) throw new Error("Could not read Web Wallet coins");
+  const candidates = coins.map(c => {
+    const value = token === "0x00" ? c.amount : c.tokenamount;
+    if (!/^0x[0-9a-f]{64}$/i.test(c.coinid) || String(c.address).toLowerCase() !== address.toLowerCase()
+        || String(c.tokenid).toLowerCase() !== token.toLowerCase() || !/^\d+(?:\.\d{1,44})?$/.test(String(value)))
+      throw new Error("Invalid Web Wallet coin");
+    return { coinid: c.coinid, value: toUnits(value) };
+  });
+  candidates.sort((a,b) => a.value === b.value ? 0 : a.value > b.value ? -1 : 1);
+  let total = 0n;
+  const chosen = [], needed = toUnits(amount);
+  for (const coin of candidates) {
+    chosen.push(coin.coinid);
+    total += coin.value;
+    if (total >= needed) break;
+  }
+  if (total < needed) throw new Error("Insufficient spendable funds at this Web Wallet address");
+  const proofs = [];
+  for (const coinid of chosen) {
+    const proof = await checkedCommand("coinexport coinid:" + coinid);
+    if (!proof || !/^0x(?:[0-9a-f]{2})+$/i.test(proof.data)) throw new Error("Could not read a coin proof");
+    proofs.push({ coinid, data: proof.data });
+  }
+  return proofs;
+}
+
+const sending = new Set();
 async function send(opts) {
-  blockOff();
-  const { seed, to, amount, tokenid } = opts || {};
+  const { seed, to, amount, tokenid = "0x00" } = opts || {};
   if (!isPhrase(seed)) throw new Error("Invalid seed phrase");
   if (!looksLikeMinimaAddress(to)) throw new Error("Invalid recipient address");
   if (!isAmount(amount)) throw new Error("Invalid amount");
-  const tok = tokenid || "0x00";
-  if (!isTokenid(tok)) throw new Error("Invalid token id");
-  if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
-
-  // confirm the recipient is a real, spendable address on this node
-  const chk = resp(await runner("checkaddress address:" + to).catch(() => null));
-  if (!chk || !chk["0x"]) throw new Error("Recipient address failed validation");
-
-  // derive key material (private key stays in this scope only) — phrase passed VERBATIM
-  let script = null, privatekey = null, fromaddress = null, pubkey = null;
-  {
-    const d = resp(await runner('keys action:genkey phrase:"' + seed + '"'));
-    if (!d || !d.address || !d.script || !d.privatekey) throw new Error("Could not derive signing key");
-    script = d.script; privatekey = d.privatekey; fromaddress = d.address; pubkey = d.publickey;
-  }
-  if (!isScript(script) || !isPrivKey(privatekey) || !/^0x[0-9A-Fa-f]{1,64}$/.test(fromaddress)) {
-    privatekey = null; throw new Error("Derived key material failed validation");
-  }
-
-  // If this is the running node's OWN wallet, let the NODE send: it coin-selects across ALL its addresses and
-  // manages its own keyuses (no single-address / manual-keyuses limits). Same path as the desktop Wallet tab.
-  if (await isNodeOwnSeed(pubkey, seed)) {
-    privatekey = null;   // not needed — the node signs with its own keys
-    let cmd = "send amount:" + amount + " address:" + to + " tokenid:" + tok;
-    try { cmd = await pinMinimaSend(runner, cmd, { minCoinage: 3 }); } catch (e) {}   // dodge shared-node beacon-dust NPE
-    let nr;
-    try { nr = await runner(cmd); }
-    catch (e) { return { ok: false, ambiguous: true, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying." }; }
-    const nok = nr && (nr.status === true || nr.pending === true);
-    if (!nok) return { ok: false, message: (nr && (nr.error || nr.message)) || "Send failed" };
-    log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : "token " + tok) + " to " + to + " (node wallet)");   // identifiers whole (0.19.198, as released 0.18.180)
-    emitter.emit("update");
-    const ntx = resp(nr) && (resp(nr).txpowid || (resp(nr).body && resp(nr).body.txn && resp(nr).body.txn.transactionid));
-    return { ok: true, txnid: ntx || null };
-  }
-
-  // FOREIGN seed → single-address non-custodial sendfrom with the durable keyuses gate.
-  // keyuses gate: the user MUST have acknowledged the seed's prior-use count for this address
-  // ONE read of the store for the gate and the reservation (0.19.230: two reads could disagree)
-  let store; try { store = loadStore(); } catch (e) { privatekey = null; throw e; }
-  const e0 = entryFor(store, fromaddress);
-  if (e0.damaged) { privatekey = null; throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent."); }
-  if (!e0.ack) { privatekey = null; throw new Error("Confirm this wallet's key-uses count before sending"); }
-
-  // RESERVE-BEFORE-SIGN: durably advance to n+1, sign at n. A crash/failure merely skips a leaf (safe).
-  const n = e0.keyuses || 0;
-  if (!Number.isSafeInteger(n) || n < 0) { privatekey = null; throw new Error(STORE_BAD); }
-  if (n > LAST_USE) { privatekey = null; throw new Error(overCount(n)); }   // 0.19.323: past the key's last use (an older version took any count); never lowered
-  store[fromaddress] = Object.assign({}, e0, { keyuses: n + 1 });
-  try { writeStore(store); } catch (e) { privatekey = null; throw new Error(STORE_BAD); }
-  const cmd = "sendfrom fromaddress:" + fromaddress
-    + " address:" + to
-    + " amount:" + amount
-    + " tokenid:" + tok
-    + ' script:"' + script + '"'
-    + " privatekey:" + privatekey
-    + " keyuses:" + n
-    + " mine:false";
-  let r;
+  if (!isTokenid(tokenid)) throw new Error("Invalid token id");
+  const { address, isNodeSeed } = await derive(seed);
+  if (isNodeSeed) throw new Error("This node owns the signing key. Use the Wallet tab to send.");
+  if (sending.has(address)) throw new Error("A payment from this address is already in progress.");
+  sending.add(address);
   try {
-    r = await runner(cmd);
-  } catch (e) {
-    // AMBIGUOUS: a transport/timeout error means the node MAY still have posted the txn. NEVER auto-retry — a
-    // retry burns a fresh leaf (no key reuse) but selects different coins and could pay the recipient TWICE.
-    // Return an ambiguous result (not a throw, so the flag survives the IPC boundary) so the UI blocks retry.
-    return { ok: false, ambiguous: true, keyuse: n, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying (a blind retry could pay twice)." };
-  } finally {
-    privatekey = null;   // best-effort scrub
-  }
-  const ok = r && (r.status === true || r.pending === true);
-  if (!ok) return { ok: false, keyuse: n, message: (r && (r.error || r.message)) || "Send failed" };
-  log("sent " + amount + " " + (tok === "0x00" ? "MINIMA" : "token " + tok) + " from " + fromaddress + " to " + to + " (keyuse " + n + ")");   // identifiers whole (0.19.198, as released 0.18.180)
-  emitter.emit("update");
-  const txnid = resp(r) && (resp(r).txpowid || (resp(r).body && resp(r).body.txn && resp(r).body.txn.transactionid));
-  return { ok: true, keyuse: n, txnid: txnid || null };
+    if (!resp(await runner("checkaddress address:" + to))?.["0x"]) throw new Error("Recipient address failed validation");
+    const id = randomUUID();
+    nextLeaf(address, false);
+    const proofs = await coinProofs(address, tokenid, amount);
+    const leaf = nextLeaf(address, true);
+    const signed = await helper.run({ action: "sign", seed, to, amount, tokenid, proofs, leaf: String(leaf), id });
+    if (!/^0x(?:[0-9a-f]{2})+$/i.test(signed.data)) throw new Error("Invalid signed Web Wallet transaction");
+    await checkedCommand("txnimport id:" + id + " data:" + signed.data);
+    try {
+      const checked = await checkedCommand("txncheck id:" + id);
+      if (!checked || checked.validtransaction !== true) throw new Error("The node could not validate the signed Web Wallet payment.");
+      let posted;
+      try { posted = await runner("txnpost id:" + id + " mine:false"); } catch { /* unknown delivery */ }
+      if (posted && posted.status === false) return { ok: false, keyuse: leaf, message: posted.error || "Send failed" };
+      if (!posted || posted.status !== true || !/^0x[0-9a-f]{64}$/i.test(posted.response?.txpowid || ""))
+        return { ok: false, ambiguous: true, keyuse: leaf, message: "Send status UNKNOWN — the node didn't confirm. The payment may have gone through; refresh balances and check History before retrying (a blind retry could pay twice)." };
+      log("sent " + amount + " " + (tokenid === "0x00" ? "MINIMA" : "token " + tokenid) + " from " + address + " to " + to + " (keyuse " + leaf + ")");
+      emitter.emit("update");
+      return { ok: true, keyuse: leaf, txnid: posted.response.txpowid };
+    } finally { await runner("txndelete id:" + id).catch(() => {}); }
+  } finally { sending.delete(address); }
 }
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = { setOnchain, setKeyMode,
+module.exports = { setOnchain,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status, KEY_USES, LAST_USE,
   _setRunner: (fn) => { runner0 = fn; },
   // exported for unit tests
-  _validators: { looksLikeMinimaAddress, isPhrase, isAmount, isTokenid, isScript, isPrivKey }
+  _validators: { looksLikeMinimaAddress, isPhrase, isAmount, isTokenid, isScript }
 };

@@ -2,6 +2,9 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "{b}Runs entirely on this computer.{_b} The app derives your classic address and signs payments locally. Only the signed transaction goes to your node for publication.": "{b}Всё выполняется на этом компьютере.{_b} Приложение вычисляет классический адрес и подписывает платежи локально. На узел для публикации отправляется только подписанная транзакция.",
+  "This node owns the signing key. Use the Wallet tab to send.": "Ключ подписи принадлежит этому узлу. Для отправки откройте вкладку «Кошелёк».",
+  "Open Wallet": "Открыть кошелёк",
   "Click to copy the full id": "Нажмите, чтобы скопировать полный ID",
   "Copied ✓": "Скопировано ✓",
   "Copy failed: select the text and press ⌘C": "Не удалось скопировать: выделите текст и нажмите ⌘C",

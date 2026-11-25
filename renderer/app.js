@@ -1382,7 +1382,7 @@ function nameWithId(tid, name) {
   const n = String(name == null ? "" : name).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2800]/gu, "").replace(/\s+/g, " ").trim();
   return n && !String(tid).startsWith(n) && !/^(minima|mxusdt?)$/i.test(n) ? t("{n} (token {tid})", { n: n, tid: tid }) : String(tid);
 }
-const wwSafe = () => `<div class="ww-safe">${tr("{b}Runs entirely on this computer.{_b} Your secret key is sent only to your own local node (127.0.0.1) to derive keys and sign. It never leaves this machine and is never saved.", { b: "<b>", _b: "</b>" })}
+const wwSafe = () => `<div class="ww-safe">${tr("{b}Runs entirely on this computer.{_b} The app derives your classic address and signs payments locally. Only the signed transaction goes to your node for publication.", { b: "<b>", _b: "</b>" })}
   <br>${tr("{b}Never type your secret key into a website Web Wallet.{_b} A hosted site can steal it (that has drained wallets).", { b: "<b>", _b: "</b>" })}</div>`;   // drawn when shown, so it is in the language of that moment
 const wwCard = (inner) => `<div class="ww"><div class="ww-card">${inner}</div></div>`;
 
@@ -1417,14 +1417,16 @@ function renderWwUnlock(body) {
     if (/["\\;\n\r\t]/.test(seed)) { toast(t("The key has a \", \\, ; or line break the command can't carry. Enter it as one clean line."), "err"); return; }   // ; started a second node command (0.19.195, as released 0.18.178)
     const b = el("wwUnlockBtn"); b.disabled = true; b.textContent = t("Logging in…");
     try {
-      wwAddr = await api.wwDerive(seed);
+      const address = await api.wwDerive(seed);
+      const uses = await api.wwKeyuses(address.address).catch(() => ({ keyuses: 0, ack: false }));
+      const balance = await api.wwRead(address.address);
+      // A login can finish after leaving or replacing this form. Only its own visible form may unlock.
+      if (activeView !== "webwallet" || b !== el("wwUnlockBtn") || !wwMegammrOn()) return;
+      wwAddr = address;
       wwSeed = seed;
-      wwKu = await api.wwKeyuses(wwAddr.address).catch(() => ({ keyuses: 0, ack: false }));
-      // Nothing leaves this computer at login (0.19.135: the public key used to be sent to the audit service here, by
-      // itself). The on-chain key uses are read when the user clicks Check on-chain or Confirm, and Confirm refuses
-      // while they are unread, so the figure is never a bare 0 for a key that has already signed elsewhere.
+      wwKu = uses;
       wwKuSuggest = null;
-      wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => []);
+      wwBal = balance;
       el("wwSeedIn").value = "";
       renderWebWallet();
     } catch (e) {
@@ -1468,11 +1470,11 @@ function renderWwWallet(body) {
     let qr = "";
     try { if (typeof qrcode !== "undefined") { const q = qrcode(0, "M"); q.addData(recv); q.make(); qr = `<div class="ww-qr">${q.createImgTag(4, 0)}</div>`; } } catch (e) {}
     page = `${qr}<div class="ww-addr" id="wwAddrBox">${esc(recv)}</div><button class="ww-btn" id="wwCopyAddr">${th("Copy")}</button>`;
+  } else if (a.isNodeSeed) {
+    page = `<p class="ww-p">${th("This node owns the signing key. Use the Wallet tab to send.")}</p><button class="ww-btn" id="wwNativeWallet">${th("Open Wallet")}</button>`;
   } else {
     const kuDefault = Math.max(Number(ku.keyuses) || 0, wwKuSuggest == null ? 0 : wwKuSuggest);
-    const kuPanel = a.isNodeSeed
-      ? `<p class="ww-fine">${tr("This is {b}your node's own wallet{_b}: the balance is the whole wallet's, across every address. Sends go through the node, which chooses the coins and manages its signing keys itself.", { b: "<b>", _b: "</b>" })}</p>`
-      : (ku.ack
+    const kuPanel = (ku.ack
       ? `<label class="ww-label">${th("Secret key uses")}</label><div class="ww-kuline"><span>${th("The next send signs at use")} <b>${esc(String(ku.keyuses))}</b>${th(". The app counts every send and never counts down.")}</span><button class="ww-link" id="wwKuEdit">${th("Raise it")}</button></div>`
       : `<div class="ww-safe ww-safe--warn">${tr("{b}Confirm the secret key uses before sending.{_b} How many payments has this key ALREADY made anywhere (0 for a brand-new key)? A key has 262144 one-time uses, so this is a whole number from 0 to 262143. A figure a little too high only skips some of them; {b}a figure that is too low can reuse a signing key and lose your funds{_b}.", { b: "<b>", _b: "</b>" })}${wwKuSuggest != null ? ` <b>${tr("The chain shows {wwKuSuggest} so far.", { wwKuSuggest: esc(String(wwKuSuggest)) })}</b>` : ""}
            <p class="ww-fine">${th("Check on-chain and Confirm read this key's uses from the chain archive: only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer. Confirm does not go on while that figure is unread.")}</p>
@@ -1480,7 +1482,7 @@ function renderWwWallet(body) {
            <div class="ww-two"><button class="ww-btn ww-btn--dark" id="wwKuCheck">${th("Check on-chain")}</button><button class="ww-btn" id="wwKuConfirm">${th("Confirm")}</button></div></div>`);
     const unknown = wwUnknown(a.address), ambig = unknown ? `<div class="ww-safe ww-safe--warn">${tr("{b}⚠ The last send's status is UNKNOWN.{_b} The node did not confirm it, and the payment may have gone through. Check {b}History{_b} and your balance before sending again, or you could pay twice.", { b: "<b>", _b: "</b>" })}
         <button class="ww-btn ww-btn--dark" id="wwAmbigClear">${th("I've checked: let me send again")}</button></div>` : "";
-    const off = ((a.isNodeSeed || ku.ack) && !unknown) ? "" : "disabled";
+    const off = (ku.ack && !unknown) ? "" : "disabled";
     const toks = wwBal.length ? wwBal : [{ tokenid: "0x00", name: "MINIMA" }];
     page = `<label class="ww-label" for="wwTok">${th("Token")}</label><select class="ww-in" id="wwTok" ${off}>${toks.map(b => `<option value="${esc(b.tokenid)}"${b.tokenid === wwForm.tok ? " selected" : ""}>${esc(wwName(b))}${b.confirmed != null ? "  (" + esc(b.confirmed) + ")" : ""}</option>`).join("")}</select>
       <label class="ww-label" for="wwAmt">${th("Amount")}</label><input class="ww-in" id="wwAmt" placeholder="${th("Enter amount")}" value="${esc(wwForm.amt)}" inputmode="decimal" autocomplete="off" ${off} />
@@ -1492,7 +1494,7 @@ function renderWwWallet(body) {
 
   body.querySelectorAll("[data-wwtab]").forEach(b => { b.onclick = () => { wwTab = b.dataset.wwtab; wwArmed = false; renderWebWallet(); }; });
   el("wwLockBtn").addEventListener("click", wwLogout);
-  const refresh = async () => { wwBal = await api.wwRead(a.address, a.isNodeSeed).catch(() => wwBal); renderWebWallet(); };
+  const refresh = async () => { wwBal = await api.wwRead(a.address).catch(() => wwBal); renderWebWallet(); };
   if (wwTab === "balance") {
     wwPaintTokens();
     el("wwSearch").oninput = () => { wwSearch = el("wwSearch").value; wwPaintTokens(); };
@@ -1500,11 +1502,13 @@ function renderWwWallet(body) {
     return;
   }
   if (wwTab === "receive") { el("wwAddrBox").onclick = el("wwCopyAddr").onclick = () => copy(recv); return; }
+  if (a.isNodeSeed) {
+    el("wwNativeWallet").onclick = () => selectTab("balances");
+    return;
+  }
   for (const [id, k] of [["wwTo", "to"], ["wwAmt", "amt"], ["wwTok", "tok"]]) el(id).oninput = el(id).onchange = () => { wwForm[k] = el(id).value; };
   const ambigBtn = el("wwAmbigClear"); if (ambigBtn) ambigBtn.addEventListener("click", () => { wwUnknown(wwAddr && wwAddr.address, false); renderWebWallet(); });
-  if (a.isNodeSeed) {
-    el("wwSendBtn").addEventListener("click", () => wwDoSend());   // node wallet: no key-uses gate, node manages keys
-  } else if (!ku.ack) {
+  if (!ku.ack) {
     // The chain's figure for this key, read on the user's click only. → a whole number, or null: not read (never 0 for "unknown").
     const readOnchain = async () => { let n = null; try { n = await api.keyAudit(a.publickey); } catch (e) { n = null; } if (wwAddr === a) wwKuSuggest = AppsAct.ww.confirmUses(0, n); return AppsAct.ww.confirmUses(0, n); };
     el("wwKuConfirm").addEventListener("click", async () => {
@@ -1561,14 +1565,14 @@ async function wwDoSend() {
     if (!wwAddr) { renderWebWallet(); return; }   // logged out while the send was at the node (0.19.263)
     wwForm.to = ""; wwForm.amt = "";
     wwKu = await api.wwKeyuses(wwAddr.address).catch(() => wwKu);
-    wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
+    wwBal = await api.wwRead(wwAddr.address).catch(() => wwBal);
     renderWebWallet();
   } else if (r && r.ambiguous) {
     // M1: don't offer a one-click retry — surface the unknown state, refresh balances, and gate re-send behind
     // an explicit "I've checked" acknowledgement (renderWwWallet shows the banner while this wallet is in WW_UNKNOWN).
     wwUnknown(from, true);
     toast(r.message ? MainSaid.say(r.message) : t("Send status unknown: check before trying again"), "err");
-    if (wwAddr) wwBal = await api.wwRead(wwAddr.address, wwAddr.isNodeSeed).catch(() => wwBal);
+    if (wwAddr) wwBal = await api.wwRead(wwAddr.address).catch(() => wwBal);
     renderWebWallet();
   } else {
     toast(r && (r.message || r.err) ? MainSaid.say(r.message || r.err) : t("Send failed"), "err");   // main's English said in the app's language (0.19.263)

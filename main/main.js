@@ -1066,15 +1066,13 @@ vestr.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContent
 let vestrStarted = false;
 node.on("status", (s) => { if (s.state === "running") { vestrStarted = true; freeze.start("vestr"); } });
 
-// Web Wallet (local, megammr-gated). All node I/O + fund logic lives in webwallet.js; the seed reaches only
-// the local node over loopback. Its gate points to Resync from a MegaMMR file (0.19.395): a MegaMMR switched on without a file is empty.
+// Classic Web Wallet. Only public reads and signed transactions reach the node.
 ipcMain.handle("mcd:wwMegammr", () => webwallet.isMegammr());
 ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
-ipcMain.handle("mcd:wwRead", (_e, address, nodeSeed) => webwallet.read(address, nodeSeed));
+ipcMain.handle("mcd:wwRead", (_e, address) => webwallet.read(address));
 ipcMain.handle("mcd:wwKeyuses", (_e, address) => webwallet.keyusesInfo(address));
 ipcMain.handle("mcd:wwAckKeyuses", (_e, address, count) => webwallet.ackKeyuses(address, count));
 // a damaged key-use entry is confirmed again only at or above the chain's figure, read here with the same pinned fetch (0.19.255)
-webwallet.setKeyMode(() => config.load().keyMode);   // off on a block key wallet (0.19.333)
 webwallet.setOnchain((pk) => keyuses.onchainUses(pk, (url) => netfetch.fetchJson(url, { noRedirect: true, maxBytes: keyuses.MAX_BODY_BYTES })));
 ipcMain.handle("mcd:wwSend", (_e, opts) => webwallet.send(opts));
 webwallet.emitter.on("update", () => { if (win && !win.isDestroyed()) win.webContents.send("mcd:webwallet"); });

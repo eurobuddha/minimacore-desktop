@@ -494,7 +494,7 @@ test("Web Wallet screen: the original's look with every desktop safeguard, and n
   assert.ok(!/localStorage|sessionStorage|store\(|document\.cookie|api\.saveConfig/.test(ww), "the screen stores nothing: the seed lives in memory until Logout");
   assert.ok(/function wwLock\(\) \{ wwSeed = null;/.test(ww), "Logout clears the seed");
   assert.ok(!/api\.wwSend\(/.test(ww), "the send goes through AppsAct.ww");
-  assert.equal(require("crypto").createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"))).digest("hex"), "3f6465650d9e1b72ebe8a9ff35be54e57e10aba8b2d892f360df8da531e5089b", "main/webwallet.js is the file of 0.19.341 (changed on purpose: 0.19.341 the released tree's sentences, a count of plain digits only; 0.19.340 an unconfirmed entry's chain figure read before the ceiling; 0.19.334 a damaged count too large for a number is over every limit; 0.19.333 off on a block key wallet, in main; 0.19.324 a damaged entry's old count is a floor, one past the last use says so, the used-up sentences say what is known; 0.19.323 a key-use count above 262143 is refused at ack, a chain figure at or above 262144 is never adopted, a stored count past 262143 sends nothing and is never lowered; 0.19.270 every key-use entry not yet acknowledged is confirmed only at or above the chain's figure, checked in main; 0.19.255 one damaged key-use entry refuses only its address and is confirmed again at or above the chain's figure, checked in main; 0.19.194 every command through rpc.oneCommand, a phrase with ; refused; 0.19.198 ids whole in its log; 0.19.230 the key-use store fails closed, one read per send, an unreadable key list is never a foreign seed; before that, of 0.19.107)");
+  assert.ok(ww.includes('id="wwNativeWallet"') && ww.includes('selectTab("balances")'), "a matching key has a route to Wallet");
 });
 // 0.19.135 (review): logging in sent the wallet's public key to the audit service by itself, the request followed
 // redirects, and an unread figure counted as 0.
@@ -525,7 +525,7 @@ test("Web Wallet: the public key leaves only on a click, with no redirect; Confi
   assert.ok(ww.indexOf("only this wallet's public key is sent to eurobuddha.com. This reveals that key to that server. The secret key stays on this computer.") < ww.indexOf('id="wwKuCheck"') && ww.indexOf("only this wallet's public key is sent to eurobuddha.com") > 0, "the privacy line is on the screen before either button");
   assert.ok(/ipcMain\.handle\("mcd:keyAudit", \(_e, publicKey\) => keyuses\.onchainUses\(publicKey, \(url\) => netfetch\.fetchJson\(url, \{ noRedirect: true, maxBytes: keyuses\.MAX_BODY_BYTES \}\)\)\);/.test(mainJs), "main: no redirect is followed, and a reply of at most 512 KB is read");
   assert.ok(!/KEYUSES_BASE|the ONLY user-initiated external call/.test(mainJs), "the second copy of the host and the stale comment are gone");
-  assert.ok(/if \(!e0\.ack\) \{ privatekey = null; throw new Error\("Confirm this wallet's key-uses count before sending"\); \}/.test(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"), "utf8")), "and the main process still refuses a send before that confirmation (main/webwallet.js; the gate reads the one store read since 0.19.230)");
+  assert.ok(/if \(!e0\.ack\) throw new Error\("Confirm this wallet's key-uses count before sending"\);/.test(fs.readFileSync(path.join(__dirname, "..", "main", "webwallet.js"), "utf8")), "and the main process still refuses a send before that confirmation (main/webwallet.js; the gate reads the one store read since 0.19.230)");
 });
 test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and outlives Logout and leaving the screen; only \"I've checked\" clears it", () => {
   const line = (re) => app.match(re)[0];
@@ -544,7 +544,7 @@ test("Web Wallet (0.19.123): the UNKNOWN lock belongs to the wallet address and 
   assert.equal((ww.match(/wwUnknown\([^)]*, false\)/g) || []).length, 1, "cleared in exactly one place");
   assert.ok(/id="wwAmbigClear"/.test(ww) && /ambigBtn\.addEventListener\("click", \(\) => \{ wwUnknown\(wwAddr && wwAddr\.address, false\);/.test(ww), "and that place is the \"I've checked\" button");
   assert.ok(/const from = wwAddr\.address;[^\n]*\n\s*const r = await AppsAct\.ww\.send\(api, f\);/.test(ww) && /wwUnknown\(from, true\);/.test(ww), "recorded for the wallet the send left, even if the screen was logged out before the answer");
-  assert.ok(/if \(wwUnknown\(wwAddr && wwAddr\.address\)\) \{ toast\("The last send's status is UNKNOWN\./.test(ww) && /const off = \(\(a\.isNodeSeed \|\| ku\.ack\) && !unknown\) \? "" : "disabled";/.test(ww), "Send is off, and refuses, while it stands");
+  assert.ok(/if \(wwUnknown\(wwAddr && wwAddr\.address\)\) \{ toast\("The last send's status is UNKNOWN\./.test(ww) && /const off = \(ku\.ack && !unknown\) \? "" : "disabled";/.test(ww), "Send is off, and refuses, while it stands");
 });
 
 // ---- 0.19.124: small things from the review ----

@@ -658,7 +658,7 @@ test("M3: wherever a pin can still happen it is given minCoinage 3, so it never 
   assert.equal(r.status, true);
   assert.match(node.seen[node.seen.length - 1], new RegExp(" fromaddress:" + ADDR(2) + "$"), "the 50 at address 2, not the younger 45 that is the smaller cover");
   assert.equal(node.saw(/^coins relevant:true sendable:true checkmempool:true tokenid:0x00 coinage:3$/).length, 1);
-  for (const [f, n] of [["main/main.js", 1], ["main/webwallet.js", 1], ["main/vestr.js", 1], ["main/shop.js", 2], ["main/mail.js", 3], ["main/atomix.js", 1]]) {
+  for (const [f, n] of [["main/main.js", 1], ["main/webwallet.js", 0], ["main/vestr.js", 1], ["main/shop.js", 2], ["main/mail.js", 3], ["main/atomix.js", 1]]) {
     const calls = [...SRC(f).matchAll(/await pinMinimaSend\([^\n;]*?\)(?=[;)\s])/g)].map(m => m[0]);
     assert.equal(calls.length, n, f + ": " + calls.join(" | "));
     for (const c of calls) assert.match(c, /minCoinage: (3|MAIL_MIN_COINAGE|AX_PUBLISH_MIN_COINAGE)/, f + ": " + c);

@@ -96,14 +96,30 @@ test("0.19.196: a peer's media is fetched into a quoted file path (the data fold
   await chat.fetchMedia("keets://" + "ab".repeat(32) + "/chat/img-2.png").catch(() => {});
   assert.match(sent[0], /^keets action:fetch url:keets:\/\/[0-9a-f]{64}\/chat\/img-2\.png file:"[^";]+\.png"$/);
 });
+function stubSigner(address, publickey, signed = []) {
+  require("../main/classic-webwallet").run = async request => {
+    if (request.action === "derive") return { address, publickey, miniaddress: "Mx" + "A".repeat(48),
+      script: "RETURN SIGNEDBY(" + publickey + ")" };
+    signed.push(request.leaf);
+    return { data: "0xAB" };
+  };
+}
+function publicCoinReply(cmd, address) {
+  if (cmd.startsWith("txncheck ")) return { status: true, response: { validtransaction: true } };
+  if (cmd.startsWith("coinexport ")) return { status: true, response: { data: "0x01" } };
+  const tokenid = cmd.split(" tokenid:")[1];
+  return { status: true, response: [{ coinid: "0x" + "12".repeat(32), tokenid, address, amount: "2", tokenamount: "2" }] };
+}
+
 // ---- 0.19.198 (released 0.18.180): the Web Wallet's log line names the token id and the addresses whole ----
 test("Web Wallet: a sent payment is logged with its whole token id and addresses", async () => {
   const ww = require("../main/webwallet");
   const FROM = "0x" + "AA".repeat(32), TO = "0x" + "DD".repeat(32), PK = "0x" + "BB".repeat(32), MXUSD = "0x7D39745FBD29049BE29850B55A18BF550E4D442F930F86266E34193D89042A90";
+  stubSigner(FROM, PK);
   ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
-    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
-    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} });
+    : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : c.startsWith("vault") ? { status: true, response: { phrase: "the node's own" } }
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("txnpost") ? { status: true, response: { txpowid: "0x" + "01".repeat(32) } } : { status: true, response: {} });
   ww.setOnchain(async () => 0); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, 0); ww.setOnchain(async () => null);   // a first confirmation is checked against the chain (0.19.270)
   const r = await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: MXUSD });
   assert.equal(r.ok, true);
@@ -116,11 +132,12 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), sent = [];
   const FROM = "0x" + "A1".repeat(32), TO = "0x" + "D1".repeat(32), PK = "0x" + "B1".repeat(32);
   let keysOk = true;
+  stubSigner(FROM, PK);
   ww._setRunner(async (c) => { sent.push(c); return c === "status" ? { status: true, response: { megammr: true } }
-    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C1".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? (keysOk ? { status: true, response: { keys: [] } } : { status: false, error: "busy" })
-    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("sendfrom") ? { status: true, response: { txpowid: "0x01" } } : { status: true, response: {} }; });
-  const sends = () => sent.filter(c => c.startsWith("send"));
+    : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? (keysOk ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : { status: false, error: "busy" })
+    : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : c.startsWith("txnpost") ? { status: true, response: { txpowid: "0x" + "01".repeat(32) } } : { status: true, response: {} }; });
+  const sends = () => sent.filter(c => c.startsWith("txnpost"));
   // CHANGED on purpose (0.19.255, as released 0.18.215): a damaged ENTRY refuses only its own address, with its own reason
   for (const [bad, why] of [["not json", /key-use record could not be read, so nothing was sent/], [JSON.stringify({ [FROM]: { keyuses: "7", ack: true } }), /saved key-use count is damaged\. Confirm its key uses again/],
     [JSON.stringify({ [FROM]: { keyuses: -1, ack: true } }), /saved key-use count is damaged/], [JSON.stringify([1]), /key-use record could not be read/]]) {
@@ -132,7 +149,7 @@ test("Web Wallet: an unreadable or damaged key-use store sends nothing; a bad co
   for (const c of ["abc", -1, 1.5, "", null]) await assert.rejects(ww.ackKeyuses(FROM, c), /whole number of at least 0/, String(c));
   ww.setOnchain(async () => 7); await ww.derive("alpha beta"); await ww.ackKeyuses(FROM, "7"); ww.setOnchain(async () => null);   // checked against the chain's figure (0.19.270)
   sent.length = 0; assert.equal((await ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" })).ok, true);
-  assert.match(sends()[0], / keyuses:7 mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
+  assert.match(sends()[0], /^txnpost id:.* mine:false$/); assert.equal(JSON.parse(fs.readFileSync(file, "utf8"))[FROM].keyuses, 8, "reserved durably, from the one read");
   keysOk = false; sent.length = 0;
   await assert.rejects(ww.send({ seed: "alpha beta", to: TO, amount: "1", tokenid: "0x00" }), /node's keys could not be read/);
   assert.deepEqual(sends(), [], "a failed key list never sends as a foreign seed");
@@ -179,9 +196,10 @@ test("Vestr: a contract coin with a malformed state signs nothing; an unanswered
 test("Web Wallet: a damaged key-use entry refuses only its address; it is confirmed again only at or above the chain's figure, read in main, and refused while unread", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
   const FROM = "0x" + "A2".repeat(32), OTHER = "0x" + "A3".repeat(32), PK = "0x" + "B2".repeat(32);
+  stubSigner(FROM, PK);
   ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
-    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C2".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+    : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : { status: true, response: {} });
   fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "x", ack: true }, [OTHER]: { keyuses: 5, ack: true } }));
   assert.deepEqual(ww.keyusesInfo(OTHER), { address: OTHER, keyuses: 5, ack: true }, "another address is untouched");
   assert.deepEqual(ww.keyusesInfo(FROM), { address: FROM, keyuses: 0, ack: false, damaged: true });
@@ -203,9 +221,10 @@ test("Web Wallet: a damaged key-use entry refuses only its address; it is confir
 test("Web Wallet: a first confirmation, or one after the key-use file went missing, is taken only at or above the chain's figure, read in main, and refused while unread", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
   const FROM = "0x" + "A4".repeat(32), PK = "0x" + "B4".repeat(32);
+  stubSigner(FROM, PK);
   ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
-    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C4".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+    : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : { status: true, response: {} });
   try { fs.rmSync(file); } catch (e) {}
   await ww.derive("alpha beta");
   let chain = null, asked = []; ww.setOnchain(async (pk) => { asked.push(pk); return chain; });
@@ -224,10 +243,11 @@ test("Web Wallet: a first confirmation, or one after the key-use file went missi
 test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 and more refused at ack, a chain figure at or above it is 'no uses left', a stored count past it sends nothing", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
   const FROM = "0x" + "A6".repeat(32), PK = "0x" + "B6".repeat(32), TO = "0x" + "11".repeat(32), sent = [];
-  ww._setRunner(async (c) => { if (c.startsWith("sendfrom")) sent.push(c.match(/ keyuses:(\d+)/)[1]);
+  stubSigner(FROM, PK, sent);
+  ww._setRunner(async (c) => {
     return c === "status" ? { status: true, response: { megammr: true } }
-    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C6".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: { txpowid: "0x01" } }; });
+    : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: { txpowid: "0x" + "01".repeat(32) } }; });
   try { fs.rmSync(file); } catch (e) {}
   await ww.derive("alpha beta"); let chain = 0; ww.setOnchain(async () => chain);
   assert.equal(ww.KEY_USES, 262144); assert.equal(ww.LAST_USE, 262143);
@@ -254,9 +274,10 @@ test("Web Wallet: the key-use count has a ceiling: 262143 is the last; 262144 an
 test("Web Wallet: a damaged entry's old count (57, \"57\", 57.5, \"57.5\") is a floor; one at or past 262144 gives the over-count explanation; the window refuses a typed fraction and says the figure main kept", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json");
   const FROM = "0x" + "A8".repeat(32), PK = "0x" + "B8".repeat(32);
+  stubSigner(FROM, PK);
   ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } }
-    : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "C8".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+    : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : { status: true, response: {} });
   await ww.derive("alpha beta"); ww.setOnchain(async () => 3);
   for (const [old, floor] of [["57", 57], [" 57 ", 57], [57.5, 58], ["57.5", 58]]) {
     fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: old, ack: true } }));
@@ -278,57 +299,98 @@ test("Web Wallet: a damaged entry's old count (57, \"57\", 57.5, \"57.5\") is a 
   assert.ok(/\.toast--copy \{[^}]*overflow-wrap: anywhere/.test(rd("renderer/app.css")), "a whole id in a toast wraps instead of running off the window");
 });
 
-// ---- 0.19.333: the Web Wallet is off, in main, on a block key wallet (a seed gives another address there; the count protects nothing) ----
-test("Web Wallet on a block key wallet: derive, read, send, the key-use confirmation and its read are refused in main with one sentence; nothing reaches the node", async () => {
-  const ww = require("../main/webwallet"), sent = [];
-  ww._setRunner(async (c) => { sent.push(c); return { status: true, response: { megammr: true } }; });
-  ww.setKeyMode(() => "block");
-  const WHY = /^(?:Error: )?The Web Wallet is not available on a block key wallet yet: here a seed gives a different address than on a classic wallet or the official Web Wallet, and the key-use count does not protect it\. Nothing was done\.$/;
-  await assert.rejects(ww.derive("alpha beta"), WHY); await assert.rejects(ww.read("0x" + "11".repeat(32), false), WHY);
-  await assert.rejects(ww.send({ seed: "alpha beta", to: "0x" + "11".repeat(32), amount: "1", tokenid: "0x00" }), WHY); await assert.rejects(ww.ackKeyuses("0x" + "A9".repeat(32), 1), WHY);
-  assert.throws(() => ww.keyusesInfo("0x" + "A9".repeat(32)), WHY);
-  assert.deepEqual(sent, [], "nothing reached the node");
-  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta").catch(() => {}); assert.ok(sent.length > 0, "a classic wallet goes on");
-  ww.setKeyMode(() => { throw new Error("config unreadable"); }); await ww.derive("alpha beta").catch((e) => assert.doesNotMatch(e.message, WHY));
-  ww.setKeyMode(() => "");
-  assert.ok(rd("main/main.js").includes("webwallet.setKeyMode(() => config.load().keyMode);"), "main gives it the recorded key mode");
+test("A concurrent send cannot reserve another leaf and an unanswered publication consumes its reserved leaf", async () => {
+  const ww = require("../main/webwallet"), FROM = "0x" + "DE".repeat(32), PK = "0x" + "AD".repeat(32);
+  const seed = "test-only wallet phrase", leaves = [], commands = [];
+  stubSigner(FROM, PK, leaves);
+  let release, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  let valid = true;
+  ww._setRunner(async c => {
+    assert.ok(!c.includes(seed));
+    commands.push(c.split(" ")[0]);
+    if (c === "status") return { status: true, response: { megammr: true } };
+    if (c.startsWith("keys action:list")) return { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } };
+    if (c.startsWith("checkaddress")) return { status: true, response: { "0x": FROM } };
+    if (c.startsWith("txncheck")) return { status: true, response: { validtransaction: valid } };
+    if (/^(coins|coinexport) /.test(c)) return publicCoinReply(c, FROM);
+    if (c.startsWith("txnpost")) {
+      entered();
+      return await new Promise(resolve => { release = resolve; });
+    }
+    return { status: true, response: {} };
+  });
+  await ww.derive(seed);
+  ww.setOnchain(async () => 10);
+  await ww.ackKeyuses(FROM, 10);
+  const send = () => ww.send({ seed, to: FROM, amount: "1" });
+  const first = send();
+  await waiting;
+  await assert.rejects(send(), /already in progress/);
+  assert.deepEqual(leaves, ["10"]);
+  assert.equal(ww.keyusesInfo(FROM).keyuses, 11);
+  release({ status: true, response: {} });
+  assert.equal((await first).ambiguous, true);
+  valid = false;
+  await assert.rejects(send(), /could not validate/);
+  assert.deepEqual(leaves, ["10", "11"]);
+  assert.equal(commands.filter(c => c === "txnpost").length, 1);
+});
+test("The classic node's own signing key only reads its classic address and directs spending to Wallet", async () => {
+  const ww = require("../main/webwallet"), FROM = "0x" + "99".repeat(32), PK = "0x" + "88".repeat(32);
+  stubSigner(FROM, PK);
+  const commands = [];
+  ww._setRunner(async c => {
+    commands.push(c);
+    if (c === "status") return { status: true, response: { megammr: true } };
+    if (c.startsWith("keys action:list")) return { status: true, response: { keys: [{ publickey: PK }] } };
+    if (c === "balance megammr:true address:" + FROM) return { status: true, response: [] };
+    throw new Error("Unexpected node operation");
+  });
+  assert.equal((await ww.derive("alpha beta")).isNodeSeed, true);
+  assert.deepEqual(await ww.read(FROM), []);
+  await assert.rejects(ww.send({ seed: "alpha beta", to: FROM, amount: "1" }), /Use the Wallet tab/);
+  assert.ok(commands.every(c => !c.includes("alpha beta") && !c.startsWith("txn")));
 });
 
 // ---- 0.19.334: a damaged old count too large for a number (1e400) is over every limit, never 0 ----
 test("Web Wallet: a damaged old count of 1e400 or a digit run too long for a number gives the over-count explanation", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AA".repeat(32), PK = "0x" + "BA".repeat(32);
-  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CA".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
-  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta"); ww.setOnchain(async () => 3);
+  stubSigner(FROM, PK);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); ww.setOnchain(async () => 3);
   for (const raw of ['{"keyuses":1e400,"ack":true}', '{"keyuses":"' + "9".repeat(400) + '","ack":true}']) {
     fs.writeFileSync(file, '{"' + FROM + '":' + raw + "}");
     assert.equal(ww.keyusesInfo(FROM).keyuses, Infinity, raw.slice(0, 30));
     await assert.rejects(ww.ackKeyuses(FROM, 5), /saved key-use count \(Infinity\) is above the limit of a key of this wallet/, raw.slice(0, 30));
   }
-  ww.setOnchain(async () => null); ww.setKeyMode(() => "");
+  ww.setOnchain(async () => null);
 });
 
 // ---- 0.19.340 (as released 0.18.274 / 0.18.279): for an entry not yet confirmed main reads the chain first: a chain figure at the limit gets the
 // at-the-limit explanation even when the window sent max(typed, chain); a figure above the ceiling with the service unreadable gets the ceiling ----
 test("Web Wallet: an unconfirmed entry's chain figure is read before the ceiling: 262144 from the chain is explained as at the limit; above the ceiling with the chain unread gets the ceiling message", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AB".repeat(32), PK = "0x" + "BB".repeat(32);
-  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CB".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : { status: true, response: {} });
+  stubSigner(FROM, PK);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : { status: true, response: {} });
   try { fs.rmSync(file); } catch (e) {}
-  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta");
+  await ww.derive("alpha beta");
   let chain = 262144; ww.setOnchain(async () => chain);
   await assert.rejects(ww.ackKeyuses(FROM, 262144), /^Error: The chain's figure for this key \(262144\) is at or above the limit of a key of this wallet/, "what the window sends, max(typed, chain): the chain's figure explained");
   chain = null; await assert.rejects(ww.ackKeyuses(FROM, 300000), /^Error: The key-use count can be at most 262143/, "above the ceiling while the chain is unread: the ceiling, not 'could not be read'");
   await assert.rejects(ww.ackKeyuses(FROM, 5), /could not be read/, "within the ceiling while unread: the chain could not be read");
-  ww.setOnchain(async () => null); ww.setKeyMode(() => "");
+  ww.setOnchain(async () => null);
 });
 
 // ---- 0.19.341: the Web Wallet's key-use refusals are the released tree's words exactly (main/webwallet.js there) ----
 test("Web Wallet: the ceiling, the chain at the limit, the over-count (sent and saved) and the damaged floor say the released tree's words; ' 5 ' is not a count", async () => {
   const ww = require("../main/webwallet"), file = path.join(DIR, "webwallet-keyuses.json"), FROM = "0x" + "AC".repeat(32), PK = "0x" + "BC".repeat(32), TO = "0x" + "11".repeat(32);
-  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : c.startsWith("keys action:genkey") ? { status: true, response: { address: FROM, script: "RETURN SIGNEDBY(" + PK + ")", privatekey: "0x" + "CC".repeat(32), publickey: PK } }
-    : c.startsWith("keys action:list") ? { status: true, response: { keys: [] } } : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: {} });
-  ww.setKeyMode(() => "classic"); await ww.derive("alpha beta"); let chain = 3; ww.setOnchain(async () => chain);
+  stubSigner(FROM, PK);
+  ww._setRunner(async (c) => c === "status" ? { status: true, response: { megammr: true } } : /^(?:coins|coinexport|txncheck) /.test(c) ? publicCoinReply(c, FROM)
+    : c.startsWith("keys action:list") ? { status: true, response: { keys: [{ publickey: "0x" + "ED".repeat(32) }] } } : c.startsWith("checkaddress") ? { status: true, response: { "0x": TO } } : { status: true, response: {} });
+  await ww.derive("alpha beta"); let chain = 3; ww.setOnchain(async () => chain);
   const msg = async (p) => { try { await p; return ""; } catch (e) { return e.message; } };
   try { fs.rmSync(file); } catch (e) {}
   assert.equal(await msg(ww.ackKeyuses(FROM, 262144)), "The key-use count can be at most 262143 (a key of this wallet has 262144 one-time uses, numbered 0 to 262143). Nothing was saved.");
@@ -343,7 +405,7 @@ test("Web Wallet: the ceiling, the chain at the limit, the over-count (sent and 
   assert.equal(await msg(ww.ackKeyuses(FROM, 10)), "This key's saved count read 57 before it was damaged. Confirm at least that many. Nothing was saved.");
   fs.writeFileSync(file, JSON.stringify({ [FROM]: { keyuses: "300000", ack: true } }));
   assert.equal(await msg(ww.ackKeyuses(FROM, 10)), "This wallet's saved key-use count (300000) is above the limit of a key of this wallet (262144 one-time uses, numbered 0 to 262143). It was probably confirmed too high before this version checked it, and the true count cannot be known here, so it is not lowered. This app will not sign from this address: signing past the last use (262143) would reuse a one-time key, which can lose funds. Nothing was saved.");
-  ww.setOnchain(async () => null); ww.setKeyMode(() => "");
+  ww.setOnchain(async () => null);
 });
 
 // ---- 0.19.343: a collect never pays out more than the coin; its change is the coin less the payout, exactly ----

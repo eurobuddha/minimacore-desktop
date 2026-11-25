@@ -2,6 +2,9 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "{b}Runs entirely on this computer.{_b} The app derives your classic address and signs payments locally. Only the signed transaction goes to your node for publication.": "{b}所有操作均在本机完成。{_b}应用在本地派生经典地址并签署付款交易，仅将已签名的交易发送到节点进行广播。",
+  "This node owns the signing key. Use the Wallet tab to send.": "此节点持有签名密钥。请在“钱包”选项卡中发送。",
+  "Open Wallet": "打开钱包",
   "Click to copy the full id": "点击复制完整 ID",
   "Copied ✓": "已复制 ✓",
   "Copy failed: select the text and press ⌘C": "复制失败：请选中文本并按 ⌘C",

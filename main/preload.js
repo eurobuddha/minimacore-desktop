@@ -304,10 +304,10 @@ contextBridge.exposeInMainWorld("mcd", {
   onVestr: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:vestr", h); return () => ipcRenderer.removeListener("mcd:vestr", h); },
   onFutureCash: (fn) => { const h = () => fn(); ipcRenderer.on("mcd:futurecash", h); return () => ipcRenderer.removeListener("mcd:futurecash", h); },
 
-  // Web Wallet (local, megammr-gated). Seed is passed to main for loopback signing only; never persisted.
+  // Web Wallet (local, megammr-gated). Seed is passed to main for local signing only; never persisted.
   wwMegammr: () => ipcRenderer.invoke("mcd:wwMegammr"),
   wwDerive: (seed) => ipcRenderer.invoke("mcd:wwDerive", seed),
-  wwRead: (address, nodeSeed) => ipcRenderer.invoke("mcd:wwRead", address, nodeSeed),
+  wwRead: (address) => ipcRenderer.invoke("mcd:wwRead", address),
   wwKeyuses: (address) => ipcRenderer.invoke("mcd:wwKeyuses", address),
   wwAckKeyuses: (address, count) => ipcRenderer.invoke("mcd:wwAckKeyuses", address, count),
   wwSend: (opts) => ipcRenderer.invoke("mcd:wwSend", opts),

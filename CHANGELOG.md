@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.447 · Pandamonium Desktop Web Wallet
+
+The Web Wallet derives the classic address and signs payments locally in both key modes. The MegaMMR node supplies public coin proofs, validates the signed transaction and broadcasts it. If the native wallet already owns the classic key, the Web Wallet shows its address and balance and opens the Wallet tab for spending.
+
 ## [0.19.446] — KeetChat follows the Keets transport setting
 
 - With Keets off, Chat disappears and old notifications cannot open it. Enabling Keets at the next node start brings Chat back with its existing history.
