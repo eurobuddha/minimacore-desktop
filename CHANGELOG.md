@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.20.00 · Keets peers on the shared server port
+
+Pandamonium now validates incoming Keets peers when the Minima node and Parlons relay share the public port. Classic P2P, direct Parlons clients and Keets continue to use their existing connection paths.
+
 ## 0.19.456 · Incoming Keets greetings
 
 The Keets bridge now keeps every part of an incoming greeting while it opens the connection to the local node. This lets Minima validate peers whose greeting arrives in several chunks.

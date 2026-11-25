@@ -32,7 +32,7 @@ function builderConfig(pkg, id, opts = {}) {
   cfg.electronDist = "node_modules/electron/dist";   // the Electron already installed: nothing is downloaded
   cfg.npmRebuild = false;
   cfg.publish = null;
-  cfg.mac = Object.assign({}, cfg.mac, { notarize: false, artifactName: F.artifact + "-${version}-${arch}.${ext}" });
+  cfg.mac = Object.assign({}, cfg.mac, { notarize: false, bundleShortVersion: pkg.version, bundleVersion: pkg.version, artifactName: F.artifact + "-" + pkg.version + "-${arch}.${ext}" });
   // the questions macOS asks for the camera and the microphone name the app that asks, not the released one
   const released = require(path.join(ROOT, "main", "flavor.js")).RELEASED.windowTitle;
   for (const [k, v] of Object.entries(cfg.mac.extendInfo || {})) if (typeof v === "string") cfg.mac.extendInfo[k] = v.split(released).join(F.productName);

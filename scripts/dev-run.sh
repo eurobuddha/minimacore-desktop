@@ -72,7 +72,7 @@ REFUSED: a node jar is missing, and this script does not fetch or copy jars by i
   the jars package.json pins (classic wallets only: minima 1.1.2.3-euro8, parlons-node 0.2.162):
     cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.3-euro8.jar" "$RES/minima.jar"
     cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.162.jar" "$RES/parlons-node.jar"
-  the block-capable jars the pandamonium flavour pins (minima 1.1.2.31-euro14-chatonly, parlons-node 0.2.160-chatonly-rpc8; they know -keetschatonly):
+  the block-capable jars the pandamonium flavour pins (minima 1.1.2.31-euro14-chatonly, parlons-node 0.2.160-chatonly-rpc8-keets-shared; they know -keetschatonly):
     cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/minima-1.1.2.31-euro14-block-chatonly.jar" "$RES/minima.jar"
     cp "$HOME/Projects/minima/_artifacts/node-cmdinject-2026-11-21/parlons-node-0.2.160-block-chatonly-rpc8.jar" "$RES/parlons-node.jar"
   or let this script copy a folder's pair:  scripts/dev-run.sh --jars <dir>
