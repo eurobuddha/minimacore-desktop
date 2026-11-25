@@ -8,7 +8,10 @@ const java = path.join(root, "resources", "jre", "bin", process.platform === "wi
 const jar = path.join(root, "resources-pandamonium", "minima.jar");
 const load = Module._load;
 Module._load = function(id, parent) {
-  if (id === "electron") return { app: { getPath: () => tmp, isPackaged: true } };
+  if (id === "electron") return { app: { getPath: () => tmp, isPackaged: true }, safeStorage: {
+    isEncryptionAvailable: () => true, getSelectedStorageBackend: () => "test",
+    encryptString: value => Buffer.from(value), decryptString: bytes => bytes.toString()
+  } };
   if (id === "./node-manager" && parent.filename.endsWith("classic-webwallet.js")) return { javaPath: () => java };
   return load.apply(this, arguments);
 };
@@ -74,6 +77,38 @@ async function run(mode, port, classic) {
       await until(async () => (await ww.read(wallet.address)).some(r => r.tokenid === token && Number(r.confirmed) === 4.5), "confirmed token change");
       assert.ok((await ok("coins megammr:true tokenid:" + token + " address:" + to)).some(c => c.tokenamount === "1.25"));
       console.log("block confirmed 1.25 custom tokens delivered and 4.5 change");
+    }
+    const mw = require("../main/minimawallet");
+    let profile = await mw.open();
+    if (mode === "classic") {
+      assert.equal(profile.mode, "classic"); assert.equal(profile.source, "node");
+      assert.equal(profile.owned, true);
+      await assert.rejects(mw.send(profile.id, 0, {}), /Use the Wallet tab/);
+    } else {
+      profile = await mw.open(await mw.replace(profile.id, {source:"node"}), 0);
+      assert.equal(profile.mode, "classic"); assert.equal(profile.owned, false);
+      const manual = "independent classic and block seed";
+      for (const format of ["classic", "block"]) {
+        const previous = profile.id;
+        const id = await mw.replace(previous, {source:"manual", mode:format, seed:manual});
+        await assert.rejects(mw.open(previous, 0), /wallet changed/);
+        profile = await mw.open(id, 1);
+        assert.equal(profile.owned, false);
+        if (format === "classic") continue;
+        const reference = await ok('keys action:genkey modifier:1 phrase:"' + manual + '"');
+        assert.equal((await mw.open(id, 0)).address, reference.address);
+        await until(async () => (await cmd("send amount:3 address:" + profile.address + " mine:true")).status, "block wallet funding");
+        await until(async () => (await ok("coins megammr:true coinage:3 address:" + profile.address)).length, "confirmed block wallet funding");
+        const floor = await mw.audit(id, 1);
+        assert.ok(floor.minimum > 0 && floor.last === 268435455);
+        const payment = {to, amount:"1.5", tokenid:"0x00"};
+        await assert.rejects(mw.send(id, 1, {...payment,keyuses:"0"}), /next key use/);
+        const typed = floor.minimum + 16;
+        assert.equal((await mw.send(id, 1, {...payment, keyuses:String(typed)})).ok,true);
+        await until(async () => (await ww.read(profile.address)).some(r => r.tokenid==="0x00" && r.confirmed==="1.5"), "block wallet change");
+        assert.ok((await mw.audit(id, 0)).minimum >= typed + 1);
+        console.log("minimaWallet confirmed a block-key payment and shared its next-use floor across addresses");
+      }
     }
     assert.ok(trace.includes("txncheck") && trace.includes("txnpost"));
     assert.ok(!trace.some(c => ["send","sendfrom","txnsign","txncreate","txninput","txnoutput"].includes(c)));

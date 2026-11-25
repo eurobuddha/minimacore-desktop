@@ -1064,6 +1064,50 @@ let vestrStarted = false;
 node.on("status", (s) => { if (s.state === "running") { vestrStarted = true; freeze.start("vestr"); } });
 
 // Classic Web Wallet. Only public reads and signed transactions reach the node.
+const nftJobs = require("./nftjobs");
+if (flavor.id === "pandamonium") {
+  const timer = setInterval(() => { if (node.state === "running" && !freeze.isFrozen("nftwallet") && !node.walletCheck?.held) nftJobs.tick().catch(e => console.warn("NFTwallet:", e.message)); }, 15000);
+  timer.unref();
+}
+for (const operation of ["status", "mint", "recover"]) {
+  ipcMain.handle("mcd:nftJobs:" + operation, (_event, ...args) => {
+    if (flavor.id !== "pandamonium") throw new Error("This wallet requires Pandamonium Desktop.");
+    requireRunning();
+    return nftJobs[operation](...args);
+  });
+}
+const nftCoins = require("./nftcoins");
+for (const operation of ["coins", "pay", "distribute"]) {
+  ipcMain.handle("mcd:nftCoins:" + operation, (_event, ...args) => {
+    if (flavor.id !== "pandamonium") throw new Error("This wallet requires Pandamonium Desktop.");
+    requireRunning();
+    if (operation==="pay") {
+      return nftCoins.pay(args[0],args[1],async exact => {
+        const answer=await dialog.showMessageBox(win, {type:"warning",buttons:[lang.t("Cancel"),lang.t("Confirm")],defaultId:0,cancelId:0,noLink:true,
+          message:lang.t("Permanently burn {amount} Minima?",{amount:exact}),detail:lang.t("This amount will be destroyed when the payment confirms.")});
+        return answer.response===1;
+      });
+    }
+    return nftCoins[operation](...args);
+  });
+}
+const nftWallet = require("./nftwallet");
+for (const operation of ["list", "transfer", "buryCollection"]) {
+  ipcMain.handle("mcd:nftWallet:" + operation, (_event, ...args) => {
+    if (flavor.id !== "pandamonium") throw new Error("This wallet requires Pandamonium Desktop.");
+    requireRunning();
+    return nftWallet[operation](...args);
+  });
+}
+const minimaWallet = require("./minimawallet");
+node.on("status", s => { if (s.state !== "running") minimaWallet.nodeChanged(); });
+for (const operation of ["open", "replace", "audit", "send", "portfolio"]) {
+  ipcMain.handle("mcd:minimaWallet:" + operation, (_event, ...args) => {
+    if (flavor.id !== "pandamonium") throw new Error("This wallet requires Pandamonium Desktop.");
+    requireRunning();
+    return minimaWallet[operation](...args);
+  });
+}
 ipcMain.handle("mcd:wwMegammr", () => webwallet.isMegammr());
 ipcMain.handle("mcd:wwDerive", (_e, seed) => webwallet.derive(seed));
 ipcMain.handle("mcd:wwRead", (_e, address) => webwallet.read(address));

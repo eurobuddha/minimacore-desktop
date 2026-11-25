@@ -38,7 +38,7 @@
  * (every start site in main.js goes through start(id)), and Dexicon's engines are held before the node is up.
  */
 const PAUSED = ["mail", "minimall", "vestr"];
-const FREEZABLE = ["mail", "ethwallet", "futurecash", "explorer", "vestr", "entropy", "keyuses", "faucet", "minimall", "webwallet", "dexicon", "chat"];
+const FREEZABLE = ["mail", "ethwallet", "futurecash", "explorer", "vestr", "entropy", "keyuses", "faucet", "minimall", "webwallet", "minimawallet", "nftwallet", "dexicon", "chat"];
 const NEVER = { core: "Minima Core is the node and the wallet. It cannot be frozen.", parlons: "Parlons is part of the node itself: its account runs inside it. It cannot be frozen. Hide takes it out of the drawer." };
 const clean = (list) => [...new Set((Array.isArray(list) ? list : []).filter(id => FREEZABLE.includes(id)))];
 

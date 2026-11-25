@@ -335,7 +335,10 @@ test("Copy the listed rows: a cell that leads with a formula trigger gets an apo
 test("C5: the Web Wallet send stops if logged out meanwhile and says main's reason translated; the Mail header and the Send picker never cut an identifier; the chat dialog removes its Escape listener", () => {
   const raw = fs.readFileSync(path.join(R, "app.js"), "utf8");
   const send = raw.slice(raw.indexOf("async function wwDoSend()"), raw.indexOf("function renderActive()"));
-  assert.ok(/const r = await AppsAct\.ww\.send\(api, f\);[\s\S]{0,300}if \(!wwAddr\) \{ renderWebWallet\(\); return; \}/.test(send) && /MainSaid\.say\(r\.message \|\| r\.err\)/.test(send) && !/"Sending\.\.\."/.test(send));
+  const posted = send.indexOf("await AppsAct.ww.send(api, f)");
+  const guarded = send.indexOf("if (wwAddr?.address !== from) return;", posted);
+  assert.ok(posted >= 0 && guarded > posted && send.indexOf("await api.wwRead(from)", guarded) > guarded);
+  assert.ok(send.includes("if (current !== wwAddr) return;") && send.includes("MainSaid.say(r.message || r.err)"));
   for (const w of ['return t("Unverified");', 'return t("just now");', 'th("awaiting payment")']) assert.ok(raw.includes(w), w);
   assert.ok(!/return "Unverified";|return "just now";|"  awaiting payment"/.test(raw));
   const mailCss = fs.readFileSync(path.join(R, "mail.css"), "utf8"), shellCss = fs.readFileSync(path.join(R, "shell.css"), "utf8");

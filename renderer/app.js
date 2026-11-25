@@ -134,6 +134,12 @@ const THEMES = [["system", N_("Follow the system")], ["light", N_("Light")], ["d
 async function boot() {
   CFG = await api.getConfig();
   try { KEYMODE = (await api.keyMode()) || KEYMODE; } catch (e) {}
+  const walletFlavor = await api.flavor().catch(() => null);
+  if (walletFlavor?.id === "pandamonium") {
+    TRAY_APPS.splice(TRAY_APPS.findIndex(a => a.id === "parlons"), 0,
+      { id: "minimawallet", name: "minimaWallet", icon: "icons/minimawallet.png" },
+      { id: "nftwallet", name: "NFTwallet", icon: "icons/nftwallet.png" });
+  }
   initShell();
   // RULE 1, app-wide: anything rendered with a shortened identifier carries the COMPLETE value in
   // data-copy, and one click puts that complete value on the clipboard. Delegated from the document so it
@@ -219,6 +225,7 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
+  if (wasRunning !== running && (activeView === "minimawallet" || activeView === "nftwallet")) renderActive();
   if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); futureCashReset(); if (activeView === "futurecash") renderActive(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
@@ -1081,6 +1088,8 @@ function shellMode(view) { const tab = TAB_OF[view] || ""; return { tab, mode: t
 function selectTab(view) {
   // Entropy holds a seed phrase: leaving it erases everything it holds, and a finished phrase is asked about first (then this runs again).
   if (activeView === "entropy" && view !== "entropy" && !entropyLeaving(() => selectTab(view))) return;
+  if (["minimawallet", "nftwallet"].includes(view) && !TRAY_APPS.some(a => a.id === view)) return;
+  if (["minimawallet", "nftwallet"].includes(activeView) && view !== activeView) leaveCompanionWallet();
   if (view === "chat" && el("chatTab").hidden) return;
   // Auto-lock the Web Wallet when navigating away — never leave the seed in renderer memory on another tab.
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
@@ -1591,6 +1600,8 @@ function renderActive() {
   if (activeView === "balances") renderBalances();
   else if (activeView === "receive") renderReceive();
   else if (activeView === "send") renderSend();
+  else if (activeView === "minimawallet") renderMinimaWallet();
+  else if (activeView === "nftwallet") renderNftWallet();
   else if (activeView === "webwallet") renderWebWallet();
   else if (activeView === "mail") renderMail();
   else if (activeView === "chat") renderChat();
@@ -1615,7 +1626,7 @@ function renderActive() {
 }
 function startRefresh() {
   stopRefresh();
-  refreshTimer = setInterval(() => { if (running && (activeView === "balances")) renderBalances(); }, 15000);
+  refreshTimer = setInterval(() => { if (running && activeView === "balances") renderBalances(); if (running && activeView === "nftwallet" && !el("nftDetails")) renderNftWallet(); }, 15000);
 }
 function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshTimer = null; }
 

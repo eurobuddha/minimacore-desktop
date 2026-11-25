@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.449 · minimaWallet and NFTwallet
+
+Pandamonium Desktop adds both wallets to the app tray. minimaWallet starts with the node seed and classic keys. Reset it to import an independent seed with classic or block-based keys. Local payments require a typed key-use count. When the node owns the key, the Wallet tab handles the payment.
+
+NFTwallet follows the current node wallet. It supports the gallery, favourites, transfers, irreversible burial, token and NFT creation, and locked-edition collections. Coin control includes split sends, consolidation and distributions in batches of up to 14 recipients. Quick send allows an optional Minima burn with a separate confirmation of the exact amount.
+
 ## 0.19.448 · Web Wallet key-use verification
 
 Opening Send checks the archive estimate and shows the next use saved on this computer. Each payment requires a typed count at least as high as both figures. The local signer checks again before reserving that use. If the archive is unavailable or the key is exhausted, sending stays disabled.

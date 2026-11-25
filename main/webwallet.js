@@ -169,10 +169,10 @@ async function nodeHasPubkey(pubkey) {
 }
 
 /** Derive the same single receive address in either node mode. */
-async function derive(seed) {
+async function derive(seed, account = null) {
   if (!isPhrase(seed)) throw new Error('Enter your seed phrase (a " or \\ or line break can\'t be carried safely)');
-  if (!(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
-  const d = await helper.run({ action: "derive", seed });
+  if (!account && !(await isMegammr())) throw new Error("Web Wallet needs a MegaMMR node");
+  const d = await helper.run({ action: "derive", seed, ...account });
   if (!/^0x[0-9a-f]{64}$/i.test(d.address) || !/^0x[0-9a-f]{64}$/i.test(d.publickey)
       || !isScript(d.script) || !looksLikeMinimaAddress(d.miniaddress)) throw new Error("Could not derive wallet from seed");
   const isNodeSeed = await nodeHasPubkey(d.publickey);
@@ -180,9 +180,9 @@ async function derive(seed) {
   return { address: d.address, miniaddress: d.miniaddress, publickey: d.publickey, script: d.script, isNodeSeed };
 }
 
-async function read(address) {
+async function read(address, mega = true) {
   if (!looksLikeMinimaAddress(address)) throw new Error("bad address");
-  const rows = await checkedCommand("balance megammr:true address:" + address);
+  const rows = await checkedCommand("balance " + (mega ? "megammr:true " : "") + "address:" + address);
   if (!Array.isArray(rows)) throw new Error("Could not read the Web Wallet balance");
   return rows.map(b => ({
     tokenid: b.tokenid,
@@ -202,8 +202,8 @@ async function checkedCommand(cmd) {
 
 // Select by exact displayed units, largest first, then export only those inputs.
 // The signer rechecks the actual serialized coins and computes change in raw chain units.
-async function coinProofs(address, token, amount) {
-  const coins = await checkedCommand("coins megammr:true checkmempool:true coinage:3 address:" + address + " tokenid:" + token);
+async function coinProofs(address, token, amount, mega) {
+  const coins = await checkedCommand("coins " + (mega ? "megammr:true" : "relevant:true") + " checkmempool:true coinage:3 address:" + address + " tokenid:" + token);
   if (!Array.isArray(coins)) throw new Error("Could not read Web Wallet coins");
   const candidates = coins.map(c => {
     const value = token === "0x00" ? c.amount : c.tokenamount;
@@ -230,14 +230,48 @@ async function coinProofs(address, token, amount) {
   return proofs;
 }
 
+const BLOCK_CAPACITY = 268435456;
+async function paymentFloor(address, publickey, blockRoot) {
+  const chain = await onchainOf(publickey).catch(() => null);
+  if (!Number.isSafeInteger(chain) || chain < 0) throw new Error("Could not verify key uses. Check your connection and try again.");
+  let height = 0;
+  if (blockRoot) {
+    const tip = await checkedCommand("block");
+    const raw = String(tip?.block ?? "");
+    if (!/^\d{1,10}$/.test(raw)) throw new Error("Could not read the block height.");
+    height = Number(raw);
+    if (!height) throw new Error("Wait for the node to sync before signing.");
+  }
+  const store = loadStore();
+  const local = Math.max(entryFor(store, address).keyuses, blockRoot ? entryFor(store, "block:" + blockRoot).keyuses : 0);
+  return { chain, local, height, minimum: Math.max(chain, local, height), last: blockRoot ? BLOCK_CAPACITY - 1 : LAST_USE };
+}
+
+async function reserveBlockUse(address, publickey, root, typed) {
+  const floor = await paymentFloor(address, publickey, root);
+  const n = Number(typed), store = loadStore();
+  const minimum = Math.max(floor.minimum, entryFor(store, address).keyuses, entryFor(store, "block:" + root).keyuses);
+  if (n < minimum) throw new Error(BELOW_SAVED(minimum));
+  if (n >= BLOCK_CAPACITY) throw new Error("The block key has reached its signing limit.");
+  store[address] = { keyuses: n + 1, ack: true };
+  store["block:" + root] = { keyuses: n + 1, ack: true };
+  writeStore(store);
+  return n;
+}
+
 const sending = new Set();
-async function send(opts) {
+async function send(opts, account = null) {
   const { seed, to, amount, tokenid = "0x00" } = opts || {};
   if (!isPhrase(seed)) throw new Error("Invalid seed phrase");
   if (!looksLikeMinimaAddress(to)) throw new Error("Invalid recipient address");
   if (!isAmount(amount)) throw new Error("Invalid amount");
   if (!isTokenid(tokenid)) throw new Error("Invalid token id");
-  const { address, isNodeSeed } = await derive(seed);
+  const options = account?.options;
+  const { address, publickey, isNodeSeed } = await derive(seed, options);
+  if (account && address !== account.address) throw new Error("The selected wallet address changed.");
+  if (account && !isNodeSeed && await nodeHasPubkey(account.rootKey)) throw new Error("This node owns the signing key. Use the Wallet tab to send.");
+  const blockRoot = options?.accountMode === "block" ? account.root : null;
+  const mega = account ? await isMegammr() : true;
   if (isNodeSeed) throw new Error("This node owns the signing key. Use the Wallet tab to send.");
   if (sending.has(address)) throw new Error("A payment from this address is already in progress.");
   sending.add(address);
@@ -245,16 +279,17 @@ async function send(opts) {
     if (!resp(await runner("checkaddress address:" + to))?.["0x"]) throw new Error("Recipient address failed validation");
     const id = randomUUID();
     const saved = entryFor(loadStore(), address);
-    if (saved.keyuses >= KEY_USES) throw new Error(overCount(saved.keyuses));
+    if (!blockRoot && saved.keyuses >= KEY_USES) throw new Error(overCount(saved.keyuses));
     if (typeof opts.keyuses !== "string" || !/^\d{1,15}$/.test(opts.keyuses)) {
       if (saved.damaged) throw new Error("This wallet's saved key-use count is damaged. Confirm its key uses again (at least what the chain shows) before sending. Nothing was sent.");
       throw new Error("Confirm this wallet's key-uses count before sending");
     }
-    if (Number(opts.keyuses) > LAST_USE) throw new Error(OVER_MAX);
+    if (!blockRoot && Number(opts.keyuses) > LAST_USE) throw new Error(OVER_MAX);
     if (Number(opts.keyuses) < saved.keyuses) throw new Error(saved.damaged ? DAMAGED_BELOW(saved.keyuses) : BELOW_SAVED(saved.keyuses));
-    const proofs = await coinProofs(address, tokenid, amount);
-    const leaf = await ackKeyuses(address, opts.keyuses, true);
-    const signed = await helper.run({ action: "sign", seed, to, amount, tokenid, proofs, leaf: String(leaf), id });
+    const proofs = await coinProofs(address, tokenid, amount, mega);
+    const leaf = blockRoot ? await reserveBlockUse(address, publickey, blockRoot, opts.keyuses)
+      : await ackKeyuses(address, opts.keyuses, true);
+    const signed = await helper.run({ action: "sign", seed, ...options, to, amount, tokenid, proofs, leaf: String(leaf), id });
     if (!/^0x(?:[0-9a-f]{2})+$/i.test(signed.data)) throw new Error("Invalid signed Web Wallet transaction");
     await checkedCommand("txnimport id:" + id + " data:" + signed.data);
     try {
@@ -274,7 +309,7 @@ async function send(opts) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = { setOnchain,
+module.exports = { setOnchain, paymentFloor, checkedCommand, nodeHasPubkey,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status, KEY_USES, LAST_USE,
   _setRunner: (fn) => { runner0 = fn; },

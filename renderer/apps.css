@@ -599,3 +599,32 @@ img.mm-prod__im { cursor: zoom-in; }
 #futurecashBody { flex: 1 0 auto; display: flex; flex-direction: column; }
 #futurecashBody > .fcn { flex: 1 0 auto; }
 .fcn-link { margin-left: auto; padding: 0; border: 0; background: none; color: var(--a); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+
+/* Android NFTwallet Design colors. The selection is scoped to this wallet. */
+#nftWalletBody {
+  --nf-bg:#0a0a0f; --nf-card:#15151f; --nf-field:#1f1f2b; --nf-text:#fff; --nf-dim:#9a9aa8;
+  --nf-accent:#f7931a; --nf-link:#f7931a; --nf-radius:6px; color-scheme:dark;
+}
+#nftWalletBody[data-design="clean"] {
+  --nf-bg:#f5f5f6; --nf-card:#fff; --nf-field:#efeff1; --nf-text:#17181c; --nf-dim:#72747c;
+  --nf-accent:#e8820a; --nf-link:#b93d0b; --nf-radius:12px; color-scheme:light;
+}
+#nftWalletBody[data-design="originalDark"] {
+  --nf-bg:#000; --nf-card:#0d0d0f; --nf-field:#18181b; --nf-text:#d6d6d6; --nf-dim:#8e8e8e;
+  --nf-accent:#ff5a1f; --nf-link:#ff7847; --nf-radius:0;
+}
+#nftWalletBody[data-design="originalLight"] {
+  --nf-bg:#fff; --nf-card:#f4f4f2; --nf-field:#e8e8e5; --nf-text:#1c1c1c; --nf-dim:#5f5f5f;
+  --nf-accent:#ff5a1f; --nf-link:#b93d0b; --nf-radius:0; color-scheme:light;
+}
+#nftWalletBody .ww { background:var(--nf-bg); color:var(--nf-text); }
+#nftWalletBody[data-design^="original"] .ww { font-family:monospace; }
+#nftWalletBody .ww-card, #nftWalletBody .card { background:var(--nf-card); color:var(--nf-text); border-radius:var(--nf-radius); }
+#nftWalletBody .ww-in, #nftWalletBody .ww-tab { background:var(--nf-field); color:var(--nf-text); border-radius:var(--nf-radius); color-scheme:inherit; }
+#nftWalletBody .ww-label, #nftWalletBody .ww-id { color:var(--nf-dim); }
+#nftWalletBody .ww-btn, #nftWalletBody .ww-tab--on { background:var(--nf-accent); color:#000; }
+#nftWalletBody .ww-h1, #nftWalletBody .ww-addr { color:var(--nf-text); }
+#nftWalletBody .ww-tabs { flex-wrap:wrap; }
+#nftWalletBody .ww-link { color:var(--nf-link); }
+#nftGallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr)); gap:12px; margin-top:12px; }
+#nftGallery .card { min-width:0; overflow-wrap:anywhere; }

@@ -198,10 +198,10 @@ if (typeof I18N === "undefined" && typeof require === "function") require("./i18
   // ---- Web Wallet (main/webwallet.js) ----
   var ww = {
     problem: function (f) { if (!text(f.to)) return I18N.t("Enter a recipient address"); if (!(Number(text(f.amount)) > 0)) return I18N.t("Enter a valid amount"); return ""; },
-    validUses: function (typed, minimum) {
+    validUses: function (typed, minimum, last = 262143) {
       return typeof typed === "string" && /^\d{1,15}$/.test(typed) &&
         Number.isSafeInteger(minimum) && minimum >= 0 &&
-        Number(typed) >= minimum && Number(typed) <= 262143;
+        Number(typed) >= minimum && Number(typed) <= last;
     },
     /** → the main process's answer ({ ok, txnid } | { ambiguous, message } | { message }), or { err } when it threw. */
     send: function (api, f) { return api.wwSend({ seed: f.seed, to: text(f.to), amount: text(f.amount), tokenid: f.tokenid, keyuses: f.keyuses }).catch(function (e) { return { message: String((e && e.message) || I18N.t("Send failed")) }; }); }
