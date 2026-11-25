@@ -151,7 +151,7 @@ function guideNetwork(s) {
 function guideNetworkUpdate(s){
   const note=el("guideNetworkStatus");if(!note)return;
   const pm=s.portmap||{};
-  note.textContent=CFG.contribute?contribHelp(s,s.health||{},pm).text:t("Light wallet");
+  note.textContent=CFG.contribute?t("Classic P2P reachability")+" · "+contribHelp(s,s.health||{},pm).text:t("Light wallet");
   const router=el("guideRouter"),html=forwardHowTo(pm);if(router.innerHTML!==html)router.innerHTML=html;
 }
 async function guideMigration(){

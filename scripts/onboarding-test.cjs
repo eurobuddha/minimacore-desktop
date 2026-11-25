@@ -94,3 +94,34 @@ async function checkRecoveryScreen() {
   }catch(e){document.documentElement.dataset.setupTest=e.message;}
 }
 test("Host resync log survives navigation and restart, and the gallery decodes sealed SVG artwork",{skip:chrome?false:"Chrome unavailable"},()=>browserExercise(checkRecoveryScreen));
+
+async function checkIncomingCounts() {
+  try {
+    await new Promise(r=>setTimeout(r,50));
+    CFG=await api.saveConfig({walletDone:true,setupDone:true});
+    running=true;activeView="node";
+    LAST_STATUS={state:"running",bootTs:12345,health:{},keetsEnabled:true};
+    let active=1, late=null;
+    const live={connections:[{incoming:true,valid:true,host:"192.0.2.7"},{incoming:true,valid:true,host:"127.113.2.2"}]};
+    const previous=api.cmd;
+    api.cmd=async c=>{
+      if(c==="network")return {status:true,response:live};
+      if(c==="keets action:info"){
+        if(late)return await late;
+        return {status:true,response:{dht:{diag:{inConnected:99,bridge:{incomingActive:active}}}}};
+      }
+      return previous(c);
+    };
+    const tick=()=>new Promise(r=>setTimeout(r,25));
+    renderNode(LAST_STATUS);await tick();
+    const expect=(c,k)=>{if(el("classicIncoming").textContent!==c||el("keetsIncoming").textContent!==k)throw Error("incoming counts "+el("classicIncoming").textContent+"/"+el("keetsIncoming").textContent);};
+    expect("1","1");
+    let resolve;
+    late=new Promise(r=>{resolve=r;});peerPoll=null;refreshPeerCounts();
+    late=null;active=0;appendLog("[KEETS] incoming Minima bridges changed");await tick();expect("1","0");
+    resolve({status:true,response:{dht:{diag:{bridge:{incomingActive:1}}}}});await tick();expect("1","0");
+    live.connections=[];peerPoll=null;refreshPeerCounts();await tick();expect("0","0");
+    document.documentElement.dataset.setupTest="passed";
+  }catch(e){document.documentElement.dataset.setupTest=e.message;}
+}
+test("Node tab drops departed Keets and classic peers and ignores an older in-flight reply",{skip:chrome?false:"Chrome unavailable"},()=>browserExercise(checkIncomingCounts));

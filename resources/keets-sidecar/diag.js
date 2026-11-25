@@ -20,6 +20,7 @@ const d = {
   outErrors: {},
   bridge: { capped: 0, dead: 0, closedBy: {}, lived: {} } // Minima bridge links: who ended them, how long they lived
 }
+const incomingBridges = new Set()
 const handshakePeers = new Map()
 const bump = (o, k) => { o[k] = (o[k] || 0) + 1 }
 
@@ -70,7 +71,21 @@ DHT.prototype.connect = function (...args) {
 
 function snapshot () {
   const top = [...handshakePeers.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
-  return { ...d, uptimeS: Math.round((Date.now() - d.since) / 1000), handshakeFromHosts: handshakePeers.size, topHandshakeHosts: top }
+  return { ...d, bridge: { ...d.bridge, incomingActive: incomingBridges.size }, uptimeS: Math.round((Date.now() - d.since) / 1000), handshakeFromHosts: handshakePeers.size, topHandshakeHosts: top }
+}
+
+// Count a remotely opened Minima tunnel only while both ends of the bridge are open.
+snapshot.trackIncomingBridge = function (conn, tcp) {
+  if (conn.destroyed || conn.destroying || tcp.destroyed || conn.readableEnded || tcp.readableEnded) return
+  incomingBridges.add(conn)
+  const closed = () => {
+    if (incomingBridges.delete(conn)) console.log('incoming Minima bridges changed')
+  }
+  conn.once('end', closed)
+  conn.once('close', closed)
+  tcp.once('end', closed)
+  tcp.once('close', closed)
+  console.log('incoming Minima bridges changed')
 }
 
 // A bridged Minima link ended: closer is LOCAL (our node), REMOTE-end / REMOTE-err:<code>, or ?.

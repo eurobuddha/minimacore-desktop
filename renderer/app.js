@@ -1142,6 +1142,7 @@ function selectTab(view) {
   if (activeView === "webwallet" && view !== "webwallet" && typeof wwLock === "function") wwLock();
   if (activeView === "backup" && view !== "backup") el("backupBody").innerHTML = "";   // a shown seed phrase or a typed password never outlives the screen
   if (activeView === "keyuses" && view !== "keyuses") keyUsesReset();                 // an audit's result is not kept after the screen is left (as the phone's)
+  if (activeView === "node" && view !== "node") peerPoll = null;
   activeView = view;
   const { tab, mode } = shellMode(view);
   if (tab) { lastTabView = view; if (tab === "dexicon") dexView = view; else lastShellView = view; }
@@ -3586,19 +3587,45 @@ let NODE_DASH = {}, NODE_DASH_AT = 0;
 async function refreshNodeDash() {
   if (Date.now() - NODE_DASH_AT < 30000) return;
   NODE_DASH_AT = Date.now();
-  const [keys, peers, net] = await Promise.all([tryCmd("keys"), tryCmd("peers"), tryCmd("network")]);
+  const [keys, peers] = await Promise.all([tryCmd("keys"), tryCmd("peers")]);
   const d = {};
   const ku = maxKeyUses(keys); if (ku != null) d.keyuses = ku;
   if (peers) { const list = String(peers.peerslist || "").split(",").filter(Boolean); d.peer = list.length ? list[Math.floor(Math.random() * list.length)] : "No peers"; }
-  if (net) {
-    const det = net.details || {}, self = String((det.p2p && det.p2p.address) || "").split(":")[0];
-    if (det.connected != null) d.connected = det.connected;
-    // incoming peers, minus a hairpinned dial back to this node's own address (same rule as the phone and main/node-manager.js)
-    if (Array.isArray(net.connections)) d.incoming = net.connections.filter(c => c && c.incoming === true && !c.keets && c.valid !== false && c.host && !/^(?:127\.|::1$|::ffff:127\.)/i.test(c.host) && String(c.host) !== self).length;
-  }
   NODE_DASH = Object.assign({}, NODE_DASH, d);
   if (activeView === "node" && running) api.nodeStatus().then(renderNode);
 }
+// Poll only while the counters are visible. A late reply from a previous
+// visit or node process must never restore its counts.
+let peerPoll = null;
+function refreshPeerCounts() {
+  const s = LAST_STATUS;
+  if (!s || s.state !== "running" || activeView !== "node" || document.hidden) { peerPoll = null; return; }
+  const now = Date.now();
+  if (!peerPoll || peerPoll.boot !== s.bootTs) peerPoll = {boot:s.bootTs, classic:null, keets:null, readAt:0, pending:false};
+  const sample = peerPoll;
+  const show = () => {
+    if (sample !== peerPoll || activeView !== "node" || document.hidden) return;
+    const classic = el("classicIncoming"), keets = el("keetsIncoming");
+    if (!classic || !keets) return;
+    const fresh = Date.now() - sample.readAt < 2500;
+    classic.textContent = fresh && sample.classic != null ? sample.classic : "–";
+    keets.textContent = s.keetsEnabled === false ? t("Off") : fresh && sample.keets != null ? sample.keets : "–";
+  };
+  show();
+  if (sample.pending || now - sample.readAt < 750) return;
+  sample.pending = true;
+  Promise.all([tryCmd("network"), s.keetsEnabled ? tryCmd("keets action:info") : null]).then(([net, info]) => {
+    if (sample !== peerPoll || LAST_STATUS?.bootTs !== sample.boot || LAST_STATUS?.state !== "running") return;
+    sample.classic = MINIMA_PARAMS.classicIncoming(net);
+    const dht = info?.dht, open = dht?.diag?.bridge?.incomingActive;
+    sample.keets = dht?.chatOnly === true ? t("Chat only") : Number.isSafeInteger(open) && open >= 0 ? open : null;
+    sample.readAt = now;
+    show();
+  }).finally(() => { sample.pending = false; });
+}
+setInterval(refreshPeerCounts, 1000);
+document.addEventListener("visibilitychange", () => { peerPoll = null; refreshPeerCounts(); });
+
 function renderNode(s) {
   s = s || { state: "?", health: null };
   const c = el("nodeCard");
@@ -3623,8 +3650,9 @@ function renderNode(s) {
       <div class="home-row" data-state="${esc(s.state)}"><i class="home-dot"></i><span class="home-row__k">${th("Status")}</span><span class="home-row__v home-status">${esc(status)}</span></div>
       ${row(t("Block"), esc(up ? (h.block ?? "") : ""))}
       ${row(t("Block time"), esc(up ? when : ""))}
-      ${row(t("Connections"), esc(up ? (D.connected ?? h.connections ?? "") : ""))}
-      ${row(t("Incoming"), esc(D.incoming ?? ""))}
+      ${row(t("Connections"), esc(up ? (h.connections ?? "") : ""))}
+      ${row(t("Classic P2P incoming"), '<span id="classicIncoming">–</span>')}
+      ${row(t("Keets incoming"), '<span id="keetsIncoming">–</span>')}
       ${row(t("Random peer"), esc(D.peer ?? ""))}
     </div>
     <div class="eyebrow home-eyebrow">${th("Identity")}</div>
@@ -3637,7 +3665,7 @@ function renderNode(s) {
     <div class="eyebrow home-eyebrow">${th("This computer")}</div>
     <div class="card home-card">
     ${row(t("Role"), contributing ? t("Contributing (server)") : t("Light wallet"))}
-    ${help ? `<div class="home-row"><span class="home-row__k">${th("Network help")}</span><span class="home-row__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
+    ${help ? `<div class="home-row"><span class="home-row__k">${th("Classic P2P reachability")}</span><span class="home-row__v"${help.color ? ` style="color:${help.color}"` : ""}>${esc(help.text)}</span></div>` : ""}
     ${help && help.howto ? forwardHowTo(pm) : ""}
     ${contributing && showAddr ? row(t("Public address"), esc(h.p2pAddress) + (addrOk ? " ✓" : "")) : ""}
     ${row(t("Network"), esc(CFG.network))}
@@ -3659,6 +3687,7 @@ function renderNode(s) {
   }
   if (guideEnabled && CFG.guideWallet && CFG.walletDone && !CFG.guideStage && contributing && MINIMA_PARAMS.keetsMode(CFG.params)==="chat")
     guideAction(c,"I can’t forward this port · use Keets",guideSwitch);
+  refreshPeerCounts();
   if (up) refreshNodeDash();
   const nContrib = el("nContrib");
   if (nContrib) nContrib.onclick = async () => {
@@ -3695,7 +3724,12 @@ function logsRender(lines, filter) { const f = String(filter || "").toLowerCase(
 /** One more line on the text already shown (LogsView: over the limit, the last 30,000 characters and the line; else the line appended). */
 function logsAppend(text, line) { return text.length > LOGS_CHARS ? text.slice(-LOGS_CHARS) + "\n" + line : (text ? text + "\n" : "") + line; }
 function appendLog(line) {
-  if (!line) return; logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX);
+  if (!line) return;
+  if (activeView === "node" && /\[KEETS\] incoming Minima bridges changed$/.test(line)) {
+    peerPoll = null;
+    refreshPeerCounts();
+  }
+  logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX);
   const nodeBox = el("logbox"); if (nodeBox && viewActive("node")) { nodeBox.textContent = logLines.join("\n"); nodeBox.scrollTop = nodeBox.scrollHeight; }
   const box = el("logsBox");
   if (!box || !viewActive("logs") || logsPaused) return;   // paused: live lines are not drawn; Resume draws the whole buffer again

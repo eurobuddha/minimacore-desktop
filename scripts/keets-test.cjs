@@ -201,3 +201,34 @@ test('0.19.442: the page is told the chat-only capability on every config it get
   assert.ok(km.includes('PARAMS.MANAGED.concat(["conf"], PARAMS.KEETS_OWNED)'), 'the -conf file check knows the three owned names');
   assert.ok(km.includes('PARAMS.reservedArg(o.extraArgs, true)'), 'the start gate reads the stored value as stored');
 });
+
+test('classic incoming excludes Keets, outgoing, invalid, disconnected and self connections', () => {
+  const {classicIncoming} = require('../renderer/params');
+  const peer = {incoming:true, valid:true, isconnected:true, host:'192.0.2.7'};
+  const connections = [peer, {...peer,host:'192.0.2.8'}, {...peer,keets:true}, {...peer,host:'127.113.1.2'},
+    {...peer,host:'::ffff:127.0.0.1'}, {...peer,host:'198.51.100.9'}, {...peer,valid:false},
+    {...peer,isconnected:false}, {...peer,incoming:false}];
+  assert.equal(classicIncoming({details:{p2p:{address:'198.51.100.9:9001'}},connections}), 2);
+  assert.equal(classicIncoming({connections:[]}), 0);
+  assert.equal(classicIncoming(null), null);
+});
+
+test('an incoming Keets bridge counts only until either end disconnects', () => {
+  const {EventEmitter} = require('node:events');
+  const diag = require('../resources/keets-sidecar/diag');
+  const conn = new EventEmitter(), tcp = new EventEmitter(), other = new EventEmitter(), otherTcp = new EventEmitter();
+  const count = () => diag().bridge.incomingActive;
+  assert.equal(count(),0);
+  diag.trackIncomingBridge(conn,tcp);
+  diag.trackIncomingBridge(other,otherTcp);
+  assert.equal(count(),2);
+  tcp.emit('close');
+  assert.equal(count(),1);
+  conn.emit('end');conn.emit('close');
+  assert.equal(count(),1);
+  other.emit('end');
+  assert.equal(count(),0);
+  otherTcp.emit('close');
+  diag.trackIncomingBridge(Object.assign(new EventEmitter(),{destroyed:true}),new EventEmitter());
+  assert.equal(count(),0);
+});

@@ -229,6 +229,7 @@ function bridge (conn, publicKey, initiator, replay) {
   const tcp = net.connect(PORT, '127.0.0.1')
   tcp.on('connect', () => {
     tcp.write(preamble(publicKey, initiator))
+    if (!initiator) diagSnapshot.trackIncomingBridge(conn, tcp)
     if (replay && replay.length) tcp.write(replay)
     conn.pipe(tcp)
     tcp.pipe(conn)

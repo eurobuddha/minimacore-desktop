@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.455 · Live incoming connections
+
+The Node tab shows open incoming classic P2P peers and Keets Minima tunnels separately. The Keets counter drops when either end of the tunnel closes. Router guidance is labeled Classic P2P.
+
 ## 0.19.454 · Host resync progress and StateNFT artwork
 
 Resync node shows the remote connection check, coin-proof count, live node log and final result. NFTwallet recognizes embedded SVG edition artwork.
