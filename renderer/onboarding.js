@@ -63,11 +63,16 @@ function guideConnection() {
   if(guideOptions.server && guideOptions.chat)toggle("fallback","Use Keets if my router blocks connections","Keep classic P2P running and add a tunnel when needed.");
   guideAction(host,"Continue",guideSource,true);
 }
+const guideSources = {spartacus:"spartacusrex.com", eurobuddha:"eurobuddha.com"};
+let guideFileUrl = "";
+function guideSnapshotLabel() {
+  return t("Snapshot file from {source}", {source:guideFileUrl || guideSources[CFG.guideSource] || "—"});
+}
 function guideSource() {
-  const host=guidePage("source","Download the network snapshot",guideConnection,"Your node will keep its full coin database (MegaMMR) with pruning off. Setup downloads the snapshot and checks it on this computer.");
+  const host=guidePage("source","Download the network snapshot",guideConnection,"Your node keeps coins with pruning off. The starting coins come from the snapshot you choose.");
   const label=document.createElement("label");label.className="ps-label";label.textContent=t("Download from");
   const select=document.createElement("select");select.className="field__input ps-field";
-  for(const [value,txt] of [["spartacus","Spartacus Rex"],["eurobuddha","Eurobuddha"]])select.add(new Option(txt,value));
+  for(const [value,txt] of Object.entries(guideSources))select.add(new Option(txt,value));
   select.value=guideOptions.source;select.onchange=()=>{guideOptions.source=select.value;};label.append(select);host.append(label);
   guideAction(host,guideRoute==="new"?"Create my wallet":"Restore Wallet",()=>guideRoute==="new"?guideStart(null):guideWords(),true);
 }
@@ -111,8 +116,7 @@ async function guideStart(restore) {
     Object.assign(params,{megammr:true,megaprune:false,megaprunestate:false,megaprunetokens:false});
     MINIMA_PARAMS.setKeetsMode(params,guideOptions.chat?"chat":"classic");
     CFG=await api.saveConfig({network:"mainnet",contribute:guideOptions.server,params,guideStage:"download",guideWallet:guideRoute,
-      guideSource:guideOptions.source,guideFallback:guideOptions.chat && guideOptions.server && guideOptions.fallback,
-      heapMb:guideOptions.source==="eurobuddha"?Math.max(6400,CFG.heapMb||0):CFG.heapMb});
+      guideSource:guideOptions.source,guideFallback:guideOptions.chat && guideOptions.server && guideOptions.fallback});
   }
   FR_CLASSIC=mode==="classic";
   await frStart(restore);
@@ -171,6 +175,7 @@ async function guideFinish(view){
 }
 function guideTrouble(error){
   const host=guidePage("error","Snapshot needs attention",null);
+  const source=document.createElement("p");source.textContent=guideSnapshotLabel();host.append(source);
   const note=document.createElement("p");note.textContent=error;host.append(note);
   guideAction(host,CFG.guideStage==="network"?"Continue":"Retry",async()=>{
     const s=await api.nodeStatus();
@@ -184,7 +189,9 @@ function guideTrouble(error){
 async function guideDownload(){
   if(guideWorking)return;
   guideWorking=true;
-  guidePage("download","Setting up the full database",null,"You can leave this window open while the snapshot downloads and your node checks it.");
+  guideFileUrl="";
+  const host=guidePage("download","Setting up the full database",null,"You can leave this window open while the snapshot downloads and your node checks it.");
+  const source=document.createElement("p");source.id="guideFileSource";source.textContent=guideSnapshotLabel();host.append(source);
   try{
     await api.setupSnapshot();
     CFG=await api.getConfig();guideScreenId="";
@@ -200,8 +207,17 @@ function guideTick(s){
   if(!CFG.guideStage || guideScreenId==="error")return;
   if(guideWorking){
     const note=el("guideNote");
-    if(note){if(s.megafileStep)note.textContent=MainSaid.say(s.megafileStep);
-      else api.setupSnapshotProgress().then(p=>{if(p && note.isConnected)note.textContent=Math.floor(100*p.bytes/p.total)+"%";}).catch(()=>{});}
+    if(note){
+      if(s.megafileStep)note.textContent=MainSaid.say(s.megafileStep);
+      api.setupSnapshotProgress().then(p=>{
+        if(!p || !note.isConnected)return;
+        if(p.url && p.url!==guideFileUrl){
+          guideFileUrl=p.url;
+          el("guideFileSource").textContent=guideSnapshotLabel();
+        }
+        if(!s.megafileStep)note.textContent=Math.floor(100*p.bytes/p.total)+"%";
+      }).catch(()=>{});
+    }
     return;
   }
   if(s.state==="error" && !guideWorking){guideTrouble(MainSaid.say(s.lastError || "node error"));return;}

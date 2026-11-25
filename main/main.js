@@ -403,12 +403,15 @@ ipcMain.handle("mcd:setupSnapshot", async () => {
       if (!cfg.guidePublicKey || !Array.isArray(keys?.keys) || !keys.keys.some(k=>k.publickey===cfg.guidePublicKey))
         throw Error("The running wallet does not match the recovery words you checked. Review the restore in Backup & Recovery.");
     }
-    const target = await require("./setup-snapshot").download(cfg.guideSource, dir, size => {
+    const target = await require("./setup-snapshot").download(cfg.guideSource, dir, (size, url) => {
+      setupProgress = {bytes:0, total:size, url};
+      node.log("[app] Downloading setup snapshot " + url + " (" + size + " bytes)");
       const reason = importfile.roomProblem({kind:node.kind(), size, ramBytes:ram, heapMb:importfile.importHeapMb(node.kind(), cfg.heapMb, ram)});
       if (reason) throw Error(reason);
-    }, (bytes,total) => { setupProgress = {bytes,total}; });
+    }, bytes => { setupProgress.bytes = bytes; });
     try {
       const file = imports.remember("megammr", target);
+      node.log("[app] Downloaded setup snapshot " + setupProgress.url + " (" + file.size + " bytes)");
       config.save({guideStage:"importing"});
       const result = await megafile.importMegammr(file.path);
       if (!result?.status || result.broken) throw Error("The node could not verify this snapshot.");

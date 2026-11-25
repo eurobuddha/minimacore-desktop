@@ -1026,7 +1026,7 @@ async function postBootRestore() {
     <div class="setup-progress">
       <div class="spin spin--lg"></div>
       <div class="setup-progress__title">${th("Restoring your wallet…")}</div>
-      <div class="view__desc">${tr("Restoring your seed from the MegaMMR node ({host}).", { host: esc(host) })}</div>
+      <div class="view__desc">${CFG.guideStage ? tr("Syncing wallet records with {host}. The snapshot will download from {source} next.", {host:esc(host), source:esc(guideSources[CFG.guideSource] || "—")}) : tr("Restoring your seed from the MegaMMR node ({host}).", { host: esc(host) })}</div>
       <div class="setup-progress__stat" id="rStat">${th("resyncing…")}</div>
     </div>`;
   try {
@@ -3315,7 +3315,7 @@ async function renderSettings() {
         : tr("This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.", { b: "<b>", _b: "</b>" })}</p>
       <label class="set-radio"><input type="radio" name="setKind" value="parlons" ${kind === "parlons" ? "checked" : ""}><span>${th("Parlons Node: the node and your Parlons account (recommended)")}</span></label>
       <label class="set-radio"><input type="radio" name="setKind" value="minima" ${kind === "minima" ? "checked" : ""}><span>${th("Plain Minima node: no Parlons account")}</span></label>
-      <div class="eyebrow ps-label">${th("Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)")}</div><input class="field__input ps-field" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" />
+      <div class="eyebrow ps-label">${th("Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)")}</div><input class="field__input ps-field" id="setHeap" inputmode="numeric" value="${esc(CFG.heapMb || 0)}" />
       <div class="home-actions set-actions"><button class="btn btn--outline" id="setKindApply">${th("Apply and restart the node")}</button></div>
       <div class="status" id="setKindStatus"></div>`) +
     (running ? sec(t("Signing keys"), `<p class="set-text">${th("Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.")}</p>

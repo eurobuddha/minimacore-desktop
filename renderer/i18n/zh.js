@@ -2,6 +2,9 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "Snapshot file from {source}": "快照文件来源：{source}",
+  "Your node keeps coins with pruning off. The starting coins come from the snapshot you choose.": "节点将关闭裁剪并保留代币。初始代币数据来自你所选的快照。",
+  "Syncing wallet records with {host}. The snapshot will download from {source} next.": "正在与 {host} 同步钱包记录。接下来将从 {source} 下载快照。",
   "Set up Pandamonium": "设置 Pandamonium",
   "Finish saving your recovery words": "完成恢复词备份",
   "If you already wrote your words down, you can restore this wallet with them.": "记下的恢复词可用于恢复此钱包。",
@@ -740,7 +743,7 @@
   "This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.": "这是 {b}纯 Minima 节点{_b}。Parlons 节点是同一个节点，加上此种子下的 Parlons 账户：同一条链、同一个钱包、同一个数据文件夹。",
   "Parlons Node: the node and your Parlons account (recommended)": "Parlons 节点：节点加您的 Parlons 账户（推荐）",
   "Plain Minima node: no Parlons account": "纯 Minima 节点：没有 Parlons 账户",
-  "Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)": "Parlons 节点内存（MB；0 = 自动：启用 MegaMMR 时为 3072，否则为 1536）",
+  "Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)": "Parlons 节点内存（MB；0 = 自动：启用 MegaMMR 时为 7168，否则为 1536）",
   "Apply and restart the node": "应用并重启节点",
   "Signing keys": "签名密钥",
   "Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.": "每个密钥只能签名有限的次数；重复使用已用尽的一次性密钥可能导致资金损失。节点会自动轮换密钥。此处显示您的剩余余量。",
@@ -3494,7 +3497,7 @@
     "This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.",
     "Parlons Node: the node and your Parlons account (recommended)",
     "Plain Minima node: no Parlons account",
-    "Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)",
+    "Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)",
     "Apply and restart the node",
     "Signing keys",
     "Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.",

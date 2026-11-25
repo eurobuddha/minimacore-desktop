@@ -19,6 +19,7 @@ const parlonsNotify = require("./parlons-notify");
 const { rpcCall } = require("./rpc");
 const { createNodeLog, scrub } = require("./nodelog");
 const keymode = require("./keymode");
+const { megammrHeapMb } = require("./importfile");
 const PARAMS = require("../renderer/params.js");
 const flavor = require("./flavor");
 const writermark = require("./writermark");
@@ -328,7 +329,7 @@ class NodeManager extends EventEmitter {
   buildParlonsArgs(cfg, dataDir) {
     const params = config.effectiveParams();
     const megammr = !!params.megammr;
-    const heap = parseInt(cfg.heapMb, 10) > 0 ? parseInt(cfg.heapMb, 10) : (megammr ? 3072 : 1536);
+    const heap = megammr ? megammrHeapMb(cfg.heapMb) : (parseInt(cfg.heapMb, 10) > 0 ? parseInt(cfg.heapMb, 10) : 1536);
     const q = (v) => '"' + String(v).replace(/(["\\])/g, "\\$1") + '"';
     const flags = ["-basefolder", q(dataDir)];
     for (const [k, v] of Object.entries(params)) {

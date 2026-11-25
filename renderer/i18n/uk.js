@@ -2,6 +2,9 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "Snapshot file from {source}": "Джерело файлу знімка: {source}",
+  "Your node keeps coins with pruning off. The starting coins come from the snapshot you choose.": "Вузол зберігає монети без обрізання. Початковий набір монет береться з вибраного знімка.",
+  "Syncing wallet records with {host}. The snapshot will download from {source} next.": "Синхронізація записів гаманця з {host}. Потім знімок буде завантажено з {source}.",
   "Set up Pandamonium": "Налаштування Pandamonium",
   "Finish saving your recovery words": "Завершіть запис слів відновлення",
   "If you already wrote your words down, you can restore this wallet with them.": "Записані слова дають змогу відновити цей гаманець.",
@@ -740,7 +743,7 @@
   "This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.": "Це {b}звичайний вузол Minima{_b}. Вузол Parlons є тим самим вузлом плюс ваш обліковий запис Parlons на цій сід-фразі: той самий ланцюжок, той самий гаманець, та сама тека даних.",
   "Parlons Node: the node and your Parlons account (recommended)": "Вузол Parlons: вузол і ваш обліковий запис Parlons (рекомендовано)",
   "Plain Minima node: no Parlons account": "Звичайний вузол Minima: без облікового запису Parlons",
-  "Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)": "Пам’ять вузла Parlons (МБ; 0 = автоматично: 3072 з MegaMMR, інакше 1536)",
+  "Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)": "Пам’ять вузла Parlons (МБ; 0 = автоматично: 7168 з MegaMMR, інакше 1536)",
   "Apply and restart the node": "Застосувати й перезапустити вузол",
   "Signing keys": "Ключі підпису",
   "Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.": "Кожен ключ може підписувати обмежену кількість разів; повторне використання вичерпаного одноразового ключа може призвести до втрати коштів. Вузол змінює ключі автоматично. Тут показано ваш запас.",
@@ -3494,7 +3497,7 @@
     "This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.",
     "Parlons Node: the node and your Parlons account (recommended)",
     "Plain Minima node: no Parlons account",
-    "Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)",
+    "Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)",
     "Apply and restart the node",
     "Signing keys",
     "Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.",

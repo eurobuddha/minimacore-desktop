@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.453 · Snapshot import on first run
+
+The automatic MegaMMR memory setting is 7168 MB. Setup distinguishes the wallet sync host from the selected snapshot provider, displays the downloaded filename, and gives the key-use field a visible border.
+
 ## 0.19.452 · Restore with recovery words alone
 
 Onboarding derives and checks all 64 classic and 32 block-based addresses for key reuse. The results show the number checked in each family. Users can start the audit with their recovery words alone.

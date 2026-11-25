@@ -467,6 +467,8 @@ textarea.ps-field { min-height: 66px; line-height: 21px; }
 .guide-option input { margin-top: 4px; }
 .guide-option small { display: block; margin-top: 4px; line-height: 1.4; }
 .guide-content label:not(.guide-option) { display: grid; gap: 6px; }
+.guide-content input.ps-field { border: 2px solid var(--dim2); background-color: var(--surface); }
+.guide-content input.ps-field:focus { border-color: var(--accent); }
 .guide-content summary { cursor: pointer; padding-block: 8px; }
 .guide-warning { color: var(--amber); }
 

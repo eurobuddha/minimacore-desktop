@@ -49,7 +49,7 @@ const DEFAULTS = {
   nodeKind: "parlons",       // "parlons" = parlons-node.jar (node + your Parlons account + relay when contributing)
                              // "minima"  = plain minima.jar. New installs get parlons; an existing install keeps
                              //             minima until it opts in (see load()).
-  heapMb: 0,                 // -Xmx for the Parlons Node (0 = automatic: 3072 with MegaMMR, else 1536)
+  heapMb: 0,                 // -Xmx for the Parlons Node (0 = automatic: 7168 with MegaMMR, else 1536)
   updateFeed: "",            // the one-app store feed the app checks for updates ("" = the eurobuddha.com feed)
   guideStage: "", guidePublicKey: "", guideSource: "spartacus", guideWallet: "", guideFallback: false,
   setupDone: false,          // node wizard completed

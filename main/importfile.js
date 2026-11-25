@@ -56,8 +56,8 @@ const ON_FAILED = "The node did not come back in MegaMMR mode, so nothing was im
 const MB = 1024 * 1024;
 /** The node's memory for an import: the Parlons Node's MegaMMR setting, or Java's own default for the plain node (a quarter of the memory). */
 const importHeapMb = (kind, heapMb, ramBytes) => (kind === "minima" ? Math.floor(ramBytes / 4 / MB) : megammrHeapMb(heapMb));
-/** The node's memory in MegaMMR mode: the app's own rule (main/node-manager.js buildParlonsArgs): the setting, else 3072 MB. */
-const megammrHeapMb = (heapMb) => (parseInt(heapMb, 10) > 0 ? parseInt(heapMb, 10) : 3072);
+/** The node's memory in MegaMMR mode: the app's own rule (main/node-manager.js buildParlonsArgs): the setting, else 7168 MB. */
+const megammrHeapMb = (heapMb) => (parseInt(heapMb, 10) > 0 ? parseInt(heapMb, 10) : 7168);
 /** Why there is no room for this import ("" = there is). o = { kind ("parlons" | "minima"), size (bytes), heapMb (the node's heap for the import:
  *  importHeapMb), ramBytes, freeDiskBytes (null: not known) }. */
 function roomProblem(o) {

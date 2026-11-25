@@ -186,7 +186,7 @@ async function flowWorld(o) {
     if (c === "balance") return { status: true, response: (imported && o.walletAfter) || o.wallet || [{ tokenid: "0x00", confirmed: "1234", coins: "2" }] };
     if (!m) return { status: true, response: { block: String(now.tip), hash: ids(now.tip, now.tag), timemilli: String(now.at || Date.now()) } };
     return Number(m[1]) <= now.tip ? { status: true, response: { txpowid: ids(Number(m[1]), now.tag) } } : { status: false, error: "TxPoW not found @ height " + m[1] }; };
-  const node = { state: o.state || "running", proc: {}, resyncing: !!o.resyncing, megammrBroken: false, heapMbNow: o.heapMbNow == null ? 3072 : o.heapMbNow, kind: () => o.kind || "parlons", dataDir: () => DIR,
+  const node = { state: o.state || "running", proc: {}, resyncing: !!o.resyncing, megammrBroken: false, heapMbNow: o.heapMbNow == null ? 7168 : o.heapMbNow, kind: () => o.kind || "parlons", dataDir: () => DIR,
     restart: async () => { did.push("restart with megammr:" + params.megammr); node.proc = {}; say(o.restartLines); node.state = o.downAfter && did.filter(x => x.startsWith("restart")).length === o.downAfter ? "error" : "running"; }, snapshot: () => ({ state: node.state }),
     start: async () => { did.push("start"); node.proc = {}; node.state = "running"; },
     on: (ev, f) => { if (ev === "line") listeners.push(f); }, removeListener: (ev, f) => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); } };
@@ -285,7 +285,7 @@ test("Turn MegaMMR off: the guard, only {megammr:false} saved, then the restart;
 
 test("room for a MegaMMR import: four times the file (the owner's 1.5 GB mainnet file peaked at 5.5 GB of a 6144 MB heap)", () => {
   const M = 1024 * 1024, G = 1024 * M, roomy = { ramBytes: 16 * G, freeDiskBytes: 100 * G };
-  assert.equal(F.megammrHeapMb(0), 3072); assert.equal(F.megammrHeapMb("6144"), 6144);
+  assert.equal(F.megammrHeapMb(0), 7168); assert.equal(F.megammrHeapMb("6144"), 6144);
   assert.equal(F.roomProblem(Object.assign({ size: 460 * M, heapMb: 3072 }, roomy)), "");
   assert.match(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 3072 }, roomy)), /This MegaMMR file is 1531 MB\. The node needs about four times that in memory while it checks and imports it: 6124 MB, and it is set to 3072 MB\. In Settings, set Parlons Node memory to 6124 or more and press Apply and restart the node/);
   assert.equal(F.roomProblem(Object.assign({ size: 1605266343, heapMb: 6144 }, roomy)), "");
@@ -557,7 +557,7 @@ test("MINOR: the file is fingerprinted before the check and compared before the 
   w = await flowWorld({ heapMb: 6144, check: () => ({ status: false, error: "java.lang.OutOfMemoryError: Java heap space" }) });
   assert.equal(w.r, F.say(MF.OOM_BACK, { why: "java.lang.OutOfMemoryError: Java heap space", heap: "6144" }));
   w = await flowWorld({ megammr: [true], checkLines: ["[raw]Exception in thread \"RPC\" java.lang.OutOfMemoryError: Java heap space"], check: (c, x) => { x.node.proc = null; throw new Error("socket hang up"); } });
-  assert.equal(w.r, F.say(MF.OOM_SAID, { why: "socket hang up", heap: "3072" }), "the node's own line says it: the exit is said as memory");
+  assert.equal(w.r, F.say(MF.OOM_SAID, { why: "socket hang up", heap: "7168" }), "the node's own line says it: the exit is said as memory");
   w = await flowWorld({ megammr: [true], import: () => ({ status: false, error: "MegaMMR import failed : java.lang.OutOfMemoryError: Java heap space .. RESTART Minima before retrying" }) });
   assert.match(w.r, /^The node ran out of memory reading this MegaMMR file .*Nothing was imported or reset\./); assert.equal(w.cfg.megammrImport, null);
   w = await flowWorld({ check: () => ({ status: false, error: "INVALID Coin proof! @ {\"coinid\":\"0x00\",\"amount\":\"1\"}" }) });

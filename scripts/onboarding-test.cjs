@@ -25,6 +25,8 @@ async function exercise(){
     for(const box of document.querySelectorAll("#setupBody .we-box")){box.value="abandon";box.dispatchEvent(new Event("input"));}
     await click("Check wallet and key uses");
     if(!el("setupBody").textContent.includes("Checked 64 classic and 32 block-based addresses"))throw Error("seed-only audit failed");
+    const input=el("setupBody").querySelector("input[inputmode=numeric]");
+    if(!input || parseFloat(getComputedStyle(input).borderTopWidth)<1 || getComputedStyle(input).borderTopStyle==="none" || document.activeElement===input)throw Error("key-use field needs a visible resting border");
     guideWelcome();await click("I have a wallet");await click("Minima Classic · 64 keys");await click("Keep my classic addresses");
     if(guideRoute!=="classic")throw Error("classic retention");
     guideWelcome();await click("I have a wallet");await click("Block key uses · 32 keys");
@@ -39,6 +41,16 @@ async function exercise(){
     if(!c.params.keetschatonly)throw Error("switched just because a router was quiet");
     guideTick({...s,portmap:{state:"double_nat"}});await pause();
     if(c.params.keetschatonly || !c.params.keets || !c.params.server || c.guideFallback)throw Error("fallback");
+    CFG=await api.saveConfig({guideStage:"download",guideSource:"eurobuddha",guideFallback:false});
+    let fail;
+    api.setupSnapshot=()=>new Promise((_,reject)=>{fail=reject;});
+    api.setupSnapshotProgress=async()=>({bytes:20,total:100,url:"https://eurobuddha.com/mega.mmr"});
+    const job=guideDownload();
+    if(!el("guideFileSource").textContent.includes("eurobuddha.com"))throw Error("selected source missing");
+    guideTick(s);await pause();
+    if(!el("guideFileSource").textContent.includes("/mega.mmr") || el("guideNote").textContent!=="20%")throw Error("resolved file missing");
+    fail(Error("fixture"));await job;
+    if(!el("setupBody").textContent.includes("/mega.mmr"))throw Error("missing file on retry screen");
     document.documentElement.dataset.setupTest="passed";
   }catch(e){document.documentElement.dataset.setupTest=e.message;}
 }

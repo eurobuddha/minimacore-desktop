@@ -47,7 +47,7 @@ async function download(source, dir, preflight, progress) {
     await fs.promises.rm(file, {force:true});
     const space = await fs.promises.statfs(dir);
     if (space.bavail * space.bsize < size + 512 * 1024 ** 2) throw Error("Make more disk space for the snapshot.");
-    preflight(size);
+    preflight(size, url);
     let got = 0, last = 0;
     await pipeline(res, new Transform({ transform(chunk, enc, cb) {
       got += chunk.length;

@@ -2,6 +2,9 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("ru", {
+  "Snapshot file from {source}": "Источник файла снимка: {source}",
+  "Your node keeps coins with pruning off. The starting coins come from the snapshot you choose.": "Узел хранит монеты без обрезки. Исходный набор монет берётся из выбранного снимка.",
+  "Syncing wallet records with {host}. The snapshot will download from {source} next.": "Синхронизация записей кошелька с {host}. Затем снимок будет загружен с {source}.",
   "Set up Pandamonium": "Настройка Pandamonium",
   "Finish saving your recovery words": "Завершите запись слов восстановления",
   "If you already wrote your words down, you can restore this wallet with them.": "Записанные слова позволяют восстановить этот кошелёк.",
@@ -740,7 +743,7 @@
   "This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.": "Это {b}обычный узел Minima{_b}. Узел Parlons: это тот же узел и ваша учётная запись Parlons на этой сид-фразе: та же цепочка, тот же кошелёк, та же папка данных.",
   "Parlons Node: the node and your Parlons account (recommended)": "Узел Parlons: узел и ваша учётная запись Parlons (рекомендуется)",
   "Plain Minima node: no Parlons account": "Обычный узел Minima: без учётной записи Parlons",
-  "Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)": "Память узла Parlons (МБ; 0 = автоматически: 3072 с MegaMMR, иначе 1536)",
+  "Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)": "Память узла Parlons (МБ; 0 = автоматически: 7168 с MegaMMR, иначе 1536)",
   "Apply and restart the node": "Применить и перезапустить узел",
   "Signing keys": "Ключи подписи",
   "Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.": "Каждый ключ может подписывать ограниченное число раз; повторное использование исчерпанного одноразового ключа может привести к потере средств. Узел меняет ключи автоматически. Здесь показан ваш запас.",
@@ -3494,7 +3497,7 @@
     "This is the {b}plain Minima node{_b}. The Parlons Node is the same node plus your Parlons account under this seed: same chain, same wallet, same data folder.",
     "Parlons Node: the node and your Parlons account (recommended)",
     "Plain Minima node: no Parlons account",
-    "Parlons Node memory (MB; 0 = automatic: 3072 with MegaMMR, else 1536)",
+    "Parlons Node memory (MB; 0 = automatic: 7168 with MegaMMR, else 1536)",
     "Apply and restart the node",
     "Signing keys",
     "Each key can sign a limited number of times; reusing an exhausted one-time key can lose funds. The node rotates keys automatically. This shows your headroom.",
