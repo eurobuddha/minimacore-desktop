@@ -2,6 +2,12 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("zh", {
+  "No transactions yet.": "暂无交易。",
+  "Selected": "已选",
+  "Choose one token": "请选择一种代币",
+  "Choose spendable inputs.": "请选择可花费的输入。",
+  "Tools": "工具",
+  "No wallet addresses available.": "没有可用的钱包地址。",
   "Insufficient spendable funds": "可用余额不足",
   "Change amount": "找零金额",
   "Original · Dark": "原版 · 深色",

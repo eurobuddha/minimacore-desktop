@@ -7,6 +7,12 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.19.450 · Wallet balances, sweep and NFT Wallet navigation
+
+minimaWallet opens on combined Minima and token balances across its derived addresses. Payments can use coins held under multiple keys. Settings can sweep spendable assets to a verified main-node address. Each independent signing key requires a typed next-use count.
+
+NFT Wallet uses the Android wallet layouts for its navigation, Quick Send, Coins, balances, gallery, mint hub and receiving addresses. Selected coins stay in Coins and Coin Control. Display precision applies to lists. Payment confirmations retain exact amounts.
+
 ## 0.19.449 · minimaWallet and NFTwallet
 
 Pandamonium Desktop adds both wallets to the app tray. minimaWallet starts with the node seed and classic keys. Reset it to import an independent seed with classic or block-based keys. Local payments require a typed key-use count. When the node owns the key, the Wallet tab handles the payment.

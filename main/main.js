@@ -1101,7 +1101,7 @@ for (const operation of ["list", "transfer", "buryCollection"]) {
 }
 const minimaWallet = require("./minimawallet");
 node.on("status", s => { if (s.state !== "running") minimaWallet.nodeChanged(); });
-for (const operation of ["open", "replace", "audit", "send", "portfolio"]) {
+for (const operation of ["open", "replace", "audit", "send", "portfolio", "home", "review", "execute"]) {
   ipcMain.handle("mcd:minimaWallet:" + operation, (_event, ...args) => {
     if (flavor.id !== "pandamonium") throw new Error("This wallet requires Pandamonium Desktop.");
     requireRunning();

@@ -89,6 +89,7 @@ async function prepare(profile) {
     }
   }
   trackedNode = identity;
+  return {identity, nativeKeys};
 }
 async function portfolio(id) {
   return exclusive(async () => {
@@ -145,4 +146,19 @@ async function send(id, index, opts) {
     });
   });
 }
-module.exports = { open, replace, audit, send, portfolio, nodeChanged: () => { trackedNode = null; } };
+const account = require("./minimawallet-account");
+function withAccount(id, fn) {
+  return exclusive(async () => {
+    let profile = existing();
+    if (id != null) verify(profile,id);
+    if (!profile) profile = await fromNode();
+    const native = await prepare(profile);
+    return fn(profile, addresses, native);
+  });
+}
+module.exports = { open, replace, audit, send, portfolio,
+  home: id => withAccount(id,account.home),
+  review: (id,request) => withAccount(id,(...a)=>account.review(...a,request)),
+  execute: (id,request) => withAccount(id,(...a)=>account.execute(...a,request)),
+  nodeChanged: () => { trackedNode = null; account.invalidate(); }
+};

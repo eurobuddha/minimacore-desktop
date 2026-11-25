@@ -19,6 +19,8 @@ public final class ClassicWebWallet {
     static JSONObject handle(JSONObject request) throws Exception {
         // Classic genkey parsed a quoted phrase first (including its historical colon spacing).
         // Parse only. Never execute a command or open a node wallet.
+        if ("summary".equals(request.get("action")) || "plan".equals(request.get("action")))
+            return com.eurobuddha.wallet.DesktopPortfolio.run(request);
         boolean account = request.containsKey("accountMode");
         boolean block = "block".equals(request.get("accountMode"));
         int keyIndex = account ? Integer.parseInt(request.getString("keyIndex")) : 0;
@@ -29,12 +31,13 @@ public final class ClassicWebWallet {
         MiniData base = org.minima.utils.BIP39.convertStringToSeed(phrase);
         if (request.containsKey("expectedSeed") && !base.to0xString().equalsIgnoreCase(request.getString("expectedSeed")))
             throw new IllegalArgumentException("Node seed mismatch");
-        boolean[] consumed = { false };
+        JSONObject leaves = (JSONObject)request.get("leaves");
+        boolean pooled = account && leaves != null;
+        HashSet<Integer> consumed = new HashSet<>();
         WalletCore wallet = new WalletCore(base, index -> {
-            int leaf = Integer.parseInt(request.getString("leaf"));
-            if (index != keyIndex || leaf < 0 || leaf >= (block ? 268435456 : 262144) || consumed[0])
+            int leaf = Integer.parseInt(pooled ? String.valueOf(leaves.get(String.valueOf(index))) : request.getString("leaf"));
+            if ((!pooled && index != keyIndex) || index < 0 || index >= (block ? 32 : 64) || leaf < 0 || leaf >= (block ? 268435456 : 262144) || !consumed.add(index))
                 throw new IllegalArgumentException("Invalid leaf reservation");
-            consumed[0] = true;
             return leaf;
         }) {
             @Override public org.minima.objects.keys.TreeKey deriveTreeKey(int index) {
@@ -62,11 +65,16 @@ public final class ClassicWebWallet {
             JSONObject entry = (JSONObject) item;
             CoinProof proof = CoinProof.convertMiniDataVersion(new MiniData(entry.getString("data")));
             Coin coin = proof.getCoin();
+            int index = pooled ? ((Number)entry.get("index")).intValue() : keyIndex;
             if (coin.getSpent() || !coin.getCoinID().to0xString().equalsIgnoreCase(entry.getString("coinid"))
                     || !ids.add(coin.getCoinID().to0xString()) || !coin.getTokenID().isEqual(token)
-                    || !coin.getAddress().isEqual(wallet.getReceiveAddress().getAddressData()))
+                    || !coin.getAddress().isEqual(wallet.getAddress(index).getAddressData()))
                 throw new IllegalArgumentException("Coin does not match payment");
-            inputs.add(TxnFactory.fromExportedCoin(coin, keyIndex));
+            if (pooled && !Boolean.TRUE.equals(request.get("whole")) &&
+                    (!coin.getState().isEmpty() || (coin.getToken()!=null &&
+                    !"RETURN TRUE".equalsIgnoreCase(coin.getToken().getTokenScript().toString().trim().replaceAll("\\s+", " ")))))
+                throw new IllegalArgumentException("Stateful input in a pooled payment");
+            inputs.add(TxnFactory.fromExportedCoin(coin, index));
             proofs.add(proof);
         }
         MiniNumber raw = display;
@@ -78,10 +86,20 @@ public final class ClassicWebWallet {
         }
         if (!raw.isValidMinimaValue()) throw new IllegalArgumentException("Invalid raw coin amount");
         String id = request.getString("id");
-        TxnFactory.BuiltTxn built = new TxnFactory(wallet).buildSend(inputs, request.getString("to"),
-                raw, token, MiniNumber.ZERO, id);
+        TxnFactory factory = new TxnFactory(wallet);
+        if (pooled) {
+            MiniNumber sum = MiniNumber.ZERO;
+            for (TxnFactory.InputCoin input : inputs) sum = sum.add(input.getAmount());
+            MiniNumber expected = new MiniNumber(request.getString("total"));
+            if (!token.isEqual(TxnFactory.TOKEN_MINIMA)) expected = inputs.get(0).getToken().getScaledMinimaAmount(expected);
+            if (!sum.isEqual(expected)) throw new IllegalArgumentException("Reviewed input total changed");
+        }
+        boolean whole = pooled && Boolean.TRUE.equals(request.get("whole"));
+        if (whole && (inputs.size()!=1 || !inputs.get(0).getAmount().isEqual(raw))) throw new IllegalArgumentException("Invalid whole transfer");
+        TxnFactory.BuiltTxn built = whole ? factory.buildWholeTransfer(inputs.get(0), request.getString("to"), id)
+                : factory.buildSend(inputs, request.getString("to"), raw, token, MiniNumber.ZERO, id);
         for (CoinProof proof : proofs) built.getWitness().addCoinProof(proof);
-        built.getWitness().addScript(new ScriptProof(wallet.getScript(keyIndex)));
+        for (int index : consumed) built.getWitness().addScript(new ScriptProof(wallet.getScript(index)));
         TxnRow row = new TxnRow(id, built.getTransaction(), built.getWitness());
         result.put("data", MiniData.getMiniDataVersion(row).to0xString());
         return result;

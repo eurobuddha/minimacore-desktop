@@ -259,6 +259,30 @@ async function reserveBlockUse(address, publickey, root, typed) {
   return n;
 }
 
+// Reserve every reviewed signing range together, before any helper receives a seed.
+async function reserveWalletRanges(keys, typed, blockRoot) {
+  const audits = [];
+  for (const key of keys) {
+    const value = typed?.[key.index];
+    if (typeof value !== "string" || !/^\d{1,12}$/.test(value)) throw Error("Enter a key-use count for each signing key.");
+    const floor = await paymentFloor(key.address, key.publickey, blockRoot);
+    audits.push({key, value:Number(value), floor});
+  }
+  const store = loadStore(), starts = {};
+  let shared = blockRoot ? entryFor(store,"block:"+blockRoot).keyuses : 0;
+  for (const {key,value,floor} of audits) {
+    const min = Math.max(floor.minimum, entryFor(store,key.address).keyuses, shared);
+    if(value < min) throw Error(BELOW_SAVED(min));
+    if(value + key.count - 1 > floor.last) throw Error("This payment would exhaust the signing key.");
+    starts[key.index] = value;
+    store[key.address] = {keyuses:value + key.count,ack:true};
+    if(blockRoot) shared = value + key.count;
+  }
+  if(blockRoot) store["block:"+blockRoot] = {keyuses:shared,ack:true};
+  writeStore(store);
+  return starts;
+}
+
 const sending = new Set();
 async function send(opts, account = null) {
   const { seed, to, amount, tokenid = "0x00" } = opts || {};
@@ -309,7 +333,7 @@ async function send(opts, account = null) {
 
 function status() { return { log: LOG_RING.slice(-20) }; }
 
-module.exports = { setOnchain, paymentFloor, checkedCommand, nodeHasPubkey,
+module.exports = { reserveWalletRanges, setOnchain, paymentFloor, checkedCommand, nodeHasPubkey,
   emitter, isMegammr, derive, read, send,
   keyusesInfo, ackKeyuses, status, KEY_USES, LAST_USE,
   _setRunner: (fn) => { runner0 = fn; },

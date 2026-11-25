@@ -78,6 +78,7 @@ async function mint(id, opts) {
     if (webvalidate) metadata.webvalidate=webvalidate;
     if (external) metadata.external_url=external;
     if (icon) metadata.url=/^(https?|ipfs):/.test(icon) ? icon : "<artimage>"+icon+"</artimage>";
+    if (kind==="NFT"){metadata.nft="true";if(opts.creator)metadata.owner=safeText(opts.creator,128);}
     if (opts.ticker) metadata.ticker=safeText(opts.ticker,24);
     if (kind === COLLECTION_KIND) {
       const size=Number(opts.size), mode=opts.mode;

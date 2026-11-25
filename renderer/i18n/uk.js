@@ -2,6 +2,12 @@
 // the same English text, and translated for the desktop where it has none: those keys are listed in `review` below for a
 // native speaker to check. The key is the English text. A value never carries markup. Do not reformat numbers here.
 (typeof I18N !== "undefined" ? I18N : require("../i18n.js")).add("uk", {
+  "No transactions yet.": "Транзакцій поки немає.",
+  "Selected": "Вибрано",
+  "Choose one token": "Виберіть один токен",
+  "Choose spendable inputs.": "Виберіть доступні монети.",
+  "Tools": "Інструменти",
+  "No wallet addresses available.": "Немає доступних адрес гаманця.",
   "Insufficient spendable funds": "Недостатньо доступних коштів",
   "Change amount": "Сума решти",
   "Original · Dark": "Оригінальна · Темна",

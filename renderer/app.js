@@ -225,7 +225,10 @@ function onStatus(s) {
     else if (!postBootStarted) { postBootStarted = true; runPostBoot(); }
   }
   // The node went away: the Wallet and Faucet must not keep showing what it last said.
-  if (wasRunning !== running && (activeView === "minimawallet" || activeView === "nftwallet")) renderActive();
+  if (activeView === "minimawallet" || activeView === "nftwallet") {
+    if (wasRunning && !running) renderActive();
+    if (running) companionBlock(s.health?.block);
+  }
   if (wasRunning && !running) { resetWalletFigures(); keyUsesReset(); explorerReset(); futureCashReset(); if (activeView === "futurecash") renderActive(); if (activeView === "explorer") renderActive(); entropyErased(t("the node stopped.")); if (activeView === "balances" || activeView === "faucet" || activeView === "keyuses") renderActive(); }
   if (activeView === "explorer") explorerTip(s);   // a new block at the node: the list follows it, as the phone's NEWBLOCK
   if (activeView === "node") renderNode(s);
@@ -1626,7 +1629,7 @@ function renderActive() {
 }
 function startRefresh() {
   stopRefresh();
-  refreshTimer = setInterval(() => { if (running && activeView === "balances") renderBalances(); if (running && activeView === "nftwallet" && !el("nftDetails")) renderNftWallet(); }, 15000);
+  refreshTimer = setInterval(() => { if (running && activeView === "balances") renderBalances();  }, 15000);
 }
 function stopRefresh() { if (refreshTimer) clearInterval(refreshTimer); refreshTimer = null; }
 
@@ -1728,15 +1731,15 @@ function initTokenOrder(host) {
 
 /** Display only: at most six decimals, cut off and never rounded up (the phone's Format.summaryAmount).
  *  The exact figure is in the token's coins dialog. A real balance is never shown as zero. */
-function summaryAmount(s) {
+function summaryAmount(s, places = 6, markTrim = false) {
   s = String(s == null ? "" : s).trim();
   const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(s);
   if (!s || !m) return s || "0";
   const int = (m[2] || "0").replace(/^0+(?=\d)/, ""), frac = m[3] || "";
   if (/^0*$/.test(int + frac)) return "0";
-  const cut = frac.slice(0, 6).replace(/0+$/, "");
-  if (int === "0" && !cut) return m[1] ? ">-0.000001" : "<0.000001";
-  return m[1] + int + (cut ? "." + cut : "");
+  const cut = frac.slice(0, places).replace(/0+$/, "");
+  if (int === "0" && !cut) return (m[1] ? ">-" : "<") + "0." + "0".repeat(places - 1) + "1";
+  return m[1] + int + (cut ? "." + cut : "") + (markTrim && /[1-9]/.test(frac.slice(places)) ? "…" : "");
 }
 /** "now", "31 minutes ago", "1 hour ago", "3 days ago": how the phone says how long ago. */
 function since(ms) {
@@ -1876,7 +1879,7 @@ function safeLinkRow(label, url) {
   return `<div class="kv"><span class="kv__k">${esc(label)}</span><a class="kv__v tokd-link" href="${esc(url)}" target="_blank" rel="noreferrer">${esc(host)} ↗</a></div>`;
 }
 
-async function showTokenDetail(b) {
+async function showTokenDetail(b, walletActions) {
   const tid = b.tokenid || MINIMA;
   const isNative = tid === MINIMA;
   const name = TOK.label(b.token, tid);   // by its id (0.19.236)
@@ -1928,6 +1931,7 @@ async function showTokenDetail(b) {
       <button class="btn btn--outline btn--full" id="tokdReceive">${th("Receive")}</button>
       <button class="btn btn--primary btn--full" id="tokdSend">${tr("Send {name}", { name: esc(tick || name) })}</button>
     </div>
+    ${walletActions?.hide && !isNative ? `<button id="tokdHide" class="btn btn--outline btn--full">${th("Hide")}</button>` : ""}
     <button class="btn btn--outline btn--full" id="tokdClose" style="margin-top:8px">${th("Close")}</button>
   </div></div>`);
 
@@ -1935,11 +1939,12 @@ async function showTokenDetail(b) {
   const close = () => { const o = el("tokDetail"); if (o) { o.remove(); back(); } };
   back = modalize(el("tokDetail"), close, el("tokdClose"));
   const leave = () => { close(); const c = el("coinsDlg"); if (c) c.remove(); };   // opened from the coins dialog: going to Send or Receive closes both
+  if(el("tokdHide"))el("tokdHide").onclick=()=>{close();walletActions.hide();};
   el("tokdClose").onclick = close;
   el("tokDetail").onclick = (e) => { if (e.target.id === "tokDetail") close(); };
   el("tokdId").onclick = () => copy(tid);
-  el("tokdReceive").onclick = () => { leave(); selectTab("receive"); };
-  el("tokdSend").onclick = () => { leave(); SEND_PRESELECT = tid; selectTab("send"); };
+  el("tokdReceive").onclick = () => { leave(); if(walletActions)walletActions.receive();else selectTab("receive"); };
+  el("tokdSend").onclick = () => { leave(); if(walletActions)walletActions.send();else { SEND_PRESELECT = tid; selectTab("send"); } };
   enhanceTokenIcons(el("tokDetail"));   // swap in the real icon + validated badge (reused path)
 
   // Decimals (tokens only) — best-effort background enrich, never blocks the modal.

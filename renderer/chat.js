@@ -180,29 +180,7 @@
 
   // ---- lightbox: the phone's ChatImageActivity (black, pinch/zoom → wheel/drag) ----
   function lightbox(dataUrl, caption) {
-    if (!available()) return;
-    document.body.insertAdjacentHTML("beforeend",
-      `<div class="chat-lightbox" id="chatLb">
-        <img id="chatLbImg" alt="photo" src="${dataUrl}" />
-        ${caption ? `<div class="chat-lightbox__cap">${h(caption)}</div>` : ""}
-        <button class="chat-lightbox__close" id="chatLbClose" title="${th("Back")}">←</button>
-      </div>`);
-    const lb = D.el("chatLb"), img = D.el("chatLbImg");
-    let scale = 1, tx = 0, ty = 0, dragging = false, lx = 0, ly = 0;
-    const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
-    const onMove = (e) => { if (!dragging) return; tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply(); };
-    const onUp = () => { dragging = false; };
-    const close = () => { dismissChat.delete(close); lb.remove(); document.removeEventListener("keydown", onKey); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-    const onKey = (e) => { if (e.key === "Escape") close(); };
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    dismissChat.add(close);
-    D.el("chatLbClose").onclick = close;
-    lb.onclick = (e) => { if (e.target === lb) close(); };
-    lb.onwheel = (e) => { e.preventDefault(); scale = Math.max(1, Math.min(6, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (scale === 1) { tx = 0; ty = 0; } apply(); };
-    img.ondblclick = () => { scale = scale > 1.01 ? 1 : 2.5; if (scale === 1) { tx = 0; ty = 0; } apply(); };
-    img.onmousedown = (e) => { dragging = true; lx = e.clientX; ly = e.clientY; e.preventDefault(); };
+    if (available()) imageLightbox(dataUrl, caption, dismissChat, D.el, h);
   }
 
   // ---- shell -------------------------------------------------------------------------
@@ -782,3 +760,30 @@
     }
   };
 })();
+
+function imageLightbox(dataUrl, caption, registry, lookup=el, escapeText=esc) {
+    if (lookup("chatLb")) return;
+    document.body.insertAdjacentHTML("beforeend",
+      `<div class="chat-lightbox" id="chatLb">
+        <img id="chatLbImg" alt="photo" src="${escapeText(dataUrl)}" />
+        ${caption ? `<div class="chat-lightbox__cap">${escapeText(caption)}</div>` : ""}
+        <button class="chat-lightbox__close" id="chatLbClose" title="${th("Back")}">←</button>
+      </div>`);
+    const lb = lookup("chatLb"), img = lookup("chatLbImg");
+    let scale = 1, tx = 0, ty = 0, dragging = false, lx = 0, ly = 0;
+    const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+    const onMove = (e) => { if (!dragging) return; tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply(); };
+    const onUp = () => { dragging = false; };
+    const close = () => { registry?.delete(close); lb.remove(); document.removeEventListener("keydown", onKey); window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    registry?.add(close);
+    lookup("chatLbClose").onclick = close;
+    lb.onclick = (e) => { if (e.target === lb) close(); };
+    lb.onwheel = (e) => { e.preventDefault(); scale = Math.max(1, Math.min(6, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); if (scale === 1) { tx = 0; ty = 0; } apply(); };
+    img.ondblclick = () => { scale = scale > 1.01 ? 1 : 2.5; if (scale === 1) { tx = 0; ty = 0; } apply(); };
+    img.onmousedown = (e) => { dragging = true; lx = e.clientX; ly = e.clientY; e.preventDefault(); };
+    return {root:lb,close};
+  }
