@@ -7,6 +7,10 @@ matching [GitHub Release](../../releases).
 
 ---
 
+## 0.20.01 · Shared-port connection handling
+
+The node preserves frame order during the Keets greeting and limits data queued while a peer is connecting. The Node tab combines overlapping connection updates and excludes IPv6 loopback and self connections from the classic incoming count.
+
 ## 0.20.00 · Keets peers on the shared server port
 
 Pandamonium now validates incoming Keets peers when the Minima node and Parlons relay share the public port. Classic P2P, direct Parlons clients and Keets continue to use their existing connection paths.

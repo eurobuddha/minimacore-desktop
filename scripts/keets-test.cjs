@@ -211,6 +211,9 @@ test('classic incoming excludes Keets, outgoing, invalid, disconnected and self 
   assert.equal(classicIncoming({details:{p2p:{address:'198.51.100.9:9001'}},connections}), 2);
   assert.equal(classicIncoming({connections:[]}), 0);
   assert.equal(classicIncoming(null), null);
+  const ipv6 = {details:{p2p:{address:"[2001:db8::1]:9001"}},
+    connections:["2001:0db8::1","0:0:0:0:0:0:0:1","::ffff:127.0.0.2","2001:db8::2"].map(host=>({...peer,host}))};
+  assert.equal(classicIncoming(ipv6), 1);
 });
 
 test('an incoming Keets bridge counts only until either end disconnects', () => {

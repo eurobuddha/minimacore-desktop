@@ -3615,13 +3615,19 @@ function refreshPeerCounts() {
   if (sample.pending || now - sample.readAt < 750) return;
   sample.pending = true;
   Promise.all([tryCmd("network"), s.keetsEnabled ? tryCmd("keets action:info") : null]).then(([net, info]) => {
-    if (sample !== peerPoll || LAST_STATUS?.bootTs !== sample.boot || LAST_STATUS?.state !== "running") return;
+    if (sample.invalidated || sample !== peerPoll || LAST_STATUS?.bootTs !== sample.boot || LAST_STATUS?.state !== "running") return;
     sample.classic = MINIMA_PARAMS.classicIncoming(net);
     const dht = info?.dht, open = dht?.diag?.bridge?.incomingActive;
     sample.keets = dht?.chatOnly === true ? t("Chat only") : Number.isSafeInteger(open) && open >= 0 ? open : null;
     sample.readAt = now;
     show();
-  }).finally(() => { sample.pending = false; });
+  }).finally(() => {
+    sample.pending = false;
+    if (sample === peerPoll && sample.invalidated) {
+      peerPoll = null;
+      refreshPeerCounts();
+    }
+  });
 }
 setInterval(refreshPeerCounts, 1000);
 document.addEventListener("visibilitychange", () => { peerPoll = null; refreshPeerCounts(); });
@@ -3726,7 +3732,12 @@ function logsAppend(text, line) { return text.length > LOGS_CHARS ? text.slice(-
 function appendLog(line) {
   if (!line) return;
   if (activeView === "node" && /\[KEETS\] incoming Minima bridges changed$/.test(line)) {
-    peerPoll = null;
+    if (peerPoll?.pending) {
+      peerPoll.invalidated = true;
+      peerPoll.keets = null;
+    } else {
+      peerPoll = null;
+    }
     refreshPeerCounts();
   }
   logLines.push(line); if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX);

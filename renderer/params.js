@@ -182,9 +182,19 @@
   // and a router can reflect our own public address back to us.
   function classicIncoming(net) {
     if (!Array.isArray(net?.connections)) return null;
-    const self = String(net.details?.p2p?.address || "").split(":")[0];
-    return net.connections.filter(c => c?.incoming === true && !c.keets && c.valid !== false &&
-      c.isconnected !== false && c.host && c.host !== self && !/^(?:127\.|::1$|::ffff:127\.)/i.test(c.host)).length;
+    const address = String(net.details?.p2p?.address || "");
+    const self = normalizeHost(address.replace(/:\d+$/, ""));
+    function normalizeHost(value) {
+      const host = String(value || "").toLowerCase().replace(/^\[|\]$/g, "");
+      if (!host.includes(":")) return host;
+      try { return new URL("http://[" + host + "]").hostname.slice(1, -1); }
+      catch (_) { return host; }
+    }
+    return net.connections.filter(c => {
+      if (c?.incoming !== true || c.keets || c.valid === false || c.isconnected === false) return false;
+      const host = normalizeHost(c.host);
+      return host && host !== self && !/^(?:127\.|::1$|::ffff:7f[0-9a-f]{2}:)/i.test(host);
+    }).length;
   }
   var API = { classicIncoming: classicIncoming, KEY_MODE_FLAGS: KEY_MODE_FLAGS, keyModeArg: keyModeArg, reservedArg: reservedArg, KEETS_OWNED: KEETS_OWNED, withoutKeetsOwned: withoutKeetsOwned, keetsMode: keetsMode, setKeetsMode: setKeetsMode, mdsArg: mdsArg, rescueProblem: rescueProblem, GROUPS: GROUPS, MANAGED: MANAGED, MANAGED_INFO: MANAGED_INFO, defaultParams: defaultParams,
               ROLE_CONTRIBUTE: ROLE_CONTRIBUTE, ROLE_LIGHT: ROLE_LIGHT };

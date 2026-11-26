@@ -160,10 +160,11 @@ test("Apps tab: a Hide and a Freeze switch per app (0.19.117), Minima Core locke
 test("Node tab: the phone's NODE and IDENTITY cards, then the desktop's own controls", () => {
   const node = app.slice(app.indexOf("function renderNode(s)"), app.indexOf("let logLines"));
   const rows = [...node.matchAll(/row\("([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(rows.slice(0, 7), ["Block", "Block time", "Connections", "Incoming", "Random peer", "Minima", "App version"]);
+  assert.deepEqual(rows.slice(0, 8), ["Block", "Block time", "Connections", "Classic P2P incoming", "Keets incoming", "Random peer", "Minima", "App version"]);
   assert.ok(/>Status</.test(node) && /"Online"/.test(node) && /"Waiting for node"/.test(node), "the Status row and the phone's two states");
   for (const id of ["nRestart", "nContrib", "nReconfig", "nReclaim"]) assert.ok(node.includes(`id="${id}"`) && node.includes(`el("${id}")`), id + " kept and wired");
-  assert.ok(/tryCmd\("keys"\), tryCmd\("peers"\), tryCmd\("network"\)/.test(app), "the phone's three read-only dashboard commands");
+  const dashboard = app.slice(app.indexOf("async function refreshNodeDash"), app.indexOf("function renderNode(s)"));
+  for (const cmd of ["keys", "peers", "network", "keets action:info"]) assert.ok(dashboard.includes('tryCmd("' + cmd + '")'), cmd);
 });
 
 // ---- executed, not read: the functions are lifted out of app.js and run ----

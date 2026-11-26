@@ -61,11 +61,15 @@ test("M1: the import says it is running in the node's status, and the window dis
   const mf = MF.create({ node });
   let inside; await mf.exclusive("import", async () => { inside = [mf.busyWhat(), node.megafileBusy]; });
   assert.deepEqual(inside, ["import", "import"]); assert.deepEqual(seen, ["status:import", "status:"]); assert.equal(mf.busyWhat(), "");
-  const nm = read("main/node-manager.js"); assert.ok(/resyncing: !!this\.resyncing, megafileBusy: this\.megafileBusy \|\| "",/.test(nm), "in the snapshot");
+  const nm = read("main/node-manager.js");
+  const snapshot = nm.slice(nm.indexOf("  snapshot() {")).split("\n  }")[0];
+  assert.match(snapshot, /resyncing: !!this\.resyncing\b/);
+  assert.match(snapshot, /megafileBusy: this\.megafileBusy \|\| ""/);
   const app = read("renderer/app.js");
   assert.ok(/const nodeBusyNow = \(\) => !!\(LAST_STATUS && \(LAST_STATUS\.resyncing \|\| LAST_STATUS\.megafileBusy\)\);/.test(app));
   for (const id of ["nRestart", "nReclaim", "nMegaOff", "nContrib", "pSave", "pSaveRestart"]) assert.ok(new RegExp('id="' + id + '"\\$\\{busyAttr\\(\\)\\}').test(app), id + " disabled while busy");
-  assert.ok(/data-bk="\$\{r\[0\]\}"\$\{nodeBusyNow\(\) && !\/\^\(chat\|mail\|create\)\$\/\.test\(r\[0\]\) && !\(r\[0\] === "megafile" && importing\) \? busyAttr\(\)/.test(app), "Backup & Recovery: Restore, Resync, Rebuild, Turn MegaMMR off (the import's own row leads back to its progress)");
+  assert.ok(app.includes('(page === "megafile" && importing) || (page === "resync" && !!hostProgress)'), "only recovery progress pages bypass the busy state");
+  assert.ok(/data-bk="\$\{r\[0\]\}"\$\{nodeBusyNow\(\) && !\/\^\(chat\|mail\|create\)\$\/\.test\(r\[0\]\) && !canReadProgress\(r\[0\]\) \? busyAttr\(\)/.test(app), "Backup & Recovery: Restore, Resync, Rebuild, Turn MegaMMR off (the import's own row leads back to its progress)");
   assert.ok(/if \(wasBusy !== nodeBusyNow\(\) && activeView === "backup" && BK_PAGE === ""\) renderBackup\(\);/.test(app), "the rows follow it");
 });
 

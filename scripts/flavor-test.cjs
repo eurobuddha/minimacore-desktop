@@ -253,7 +253,7 @@ test("the build of a flavour: its name, id and artifact names, the flavour writt
   assert.deepEqual(cfg.mac.extendInfo, { NSCameraUsageDescription: "Pandamonium Desktop uses your camera to scan QR codes.", NSMicrophoneUsageDescription: "Pandamonium Desktop uses your microphone to record a Chat voice note when you choose Voice note." });
   assert.match(PKG.build.mac.extendInfo.NSMicrophoneUsageDescription, /^Minima Core uses your microphone/);
   assert.throws(() => builderConfig(PKG, ""), /name a flavour/); assert.equal(F.basePort, 17001);
-  assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.160-chatonly-rpc8-keets-shared", "5e1bbc2f2f4025d6d6df857c97dab0aad0e1381af8dae116f83cbe8663e58cfc", "1.1.2.31-euro14-chatonly", "dea0a6c7b4568fcd15576dafd421bad28da79310b76d2265d2ebadf707f350dd"]);   // 0.19.441: the same jars with -keetschatonly
+  assert.deepEqual([J.parlonsNode, J.parlonsNodeSha256, J.minima, J.minimaSha256], ["0.2.160-chatonly-rpc8-keets-shared-r2", "e74a57dc8274632a2e12da9fe2dd8f202ef9346b7cd751b9058b77bf7544ea37", "1.1.2.31-euro14-chatonly", "dea0a6c7b4568fcd15576dafd421bad28da79310b76d2265d2ebadf707f350dd"]);   // 0.19.441: the same jars with -keetschatonly
   assert.equal(flavor.resolve({ flavor: "pandamonium", flavors: PKG.flavors }).keetsChatOnly, true, "this flavour's jars know -keetschatonly"); assert.equal(flavor.RELEASED.keetsChatOnly, false, "the released app's do not");
   // the jar check, on stand-in files
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flavor-jars-")), sha = (s) => require("crypto").createHash("sha256").update(s).digest("hex");

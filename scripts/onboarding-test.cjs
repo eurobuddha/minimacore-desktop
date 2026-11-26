@@ -118,7 +118,10 @@ async function checkIncomingCounts() {
     expect("1","1");
     let resolve;
     late=new Promise(r=>{resolve=r;});peerPoll=null;refreshPeerCounts();
-    late=null;active=0;appendLog("[KEETS] incoming Minima bridges changed");await tick();expect("1","0");
+    late=null;active=0;
+    for(let i=0;i<8;i++)appendLog("[KEETS] incoming Minima bridges changed");
+    await tick();
+    if(el("keetsIncoming").textContent!=="–")throw Error("stale pending peer count");
     resolve({status:true,response:{dht:{diag:{bridge:{incomingActive:1}}}}});await tick();expect("1","0");
     live.connections=[];peerPoll=null;refreshPeerCounts();await tick();expect("0","0");
     document.documentElement.dataset.setupTest="passed";
