@@ -74,6 +74,10 @@ jobs:
           const { J, cfg } = builderConfig(pkg, 'pandamonium')
           assert.equal(pkg.version, '0.20.01')
           assert.equal(jarProblem(J.dir, J), '')
+          cfg.extraMetadata.version = pkg.version
+          for (const target of [cfg.win, cfg.linux]) {
+            target.artifactName = target.artifactName.replace('${version}', pkg.version)
+          }
           cfg.linux.executableName = 'pandamonium-desktop'
           fs.writeFileSync('pandamonium.builder.json', JSON.stringify(cfg))
           NODE
