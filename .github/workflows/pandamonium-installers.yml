@@ -1,0 +1,127 @@
+name: Build Pandamonium Desktop 0.20.01 installers
+on:
+  push:
+    branches: [build/pandamonium-0.20.01-installers]
+permissions:
+  contents: read
+jobs:
+  jars:
+    runs-on: macos-latest
+    steps:
+      - name: Extract the platform-independent node JARs from the released DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release download pandamonium-v0.20.01 --repo "$GITHUB_REPOSITORY" --pattern 'PandamoniumDesktop-0.20.01-arm64.dmg'
+          echo '5613249f1ff44350544fcc0b85ce1a060d9ec1ffd5e5ba19e27e16e32272a96b  PandamoniumDesktop-0.20.01-arm64.dmg' | shasum -a 256 -c -
+          mount_dir="$RUNNER_TEMP/pandamonium"
+          mkdir "$mount_dir" resources-pandamonium
+          hdiutil attach PandamoniumDesktop-0.20.01-arm64.dmg -mountpoint "$mount_dir" -readonly -nobrowse
+          trap 'hdiutil detach "$mount_dir"' EXIT
+          resources="$mount_dir/Pandamonium Desktop.app/Contents/Resources"
+          cp "$resources/minima.jar" "$resources/parlons-node.jar" resources-pandamonium/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pandamonium-node-jars
+          path: resources-pandamonium/*.jar
+          retention-days: 1
+          if-no-files-found: error
+  build:
+    needs: jars
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            extension: exe
+          - os: ubuntu-latest
+            platform: linux
+            extension: AppImage
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3286420b5fe1172d2c8f1ee249ee390ca86814a4
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@v4
+        with:
+          name: pandamonium-node-jars
+          path: resources-pandamonium
+      - name: Prepare native Java, Electron and Keets runtimes
+        run: |
+          jlink --add-modules java.se,jdk.unsupported,jdk.httpserver,jdk.crypto.ec --strip-debug --no-header-files --no-man-pages --compress=2 --output resources/jre
+          npm ci
+          bash scripts/fetch-keets-sidecar.sh
+      - name: Prepare Pandamonium configuration and verify JARs
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const assert = require('node:assert/strict')
+          const pkg = require('./package.json')
+          const { builderConfig, jarProblem } = require('./scripts/build-flavor.cjs')
+          const { J, cfg } = builderConfig(pkg, 'pandamonium')
+          assert.equal(pkg.version, '0.20.01')
+          assert.equal(jarProblem(J.dir, J), '')
+          cfg.linux.executableName = 'pandamonium-desktop'
+          fs.writeFileSync('pandamonium.builder.json', JSON.stringify(cfg))
+          NODE
+          echo '910c0a0348deceb0b6945b314a896eabea728f7902bda56101b1c96c5ff5a721  resources/classic-webwallet.jar' | sha256sum -c -
+          echo '99c198ca1fe857d75af53d1e377d53cf701a75738c46e3747efe86005e0387ef  resources/nftwallet.jar' | sha256sum -c -
+      - name: Build native installer
+        run: npx --no-install electron-builder --${{ matrix.platform }} --x64 --config pandamonium.builder.json --publish never
+      - name: Install or extract the produced installer for verification
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Resolve-Path 'dist/PandamoniumDesktop-0.20.01-x64.exe'
+          $target = Join-Path $env:RUNNER_TEMP 'PandamoniumCheck'
+          $setup = Start-Process -FilePath $installer -ArgumentList '/S',"/D=$target" -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw "Installer exited with $($setup.ExitCode)" }
+          "PACKAGED_APP=$target" >> $env:GITHUB_ENV
+      - name: Extract Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          ./dist/PandamoniumDesktop-0.20.01-x64.AppImage --appimage-extract > /dev/null
+          echo "PACKAGED_APP=$PWD/squashfs-root" >> "$GITHUB_ENV"
+      - name: Check installed identity, Java, wallets and native Keets
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const assert = require('node:assert/strict')
+          const { execFileSync } = require('node:child_process')
+          const asar = require('@electron/asar')
+          const { jarProblem } = require('./scripts/build-flavor.cjs')
+          const root = process.env.PACKAGED_APP
+          const res = path.join(root, 'resources')
+          const pkg = JSON.parse(asar.extractFile(path.join(res, 'app.asar'), 'package.json'))
+          assert.equal(pkg.productName, 'Pandamonium Desktop')
+          assert.equal(pkg.version, '0.20.01')
+          assert.equal(pkg.flavor, 'pandamonium')
+          assert.equal(jarProblem(res, require('./package.json').flavors.pandamonium.jars), '')
+          for (const jar of ['classic-webwallet.jar','nftwallet.jar']) {
+            assert.deepEqual(fs.readFileSync(path.join(res, jar)), fs.readFileSync(path.join('resources', jar)))
+          }
+          const win = process.platform === 'win32'
+          execFileSync(path.join(res, 'jre', 'bin', win ? 'java.exe' : 'java'), ['-version'], {stdio:'inherit'})
+          execFileSync(path.join(root, win ? 'Pandamonium Desktop.exe' : 'pandamonium-desktop'),
+            ['-e', "require('hyperswarm');console.log('Installed Electron loaded native Keets dependencies')"],
+            {cwd:path.join(res,'keets-sidecar'), env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:'inherit',timeout:30000})
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PandamoniumDesktop-0.20.01-${{ matrix.platform }}-x64
+          path: dist/PandamoniumDesktop-0.20.01-x64.${{ matrix.extension }}
+          if-no-files-found: error
